@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.0.4
+// @version      0.0.5
 // @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
@@ -192,6 +192,7 @@
         refreshOnStart: true,
         showLauncher: true,
         askNode: true,                    // 下载时是否弹出节点选择弹窗
+        showPageButtons: true,     // GitHub 页面内注入镜像加速按钮的主开关
         launcherPos: null,
         lastTab: 'nodes',
         inject: Object.assign({}, DEFAULT_INJECT)
@@ -1474,6 +1475,14 @@ html[data-color-mode="light"]{
                         (s.showLauncher ? ' checked' : '') + '><i></i></span>' +
                     '</div>' +
                     '<div class="ghb-setting">' +
+                    '  <label class="ghb-label" for="ghb-s-pagebtn">' +
+                    '    <span class="ghb-lt">显示页面内镜像按钮</span>' +
+                    '    <span class="ghb-ld">关闭后 GitHub 页面不出现注入的加速按钮，可用面板或启动器手动打开弹窗</span>' +
+                    '  </label>' +
+                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-pagebtn"' +
+                        (s.showPageButtons ? ' checked' : '') + '><i></i></span>' +
+                    '</div>' +
+                    '<div class="ghb-setting">' +
                     '  <label class="ghb-label" for="ghb-s-asknode">' +
                     '    <span class="ghb-lt">下载时弹出节点选择</span>' +
                     '    <span class="ghb-ld">开启：每次下载先弹窗手选镜像；关闭：全自动选最快镜像，失败自动换下一个</span>' +
@@ -1500,6 +1509,10 @@ html[data-color-mode="light"]{
                     View.Toast.info(e.target.checked
                         ? '下载时将弹出节点选择弹窗'
                         : '已切换为全自动：自动选最快镜像，失败自动换下一个');
+                });
+                page.querySelector('#ghb-s-pagebtn').addEventListener('change', (e) => {
+                    Settings.set({ showPageButtons: e.target.checked });
+                    View.Toast.info('页面内镜像按钮已' + (e.target.checked ? '开启' : '关闭') + ',刷新页面后生效');
                 });
     
                 page.querySelector('#ghb-s-launcher').addEventListener('change', (e) => {
@@ -1629,7 +1642,7 @@ html[data-color-mode="light"]{
             ['打开加速面板', () => { if (!View.Panel.open) View.Panel.toggle(); }],
             ['刷新镜像节点', () => loadNodes('菜单').then((ok) =>
                 ok ? View.Toast.ok('已刷新 ' + NodeStore.nodes.length + ' 个节点') : View.Toast.err('刷新失败'))],
-            ['切换侧边启动器', () => {
+            ['显示 / 隐藏侧边启动器', () => {
                 const on = !Settings.get().showLauncher;
                 View.setLauncherVisible(on);
                 View.Toast.info('侧边启动器已' + (on ? '显示' : '隐藏'));
@@ -1668,7 +1681,7 @@ html[data-color-mode="light"]{
         });
 
         registerMenu();
-        Injector.start();
+        if (Settings.get().showPageButtons) Injector.start();
 
         if (NodeStore.isStale() && Settings.get().refreshOnStart) {
             loadNodes('启动');
