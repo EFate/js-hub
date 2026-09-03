@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.0.0
+// @version      1.0.1
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
