@@ -209,34 +209,9 @@
         enhance: Object.assign({}, ENHANCE_DEFAULT)
     };
 
-    /** 设置的唯一读写口：load 负责与默认值合并，set 负责落盘 */
-    const Settings = {
-        data: Object.assign({}, DEFAULT_SETTINGS),
-
-        load() {
-            const saved = Store.read(K.settings, {}) || {};
-            this.data = Object.assign({}, DEFAULT_SETTINGS, saved);
-            this.data.inject = Object.assign({}, DEFAULT_INJECT, saved.inject || {});
-            this.data.enhance = Object.assign({}, ENHANCE_DEFAULT, saved.enhance || {});
-            return this.data;
-        },
-        get() { return this.data; },
-        set(patch) {
-            Object.assign(this.data, patch);
-            Store.write(K.settings, this.data);
-        },
-        setInject(key, on) {
-            this.data.inject[key] = on;
-            Store.write(K.settings, this.data);
-        },
-        reset() {
-            this.data = Object.assign({}, DEFAULT_SETTINGS, { inject: Object.assign({}, DEFAULT_INJECT) });
-            Store.write(K.settings, this.data);
-        }
-    };
 
     /* ======================================================================
-     * L2 · FOUNDATION —— 日志、工具、持久化、图标
+     * L2 · FOUNDATION —— 日志、工具、存储原语、图标
      * ==================================================================== */
 
     const Log = {
@@ -349,7 +324,7 @@
     };
     /* ======================================================================
      * L2-b · FOUNDATION —— 增强显示工具（纯函数，无 DOM 依赖）
-     *   来源：github增强显示.js（caolib）核心解析逻辑，原样保留判定顺序。
+     *   纯函数解析逻辑，判定顺序严格保留「先 64 位后 32 位」。
      *   只做「文件名 → 平台/架构/分组」与「当前环境 → OS/架构」的纯计算，
      *   不触碰 DOM；DOM 编排全部在 L5-c 的 Enhancer 中。
      * ==================================================================== */
@@ -670,8 +645,38 @@
     }
 
     /* ======================================================================
-     * L4 · STATE —— NodeStore：唯一数据源，变更广播给视图层
+     * L4 · STATE —— 用户偏好(Settings) + 镜像节点(NodeStore)：唯一数据源，变更广播给视图层
      * ==================================================================== */
+
+    /**
+     * L4-a · STATE · Settings：用户偏好（持久化于 GM 存储），唯一读写口。
+     *   load 与默认值合并，set 落盘；与下方 L4-b NodeStore 同属 STATE 层。
+     */
+    /** 设置的唯一读写口：load 负责与默认值合并，set 负责落盘 */
+    const Settings = {
+        data: Object.assign({}, DEFAULT_SETTINGS),
+
+        load() {
+            const saved = Store.read(K.settings, {}) || {};
+            this.data = Object.assign({}, DEFAULT_SETTINGS, saved);
+            this.data.inject = Object.assign({}, DEFAULT_INJECT, saved.inject || {});
+            this.data.enhance = Object.assign({}, ENHANCE_DEFAULT, saved.enhance || {});
+            return this.data;
+        },
+        get() { return this.data; },
+        set(patch) {
+            Object.assign(this.data, patch);
+            Store.write(K.settings, this.data);
+        },
+        setInject(key, on) {
+            this.data.inject[key] = on;
+            Store.write(K.settings, this.data);
+        },
+        reset() {
+            this.data = Object.assign({}, DEFAULT_SETTINGS, { inject: Object.assign({}, DEFAULT_INJECT) });
+            Store.write(K.settings, this.data);
+        }
+    };
 
     const NodeStore = {
         nodes: [],
@@ -1016,8 +1021,7 @@
     };
     /* ======================================================================
      * L5-c · CAPABILITY —— Enhancer：Release 增强显示
-     *   来源：github增强显示.js（caolib）核心能力，合理化集成。
-     *   四大能力（均可独立开关，持久化于 Settings.enhance）：
+     *   Release 增强显示核心能力（DOM 编排层），四大能力均可独立开关、持久化于 Settings.enhance：
      *     groupSort        文件按平台分组、按当前系统/架构排序、推荐最可能安装包
      *     downloadCount    通过 GitHub API 显示各文件下载量
      *     replaceTime      相对时间 → 精确时间
@@ -2330,7 +2334,7 @@ html[data-color-mode="light"]{
                     { key: 'collapsibleNotes', t: '更新日志可折叠', d: '给 Release 更新日志增加折叠开关，默认展开' }
                 ];
                 page.innerHTML =
-                    '<div class="ghb-hint">增强显示能力来自社区脚本，已合理化集成。改动即时生效，部分需刷新页面。</div>' +
+                    '<div class="ghb-hint">Release 增强显示：文件分组排序、下载量、精确时间、日志折叠，均可独立开关。改动即时生效，部分需刷新页面。</div>' +
                     rows.map((r) =>
                         '<div class="ghb-setting">' +
                         '  <label class="ghb-label" for="ghb-e-' + r.key + '">' +
