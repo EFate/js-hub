@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.0.7
+// @version      0.0.8
 // @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
@@ -194,7 +194,7 @@
     const DEFAULT_SETTINGS = {
         refreshOnStart: true,
         showLauncher: true,
-        askNode: true,                    // 下载时是否弹出节点选择弹窗
+        autoDownload: false,              // 全自动下载：开=自动选最快镜像直发（无感）；关=每次下载弹窗手选
         showPageButtons: true,     // GitHub 页面内注入镜像加速按钮的主开关
         launcherPos: null,
         lastTab: 'nodes',
@@ -1199,12 +1199,12 @@ html[data-color-mode="light"]{
             if (cb) cb.checked = on;
         },
 
-        /** 统一下载入口：弹窗手选 / 全自动最快节点，由设置 askNode 决定（脚本不接管下载） */
+        /** 统一下载入口：由 autoDownload 分流——开=全自动最快节点直发（无感）；关=弹窗手选（脚本不接管下载） */
         download(githubUrl, filename) {
             if (!githubUrl) { this.Toast.err('链接无效'); return; }
             const name = filename || Utils.filenameFromUrl(githubUrl);
-            if (Settings.get().askNode) this.DlModal.open(githubUrl, name);
-            else this.autoDownload(githubUrl, name);
+            if (Settings.get().autoDownload) this.autoDownload(githubUrl, name);
+            else this.DlModal.open(githubUrl, name);
         },
 
         /**
@@ -1544,12 +1544,12 @@ html[data-color-mode="light"]{
                         (s.showPageButtons ? ' checked' : '') + '><i></i></span>' +
                     '</div>' +
                     '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-asknode">' +
-                    '    <span class="ghb-lt">下载时弹出节点选择</span>' +
-                    '    <span class="ghb-ld">开启：每次下载先弹窗手选镜像；关闭：全自动选最快镜像，失败自动换下一个</span>' +
+                    '  <label class="ghb-label" for="ghb-s-auto">' +
+                    '    <span class="ghb-lt">全自动下载</span>' +
+                    '    <span class="ghb-ld">开启：自动选最快镜像直发（无感，失败自动换下一个）；关闭：每次下载先弹窗手选镜像</span>' +
                     '  </label>' +
-                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-asknode"' +
-                        (s.askNode ? ' checked' : '') + '><i></i></span>' +
+                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-auto"' +
+                        (s.autoDownload ? ' checked' : '') + '><i></i></span>' +
                     '</div>' +
                     '<div class="ghb-setting">' +
                     '  <span class="ghb-label"><span class="ghb-lt">恢复默认设置</span>' +
@@ -1565,11 +1565,11 @@ html[data-color-mode="light"]{
                 page.querySelector('#ghb-s-autorefresh').addEventListener('change', (e) => {
                     Settings.set({ refreshOnStart: e.target.checked });
                 });
-                page.querySelector('#ghb-s-asknode').addEventListener('change', (e) => {
-                    Settings.set({ askNode: e.target.checked });
+                page.querySelector('#ghb-s-auto').addEventListener('change', (e) => {
+                    Settings.set({ autoDownload: e.target.checked });
                     View.Toast.info(e.target.checked
-                        ? '下载时将弹出节点选择弹窗'
-                        : '已切换为全自动：自动选最快镜像，失败自动换下一个');
+                        ? '已开启全自动：自动选最快镜像，失败自动换下一个'
+                        : '已切换为手动：每次下载先弹窗手选镜像');
                 });
                 page.querySelector('#ghb-s-pagebtn').addEventListener('change', (e) => {
                     Settings.set({ showPageButtons: e.target.checked });

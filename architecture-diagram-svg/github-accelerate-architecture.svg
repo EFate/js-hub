@@ -53,7 +53,7 @@
 
   <rect x="40" y="402" width="600" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
   <text x="56" y="430" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#0C447C">L6 · VIEW</text>
-  <text x="170" y="422" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">View.download 统一入口 · askNode 分流（弹窗手选 / 全自动）</text>
+  <text x="170" y="422" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">View.download 统一入口 · autoDownload 分流（开=全自动直发 / 关=弹窗手选）</text>
   <text x="170" y="442" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Launcher 右侧居中 · Panel 三页签 · DlModal 选节点 · Toast 延迟 150ms（fast-path 不闪烁）</text>
 
   <rect x="40" y="468" width="292" height="48" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
