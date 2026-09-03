@@ -8,7 +8,7 @@
   </defs>
 
   <text x="40" y="58" font-family="sans-serif" font-size="14" font-weight="500" fill="#2C2C2A">github-accelerate.js · 分层架构</text>
-  <text x="40" y="78" font-family="sans-serif" font-size="12" fill="#5F5E5A">双节点源 · 下载自愈 · 健康度记忆 · 作者 EFate</text>
+  <text x="40" y="78" font-family="sans-serif" font-size="12" fill="#5F5E5A">双节点源 · 纯直链交付（不接管下载） · 健康度记忆 · 作者 EFate</text>
 
   <g font-family="sans-serif">
     <rect x="40" y="96" width="188" height="48" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
@@ -42,9 +42,9 @@
   <text x="56" y="346" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#0C447C">L5 · CAPABILITY</text>
   <rect x="170" y="310" width="224" height="72" rx="8" fill="#FFFFFF" stroke="#185FA5" stroke-width="0.5"/>
   <text x="282" y="328" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" font-weight="500" fill="#0C447C">Downloader 下载策略链</text>
-  <text x="282" y="346" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#185FA5">可回执 verified：blob / gm</text>
-  <text x="282" y="362" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#185FA5">盲发 blind：anchor / tab（仅兜底）</text>
-  <text x="282" y="378" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#185FA5">runAuto：失败自动换镜像轮转</text>
+  <text x="282" y="346" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5" font-family="sans-serif">原生优先：anchor 直连（HEAD 预检）</text>
+  <text x="282" y="362" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5" font-family="sans-serif">兜底：blob / gm / tab</text>
+  <text x="282" y="378" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#185FA5" font-family="sans-serif">runAuto：预检失败自动换镜像轮转</text>
   <rect x="410" y="310" width="216" height="72" rx="8" fill="#FFFFFF" stroke="#185FA5" stroke-width="0.5"/>
   <text x="518" y="328" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" font-weight="500" fill="#0C447C">Injector 场景注入</text>
   <text x="518" y="346" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#185FA5">9 条 SCENARIOS 规则表</text>
@@ -54,7 +54,7 @@
   <rect x="40" y="402" width="600" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
   <text x="56" y="430" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#0C447C">L6 · VIEW</text>
   <text x="170" y="422" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">View.download 统一入口 · askNode 分流（弹窗手选 / 全自动）</text>
-  <text x="170" y="442" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Launcher 左侧居中 · Panel 三页签 · DlModal 节点弹窗 · Toast 进度</text>
+  <text x="170" y="442" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Launcher 左侧居中 · Panel 三页签 · DlModal 选节点（无内嵌进度） · Toast 状态</text>
 
   <rect x="40" y="468" width="292" height="48" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
   <text x="56" y="486" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#2C2C2A">L2 · FOUNDATION</text>
@@ -68,27 +68,28 @@
   <text x="200" y="546" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#5F5E5A">初始化 · 油猴菜单注册 · 页面注入监听 · 状态恢复</text>
 
   <rect x="40" y="578" width="600" height="80" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
-  <text x="56" y="596" dominant-baseline="central" font-family="sans-serif" font-size="12" font-weight="500" fill="#085041">下载链路（单镜像四级降级）</text>
-  <text x="230" y="596" dominant-baseline="central" font-family="sans-serif" font-size="11" fill="#0F6E56">可回执两级失败 → 自动换下一镜像（健康度记账）；全部失败 → 盲发一次兜底</text>
+  <text x="56" y="596" dominant-baseline="central" font-family="sans-serif" font-size="12" font-weight="500" fill="#085041">下载链路（纯直链 · 脚本不接管下载）</text>
+  <text x="318" y="596" dominant-baseline="central" font-family="sans-serif" font-size="11" fill="#0F6E56">HEAD 预检通过 → 原生直链交给浏览器（Gopeed 直接接管）；预检失败 → 换下一镜像；轮转耗尽 → 对最快节点直接放行</text>
 
   <g font-family="sans-serif">
-    <rect x="56" y="606" width="120" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
-    <text x="116" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">① blob 中转</text>
-    <text x="116" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">原生通道 · 可接管</text>
-    <rect x="194" y="606" width="120" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
-    <text x="254" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">② GM_download</text>
-    <text x="254" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">回执超时 = 存疑</text>
-    <rect x="332" y="606" width="120" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
-    <text x="392" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">③ anchor 直连</text>
-    <text x="392" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">盲发 · 零内存</text>
-    <rect x="470" y="606" width="120" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
-    <text x="530" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">④ tab 新标签</text>
-    <text x="530" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">最后出路</text>
-    <path d="M176 628L192 628" fill="none" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
-    <path d="M314 628L330 628" fill="none" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
-    <path d="M452 628L468 628" fill="none" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
-    <text x="184" y="612" text-anchor="middle" font-size="11" fill="#0F6E56">失败</text>
-    <text x="322" y="612" text-anchor="middle" font-size="11" fill="#0F6E56">失败</text>
-    <text x="460" y="612" text-anchor="middle" font-size="11" fill="#0F6E56">失败</text>
+    <rect x="56" y="606" width="128" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="120" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">① 挑选镜像</text>
+    <text x="120" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">健康度排序 · 延迟优先</text>
+    <rect x="206" y="606" width="128" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="270" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">② HEAD 预检</text>
+    <text x="270" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">失败换下一镜像</text>
+    <rect x="356" y="606" width="132" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="422" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">③ 原生直链</text>
+    <text x="422" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">a[download] 点击触发</text>
+    <rect x="510" y="606" width="114" height="44" rx="8" fill="#FFFFFF" stroke="#0F6E56" stroke-width="0.5"/>
+    <text x="567" y="622" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="500" fill="#085041">④ 浏览器/Gopeed</text>
+    <text x="567" y="638" text-anchor="middle" dominant-baseline="central" font-size="11" fill="#0F6E56">原生通道接管下载</text>
+    <path d="M188 628L202 628" fill="none" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M338 628L352 628" fill="none" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M492 628L506 628" fill="none" stroke="#0F6E56" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="197" y="613" text-anchor="middle" font-size="11" fill="#0F6E56">通过</text>
+    <text x="347" y="613" text-anchor="middle" font-size="11" fill="#0F6E56">通过</text>
+    <text x="501" y="613" text-anchor="middle" font-size="11" fill="#0F6E56">交付</text>
+    <text x="131" y="664" text-anchor="middle" font-size="11" fill="#085041" font-weight="500">↑ 预检失败自动换下一个镜像（健康度记账）；轮转耗尽 → 对最快节点直接放行</text>
   </g>
 </svg>

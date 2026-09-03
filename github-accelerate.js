@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.1.0
-// @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、四级下载策略链（兼容 Gopeed 等下载接管工具）。
+// @version      0.0.2
+// @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
 // @icon         data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232da44e'/%3E%3Crect x='14.7' y='6.2' width='2.6' height='9.6' rx='1.3' fill='%23fff'/%3E%3Cpath d='M9.4 15.2h13.2l-6.6 6.8z' fill='%23fff'/%3E%3Crect x='9.2' y='22.4' width='13.6' height='2.5' rx='1.25' fill='%23fff' opacity='.85'/%3E%3Ccircle cx='24.5' cy='8' r='5.8' fill='%23000' opacity='.22'/%3E%3Cpath d='M25.7 4 22.4 8.9h2.1l-1.6 2.9 3-4.8h-1.9z' fill='%23fff'/%3E%3C/svg%3E
@@ -18,8 +18,6 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_xmlhttpRequest
-// @grant        GM_download
-// @grant        GM_openInTab
 // @grant        GM_addStyle
 // @grant        GM_info
 // @grant        GM_registerMenuCommand
@@ -35,7 +33,7 @@
  *   L2  FOUNDATION  Utils 格式化 · Store 持久化 · Icons 内联 SVG · Log
  *   L3  NETWORK     gmRequest · 节点多源降级 · 并发测速
  *   L4  STATE       NodeStore（节点/可见集合/时间戳，变更即广播）
- *   L5  CAPABILITY  Downloader 四级策略链 · Injector 规则表驱动
+ *   L5  CAPABILITY  Downloader 直链交付（不接管下载） · Injector 规则表驱动
  *   L6  VIEW        Launcher(左中) · Panel(节点/注入/设置) · DlModal · Toast
  *   L7  BOOTSTRAP   装配与生命周期
  *
@@ -69,8 +67,7 @@
     const NODE_RETRY_MAX = 4;             // 自动下载最多轮换几个节点
     const PROBE_TIMEOUT = 4000;           // 单节点测速超时
     const PROBE_CONCURRENCY = 8;          // 并发测速路数
-    const GM_ACK_TIMEOUT = 8000;          // GM_download 回执等待上限
-    const ERROR_PAGE_MAX = 64 * 1024;     // 小于此体积的 text/html 视为镜像错误页
+    const HEAD_TIMEOUT = 8000;            // 直链 HEAD 预检超时
     const LATENCY_FAST = 300;             // 延迟分档（ms）
     const LATENCY_MID = 800;
     const LATENCY_SCALE = 1500;           // 进度条满格基准
@@ -96,14 +93,6 @@
         'https://hub.ddayh.com/',
         'https://gh.con.sh/',
         'https://ghproxy.053000.xyz/'
-    ];
-
-    const METHODS = [
-        { id: 'auto', label: '自动（推荐）', desc: '逐个镜像试可靠通道，失败自动换下一个；全部失败才盲发兜底' },
-        { id: 'blob', label: 'Blob 中转', desc: '下载到内存再交给浏览器，Gopeed 可接管，有进度' },
-        { id: 'gm', label: 'GM_download', desc: '脚本管理器通道，省内存但下载工具可能接不住' },
-        { id: 'anchor', label: '直连链接', desc: '零内存，依赖镜像返回 Content-Disposition' },
-        { id: 'tab', label: '新标签页', desc: '打开链接由浏览器自行处理' }
     ];
 
     // 注入场景规则表：新增/调整位置只改这里，注入器是通用执行器
@@ -198,8 +187,6 @@
     }, {});
 
     const DEFAULT_SETTINGS = {
-        method: 'auto',
-        blobMaxMB: 300,
         refreshOnStart: true,
         showLauncher: true,
         askNode: true,                    // 下载时是否弹出节点选择弹窗
@@ -343,7 +330,6 @@
         search: '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>',
         sliders: '<svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>',
         reset: '<svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-        grip: '<svg viewBox="0 0 24 24"><path d="M9 4h2v2H9V4zm0 7h2v2H9v-2zm0 7h2v2H9v-2zm4-14h2v2h-2V4zm0 7h2v2h-2v-2zm0 7h2v2h-2v-2z"/></svg>',
         check: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'
     };
 
@@ -359,7 +345,6 @@
                 headers: opt.headers || {},
                 responseType: opt.responseType || 'text',
                 timeout: opt.timeout || 30000,
-                onprogress: opt.onProgress || undefined,
                 onload(res) {
                     if (res.status >= 200 && res.status < 400) resolve(res);
                     else reject(new Error('HTTP ' + res.status));
@@ -586,13 +571,12 @@
     }
 
     /* ======================================================================
-     * L5-a · CAPABILITY —— Downloader：策略链 + 镜像轮转
+     * L5-a · CAPABILITY —— Downloader：直链交付 + 镜像轮转
      *
-     * 策略分两类，这是下载层能否自愈的关键：
-     *   可回执 verified：blob / gm   —— 成功拿得到字节或回调，失败抛得出错
-     *   盲  发 blind   ：anchor / tab —— 点了就走，永远拿不到结果
-     * 镜像轮转只能在「可回执」策略上进行：盲发一旦参与单节点链路，
-     * 任何坏镜像都会被伪装成成功，轮转分支将永远执行不到。
+     * 本脚本不接管下载：只负责挑一个活着的镜像，
+     * 把拼好的直链通过原生 a[download] 点击交给浏览器。
+     * 这条通道正是 Gopeed / IDM 等下载工具拦截的入口，工具可正常接管。
+     * 镜像可用性靠 HEAD 预检判断：失败记入健康度并自动换下一个。
      * ==================================================================== */
 
     /** GitHub 原链 + 镜像前缀 → 镜像直链 */
@@ -617,138 +601,31 @@
         setTimeout(() => a.remove(), 1000);
     }
 
-    function remoteSize(url) {
-        return gmRequest({ url, method: 'HEAD', timeout: 8000 }).then((res) => {
-            const m = /content-length:\s*(\d+)/i.exec(res.responseHeaders || '');
-            return m ? parseInt(m[1], 10) : -1;
-        }).catch(() => -1);
+    /** HEAD 预检：确认镜像真的能给文件，再把直链交给浏览器 */
+    function precheck(url) {
+        return gmRequest({ url, method: 'HEAD', timeout: HEAD_TIMEOUT })
+            .then((res) => {
+                const m = /content-length:\s*(\d+)/i.exec(res.responseHeaders || '');
+                return { ok: true, size: m ? parseInt(m[1], 10) : -1 };
+            })
+            .catch((e) => ({ ok: false, error: (e && e.message) || '预检失败' }));
     }
-
-    const Strategies = {
-        /** ① 默认：Blob 中转 → 同源 objectURL → a[download]，有进度、有文件名 */
-        async blob(url, filename, onProgress) {
-            const limit = (Settings.get().blobMaxMB || 300) * 1024 * 1024;
-            if (limit > 0) {
-                const size = await remoteSize(url);
-                if (size > limit) throw new Error('文件 ' + Utils.bytes(size) + ' 超过 Blob 上限，改用下一级策略');
-            }
-            const res = await gmRequest({
-                url,
-                responseType: 'blob',
-                timeout: 600000,
-                onProgress: (p) => {
-                    if (p && p.lengthComputable) onProgress(p.loaded, p.total);
-                }
-            });
-            let blob = res.response;
-            if (!(blob instanceof Blob)) blob = new Blob([blob], { type: 'application/octet-stream' });
-            if (!blob.size) throw new Error('镜像返回空内容');
-            // 镜像挂掉时常返回 200 + HTML 错误页：识别出来判为失败，才能触发换节点
-            if (blob.size <= ERROR_PAGE_MAX) {
-                const head = (await blob.slice(0, 512).text()).trim().toLowerCase();
-                if (head.startsWith('<!doctype html') || head.startsWith('<html')) {
-                    throw new Error('镜像返回错误页而非文件');
-                }
-            }
-            const objectUrl = URL.createObjectURL(blob);
-            clickAnchor(objectUrl, filename);
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
-            return { ok: true, method: 'blob', size: blob.size, hint: '已交给浏览器下载' };
-        },
-
-        /** ② GM_download：挂满回执，超时按「存疑」处理，绝不谎报成功 */
-        gm(url, filename, onProgress) {
-            if (typeof GM_download !== 'function') throw new Error('GM_download 不可用');
-            return new Promise((resolve, reject) => {
-                let settled = false;
-                let timer = null;
-                const ok = (result) => {
-                    if (settled) return;
-                    settled = true;
-                    if (timer) clearTimeout(timer);
-                    resolve(result);
-                };
-                const fail = (message) => {
-                    if (settled) return;
-                    settled = true;
-                    if (timer) clearTimeout(timer);
-                    reject(new Error(message));
-                };
-                // 超时应判定为「存疑」而不是成功——这正是旧版谎报「开始下载」的地方
-                timer = setTimeout(() => {
-                    ok({ ok: true, method: 'gm', unsure: true, hint: '未收到浏览器回执' });
-                }, GM_ACK_TIMEOUT);
-                try {
-                    GM_download({
-                        url,
-                        name: filename,
-                        saveAs: false,
-                        onprogress: (p) => { if (p && p.lengthComputable) onProgress(p.loaded, p.total); },
-                        onload: () => ok({ ok: true, method: 'gm', hint: '下载完成' }),
-                        onerror: (e) => fail('GM_download 失败：' + ((e && e.error) || '未知错误')),
-                        ontimeout: () => fail('GM_download 超时')
-                    });
-                } catch (e) {
-                    fail('GM_download 调用异常：' + ((e && e.message) || '未知'));
-                }
-            });
-        },
-
-        /** ③ 直连：零内存，成败取决于镜像是否返回 Content-Disposition */
-        anchor(url, filename) {
-            clickAnchor(url, filename);
-            return Promise.resolve({ ok: true, method: 'anchor', hint: '已交给浏览器处理' });
-        },
-
-        /** ④ 最后可见出路 */
-        tab(url) {
-            if (typeof GM_openInTab === 'function') GM_openInTab(url, { active: false, insert: true });
-            else window.open(url, '_blank', 'noopener');
-            return Promise.resolve({ ok: true, method: 'tab', hint: '已在新标签页打开' });
-        }
-    };
-
-    /** 可回执策略：轮转镜像时只跑这两级，失败才说明这个镜像真的不行 */
-    const VERIFIED_CHAIN = ['blob', 'gm'];
-    /** 盲发策略：拿不到任何结果，只能当作最后的一次性出路 */
-    const BLIND_CHAIN = ['anchor', 'tab'];
-    /** 单节点全量链路：用户已手动选定镜像时，给它每一级机会 */
-    const FULL_CHAIN = VERIFIED_CHAIN.concat(BLIND_CHAIN);
 
     const Downloader = {
         /**
-         * 在【单个镜像】上按 chain 依次尝试，任一级成功即返回。
-         * @param chain 缺省时按设置推导；显式传入则由调用方决定（轮转用可回执链）
-         * @returns {Promise<{ok:boolean, method?:string, hint?:string, unsure?:boolean, size?:number, error?:string, trace:string[]}>}
+         * 直链交付：本脚本不接管下载，只负责把拼好的镜像直链
+         * 通过 <a download> 原生点击交给浏览器——
+         * 这条通道正是 Gopeed / IDM 等下载工具拦截的入口，工具可正常接管。
          */
-        async run(url, filename, onProgress, chain) {
-            const wanted = Settings.get().method || 'auto';
-            const ids = Array.isArray(chain) && chain.length
-                ? chain
-                : (wanted === 'auto' ? FULL_CHAIN : [wanted]);
-            const trace = [];
-            const noop = () => {};
-
-            for (const id of ids) {
-                const fn = Strategies[id];
-                if (!fn) continue;
-                try {
-                    const r = await fn(url, filename, onProgress || noop);
-                    trace.push(id + ' ✓');
-                    return Object.assign({}, r, { trace });
-                } catch (e) {
-                    trace.push(id + ' ✗ ' + e.message);
-                    Log.warn('下载策略 ' + id + ' 失败 →', e.message);
-                }
-            }
-            return { ok: false, error: '该镜像上所有可用方式均失败', trace };
+        deliver(githubUrl, filename) {
+            clickAnchor(githubUrl, filename);
+            return { ok: true, hint: '已交给浏览器下载' };
         },
 
         /**
-         * 自动模式：两阶段。
-         *   阶段一 逐个候选镜像跑“可回执”链路，成功即停，失败记入健康度并换下一个；
-         *   阶段二 所有镜像都拿不到可靠回执时，才用最快那个做一次“盲发”兜底。
-         * @returns Promise<{ok, nodeUrl?, blind?, error?, trace:string[]}>
+         * 自动模式：候选镜像逐个 HEAD 预检，失败记入健康度并换下一个；
+         * 全部预检失败时，对最快节点直接放行一次（仍是原生通道，不拦截下载）。
+         * @returns Promise<{ok, nodeUrl?, blind?, size?, error?, trace:string[]}>
          */
         async runAuto(githubUrl, filename, hooks) {
             hooks = hooks || {};
@@ -760,26 +637,23 @@
             for (let i = 0; i < list.length; i++) {
                 const node = list[i];
                 if (hooks.onNode) hooks.onNode(node, i + 1, list.length, false);
-                const r = await this.run(mirrorUrl(githubUrl, node.url), filename, hooks.onProgress, VERIFIED_CHAIN);
-                if (r.ok) {
+                const target = mirrorUrl(githubUrl, node.url);
+                const head = await precheck(target);
+                if (head.ok) {
                     NodeStore.markOk(node.url);
-                    return Object.assign({ nodeUrl: node.url }, r, { trace: trace.concat(r.trace || []) });
+                    this.deliver(target, filename);
+                    return { ok: true, nodeUrl: node.url, size: head.size, blind: false, trace };
                 }
                 NodeStore.markFail(node.url);
-                trace.push(Utils.shortDomain(node.url) + ' ✗ ' + (r.error || '失败'));
+                trace.push(Utils.shortDomain(node.url) + ' ✗ ' + head.error);
+                Log.warn('镜像预检失败 →', Utils.shortDomain(node.url), head.error);
             }
 
+            // 轮转耗尽：预检可能误判（部分镜像不支持 HEAD），对最快节点直接放行
             const best = list[0];
             if (hooks.onNode) hooks.onNode(best, list.length, list.length, true);
-            const last = await this.run(mirrorUrl(githubUrl, best.url), filename, hooks.onProgress, BLIND_CHAIN);
-            if (last.ok) {
-                return Object.assign({ nodeUrl: best.url, blind: true }, last, { trace: trace.concat(last.trace || []) });
-            }
-            return {
-                ok: false,
-                error: '已尝试 ' + list.length + ' 个镜像，均未拿到有效回执',
-                trace: trace.concat(last.trace || [])
-            };
+            this.deliver(mirrorUrl(githubUrl, best.url), filename);
+            return { ok: true, nodeUrl: best.url, blind: true, trace };
         }
     };
 
@@ -902,22 +776,22 @@ html[data-color-mode="light"]{
 }
 .ghb-scope svg{width:1em;height:1em;fill:currentColor;flex:none;vertical-align:-.125em;}
 
-/* ---------- 启动器：左侧中部，可拖拽，不占右下角 ---------- */
+/* ---------- 启动器：左侧中部圆形按钮，可拖拽，不占右下角 ---------- */
 #ghb-launcher{
   position:fixed; left:0; top:50%; transform:translateY(-50%);
-  z-index:2147483000; display:flex; align-items:center; gap:6px;
-  padding:8px 12px 8px 9px; border:none; border-radius:0 12px 12px 0;
+  margin-left:10px; z-index:2147483000;
+  width:44px; height:44px; padding:0;
+  display:flex; align-items:center; justify-content:center;
+  border:none; border-radius:50%;
   background:var(--ghb-accent); color:#fff; cursor:pointer;
   box-shadow:0 6px 20px rgba(0,0,0,.32);
-  transition:background .18s, box-shadow .18s, filter .18s;
-  font-family:inherit; font-size:13px; font-weight:500; line-height:1;
+  transition:background .18s, box-shadow .18s, transform .18s, filter .18s;
+  font-family:inherit; line-height:1;
 }
-#ghb-launcher:hover{background:var(--ghb-accent-2); box-shadow:0 8px 26px rgba(0,0,0,.4);}
-#ghb-launcher.ghb-dragging{cursor:grabbing; filter:brightness(1.08); user-select:none;}
-#ghb-launcher .ghb-lau-mark{width:22px;height:22px;display:block;}
-#ghb-launcher .ghb-lau-mark svg{width:22px;height:22px;}
-#ghb-launcher .ghb-lau-grip{width:12px;height:22px;opacity:.55;}
-#ghb-launcher .ghb-lau-grip svg{width:12px;height:22px;}
+#ghb-launcher:hover{background:var(--ghb-accent-2); box-shadow:0 8px 26px rgba(0,0,0,.4); transform:translateY(-50%) scale(1.06);}
+#ghb-launcher.ghb-dragging{cursor:grabbing; filter:brightness(1.08); user-select:none; transform:translateY(-50%) scale(.96);}
+#ghb-launcher .ghb-lau-mark{width:26px;height:26px;display:block;}
+#ghb-launcher .ghb-lau-mark svg{width:26px;height:26px;}
 
 /* ---------- 遮罩 ---------- */
 #ghb-overlay{
@@ -1086,18 +960,7 @@ html[data-color-mode="light"]{
 .ghb-file .ghb-f1{font-size:11px; color:var(--ghb-fg-2);}
 .ghb-file .ghb-f2{font-size:13px; font-weight:600; color:var(--ghb-fg); word-break:break-all; margin-top:2px;}
 .ghb-file .ghb-f3{display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap;}
-.ghb-seg{display:flex; gap:4px; padding:10px 16px; border-bottom:1px solid var(--ghb-bd-2); flex:none; flex-wrap:wrap;}
-.ghb-seg button{
-  padding:4px 9px; border:1px solid var(--ghb-bd); border-radius:999px;
-  background:transparent; color:var(--ghb-fg-2); font-family:inherit; font-size:12px; cursor:pointer;
-}
-.ghb-seg button:hover{border-color:var(--ghb-fg-3); color:var(--ghb-fg);}
-.ghb-seg button.ghb-on{background:var(--ghb-accent); border-color:var(--ghb-accent); color:var(--ghb-accent-fg);}
-.ghb-prog{padding:0 16px; flex:none;}
-.ghb-prog.ghb-hide{display:none;}
-.ghb-prog .ghb-p1{display:flex; justify-content:space-between; font-size:11px; color:var(--ghb-fg-2); padding-top:10px;}
-.ghb-prog .ghb-p2{height:5px; border-radius:3px; background:var(--ghb-bg-3); overflow:hidden; margin:5px 0 10px;}
-.ghb-prog .ghb-p2 i{display:block; height:100%; width:0; background:var(--ghb-accent); transition:width .2s;}
+.ghb-dl-sub{display:flex; justify-content:flex-end; padding:8px 16px 0; font-size:12px; color:var(--ghb-fg-2); flex:none;}
 .ghb-nodes{flex:1; overflow-y:auto; padding:4px 0; min-height:120px;}
 .ghb-nodes::-webkit-scrollbar{width:8px;}
 .ghb-nodes::-webkit-scrollbar-thumb{background:var(--ghb-bd); border-radius:4px;}
@@ -1129,9 +992,6 @@ html[data-color-mode="light"]{
 .ghb-toast.ghb-ok{background:var(--ghb-good);}
 .ghb-toast.ghb-warn{background:#9e6a03;}
 .ghb-toast.ghb-err{background:#b62324;}
-.ghb-toast.ghb-prog{flex-direction:column; align-items:stretch; gap:6px; min-width:280px;}
-.ghb-toast.ghb-prog .ghb-ptext{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-.ghb-toast.ghb-prog .ghb-pbar{display:block; height:3px; border-radius:2px; background:rgba(255,255,255,.85); width:3%; transition:width .25s;}
 `;
 
     const View = {
@@ -1159,9 +1019,7 @@ html[data-color-mode="light"]{
             launcher.type = 'button';
             launcher.title = 'GitHub 加速助手（点击打开面板，按住可拖拽）';
             launcher.innerHTML =
-                '<span class="ghb-lau-grip">' + Icons.grip + '</span>' +
-                '<span class="ghb-lau-mark">' + Icons.mark + '</span>' +
-                '<span class="ghb-lau-text">加速</span>';
+                '<span class="ghb-lau-mark">' + Icons.mark + '</span>';
             document.body.appendChild(launcher);
 
             const overlay = document.createElement('div');
@@ -1194,11 +1052,7 @@ html[data-color-mode="light"]{
                 '      <button class="ghb-btn" id="ghb-dl-copy">' + Icons.copy + '复制链接</button>' +
                 '    </div>' +
                 '  </div>' +
-                '  <div class="ghb-seg" id="ghb-dl-methods"></div>' +
-                '  <div class="ghb-prog ghb-hide" id="ghb-dl-prog">' +
-                '    <div class="ghb-p1"><span id="ghb-dl-ptext">准备中…</span><span id="ghb-dl-psize"></span></div>' +
-                '    <div class="ghb-p2"><i id="ghb-dl-pbar"></i></div>' +
-                '  </div>' +
+                '  <div class="ghb-dl-sub"><span id="ghb-dl-count"></span></div>' +
                 '  <div class="ghb-nodes" id="ghb-dl-nodes"></div>' +
                 '  <div class="ghb-foot"><span>' + VERSION + '</span><span>作者 ' + AUTHOR + '</span></div>' +
                 '</div>';
@@ -1282,19 +1136,6 @@ html[data-color-mode="light"]{
             if (cb) cb.checked = on;
         },
 
-        /** 下载方式的唯一写入口：设置项、设置页下拉框、下载弹窗按钮三处同步 */
-        setMethod(id) {
-            Settings.set({ method: id });
-            const sel = document.getElementById('ghb-s-method');
-            if (sel) sel.value = id;
-            const desc = document.getElementById('ghb-s-method-desc');
-            if (desc) desc.textContent = this.Panel.methodDesc(id);
-            if (this.DlModal.root) {
-                this.DlModal.renderMethods();
-                this.DlModal.renderNodes(); // 同步刷新弹窗右上角的节点计数
-            }
-        },
-
         /** 统一下载入口：弹窗手选 或 全自动最快节点，由设置 askNode 决定 */
         download(githubUrl, filename) {
             const name = filename || Utils.filenameFromUrl(githubUrl);
@@ -1303,24 +1144,22 @@ html[data-color-mode="light"]{
             else this.autoDownload(githubUrl, name);
         },
 
-        /** 全自动：轮换镜像直到成功，进度用常驻 Toast 反馈，不打扰页面 */
+        /** 全自动：轮换镜像直到预检通过，常驻 Toast 反馈，不打扰页面 */
         async autoDownload(githubUrl, filename) {
             if (this._autoBusy) { this.Toast.warn('已有下载任务在进行中'); return; }
             this._autoBusy = true;
-            const prog = this.Toast.progress('正在选择最快镜像…');
+            const sticky = this.Toast.sticky('正在选择最快镜像…');
             const r = await Downloader.runAuto(githubUrl, filename, {
-                onNode: (node, i, n) =>
-                    prog.update(0, '(' + i + '/' + n + ') 连接 ' + Utils.shortDomain(node.url) + '…'),
-                onProgress: (l, t) => prog.update(t ? (l / t) * 100 : 0,
-                    '下载中 ' + (t ? Math.round((l / t) * 100) + '%' : '…') + ' · ' + filename)
+                onNode: (node, i, n, last) =>
+                    sticky.update('(' + i + '/' + n + ') 预检 ' + Utils.shortDomain(node.url) + (last ? '（兜底直连）' : '') + '…')
             });
             this._autoBusy = false;
-            if (r.ok && r.unsure) {
-                prog.warn('已提交下载但未收到回执，若无反应可开启「节点选择弹窗」重试');
+            if (r.ok && r.blind) {
+                sticky.warn('镜像预检均失败，已对最快节点直接放行 · ' + filename);
             } else if (r.ok) {
-                prog.ok('已交给浏览器下载 · ' + filename + '（' + Utils.shortDomain(r.nodeUrl) + '）');
+                sticky.ok('已交给浏览器下载 · ' + filename + '（' + Utils.shortDomain(r.nodeUrl) + '）');
             } else {
-                prog.err(r.error + '｜可在设置开启节点弹窗手动重试');
+                sticky.err(r.error + '｜可点「复制链接」手动下载');
             }
         },
 
@@ -1350,12 +1189,11 @@ html[data-color-mode="light"]{
                 }, ms || (kind === 'err' ? 4200 : 2400));
             },
 
-            /** 常驻进度条提示：全自动下载时替代弹窗的反馈载体 */
-            progress(text) {
+            /** 常驻状态提示：自动下载过程的反馈载体，结束时收敛为普通 toast */
+            sticky(text) {
                 const t = document.createElement('div');
-                t.className = 'ghb-toast ghb-info ghb-prog';
-                t.innerHTML = '<span class="ghb-ptext"></span><i class="ghb-pbar"></i>';
-                t.querySelector('.ghb-ptext').textContent = text;
+                t.className = 'ghb-toast ghb-info';
+                t.textContent = text;
                 this.host().appendChild(t);
                 requestAnimationFrame(() => t.classList.add('ghb-show'));
                 let gone = false;
@@ -1366,12 +1204,7 @@ html[data-color-mode="light"]{
                     setTimeout(() => t.remove(), 260);
                 };
                 return {
-                    update(pct, msg) {
-                        if (gone) return;
-                        t.querySelector('.ghb-ptext').textContent = msg || text;
-                        t.querySelector('.ghb-pbar').style.width =
-                            Math.max(3, Math.min(100, pct || 0)) + '%';
-                    },
+                    update(msg) { if (!gone) t.textContent = msg || text; },
                     ok(msg) { close(); View.Toast.ok(msg); },
                     warn(msg) { close(); View.Toast.warn(msg); },
                     err(msg) { close(); View.Toast.err(msg); }
@@ -1608,24 +1441,6 @@ html[data-color-mode="light"]{
 
                 page.innerHTML =
                     '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-method">' +
-                    '    <span class="ghb-lt">下载方式</span>' +
-                    '    <span class="ghb-ld">' + Utils.esc(this.methodDesc(s.method)) + '</span>' +
-                    '  </label>' +
-                    '  <select class="ghb-select" id="ghb-s-method">' +
-                        METHODS.map((m) => '<option value="' + m.id + '"' + (s.method === m.id ? ' selected' : '') + '>' +
-                            Utils.esc(m.label) + '</option>').join('') +
-                    '  </select>' +
-                    '</div>' +
-                    '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-blob">' +
-                    '    <span class="ghb-lt">Blob 体积上限</span>' +
-                    '    <span class="ghb-ld">超过该体积跳过 Blob 中转，改用下一级策略；0 表示不限制</span>' +
-                    '  </label>' +
-                    '  <span class="ghb-inline"><input class="ghb-num" id="ghb-s-blob" type="number" min="0" step="50" value="' +
-                        (s.blobMaxMB || 0) + '"><span style="font-size:12px;color:var(--ghb-fg-2)">MB</span></span>' +
-                    '</div>' +
-                    '<div class="ghb-setting">' +
                     '  <label class="ghb-label" for="ghb-s-autorefresh">' +
                     '    <span class="ghb-lt">启动时刷新节点</span>' +
                     '    <span class="ghb-ld">打开页面时若缓存过期则自动拉取最新节点</span>' +
@@ -1656,20 +1471,10 @@ html[data-color-mode="light"]{
                     '</div>' +
                     '<div class="ghb-about">' +
                     '  <b>' + VERSION + '</b> · 作者 ' + AUTHOR + '<br>' +
-                    '  下载被 Gopeed / IDM 等工具接管时，推荐「自动」或「Blob 中转」，两者都走浏览器原生下载通道。<br>' +
-                    '  若仍无反应，点「复制链接」粘贴进下载工具即可。' +
+                    '  本脚本不接管下载：只负责挑选可用镜像并生成直链，下载一律走浏览器原生通道，Gopeed / IDM 等工具可正常接管。<br>' +
+                    '  若浏览器无反应，点「复制链接」粘贴进下载工具即可。' +
                     '</div>';
 
-                const sel = page.querySelector('#ghb-s-method');
-                sel.addEventListener('change', () => {
-                    View.setMethod(sel.value);
-                    View.Toast.info('下载方式已切换为「' + sel.options[sel.selectedIndex].text + '」');
-                });
-                page.querySelector('#ghb-s-blob').addEventListener('change', (e) => {
-                    const v = Math.max(0, parseInt(e.target.value, 10) || 0);
-                    Settings.set({ blobMaxMB: v });
-                    View.Toast.info('Blob 上限已设为 ' + (v ? v + ' MB' : '不限制'));
-                });
                 page.querySelector('#ghb-s-autorefresh').addEventListener('change', (e) => {
                     Settings.set({ refreshOnStart: e.target.checked });
                 });
@@ -1699,11 +1504,6 @@ html[data-color-mode="light"]{
                     this.refresh();
                     View.Toast.ok('已恢复默认设置');
                 });
-            },
-
-            methodDesc(id) {
-                const m = METHODS.find((x) => x.id === id);
-                return m ? m.desc : '';
             }
         },
 
@@ -1711,7 +1511,6 @@ html[data-color-mode="light"]{
         DlModal: {
             url: '',
             name: '',
-            busy: false,
             root: null,
 
             mount(root) {
@@ -1723,28 +1522,10 @@ html[data-color-mode="light"]{
                 root.querySelector('#ghb-dl-fast').addEventListener('click', () => this.onFastest());
                 root.querySelector('#ghb-dl-nodes').addEventListener('click', (e) => {
                     const b = e.target.closest('.ghb-dl-go');
-                    if (b) this.onDownload(b.dataset.node);
+                    if (b) this.onDownload(b.dataset.node, b);
                 });
                 document.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape' && root.classList.contains('ghb-open')) this.close();
-                });
-                this.renderMethods();
-            },
-
-            renderMethods() {
-                const cur = Settings.get().method;
-                const host = this.root.querySelector('#ghb-dl-methods');
-                host.innerHTML = '<span style="font-size:12px;color:var(--ghb-fg-2);align-self:center;margin-right:2px;">方式</span>' +
-                    METHODS.map((m) => '<button data-method="' + m.id + '"' + (m.id === cur ? ' class="ghb-on"' : '') +
-                        ' title="' + Utils.esc(m.desc) + '">' + Utils.esc(m.label) + '</button>').join('') +
-                    '<span style="flex:1"></span><span id="ghb-dl-count" style="font-size:12px;color:var(--ghb-fg-2);align-self:center"></span>';
-                host.querySelectorAll('button[data-method]').forEach((b) => {
-                    b.addEventListener('click', () => {
-                        Settings.set({ method: b.dataset.method });
-                        this.renderMethods();
-                        this.renderNodes(); // 同步刷新右上角节点计数
-                        View.Toast.info('下载方式：' + b.textContent);
-                    });
                 });
             },
 
@@ -1752,8 +1533,6 @@ html[data-color-mode="light"]{
                 this.url = githubUrl || '';
                 this.name = filename || Utils.filenameFromUrl(githubUrl);
                 this.root.querySelector('#ghb-dl-name').textContent = this.name;
-                this.renderMethods();
-                this.hideProgress();
                 this.renderNodes();
                 this.root.classList.add('ghb-open');
 
@@ -1761,7 +1540,6 @@ html[data-color-mode="light"]{
             },
 
             close() {
-                if (this.busy) return;
                 this.root.classList.remove('ghb-open');
             },
 
@@ -1813,56 +1591,23 @@ html[data-color-mode="light"]{
                 this.onDownload(list[0].url);
             },
 
-            showProgress() {
-                const p = this.root.querySelector('#ghb-dl-prog');
-                p.classList.remove('ghb-hide');
-                this.root.querySelector('#ghb-dl-pbar').style.width = '0%';
-                this.root.querySelector('#ghb-dl-ptext').textContent = '准备中…';
-                this.root.querySelector('#ghb-dl-psize').textContent = '';
-            },
-
-            hideProgress() {
-                this.root.querySelector('#ghb-dl-prog').classList.add('ghb-hide');
-            },
-
-            onProgress(loaded, total) {
-                const pct = total ? Math.min(100, (loaded / total) * 100) : 0;
-                this.root.querySelector('#ghb-dl-pbar').style.width = pct.toFixed(1) + '%';
-                this.root.querySelector('#ghb-dl-ptext').textContent =
-                    total ? '下载中 ' + pct.toFixed(0) + '%' : '下载中…';
-                this.root.querySelector('#ghb-dl-psize').textContent =
-                    Utils.bytes(loaded) + (total ? ' / ' + Utils.bytes(total) : '');
-            },
-
-            async onDownload(nodeUrl) {
-                if (this.busy) return;
+            async onDownload(nodeUrl, btn) {
                 const target = mirrorUrl(this.url, nodeUrl);
                 if (!target) { View.Toast.err('链接拼装失败'); return; }
 
-                this.busy = true;
-                this.showProgress();
-                this.root.querySelector('#ghb-dl-ptext').textContent = '正在连接 ' + Utils.shortDomain(nodeUrl) + '…';
+                if (btn) { btn.disabled = true; btn.textContent = '预检中…'; }
+                const head = await precheck(target);
 
-                const result = await Downloader.run(target, this.name, (l, t) => this.onProgress(l, t));
-
-                this.busy = false;
-                this.hideProgress();
-
-                if (!result.ok) {
+                if (!head.ok) {
                     NodeStore.markFail(nodeUrl);
-                    View.Toast.err('下载失败：' + result.error + '｜可点「复制链接」手动下载，或在设置开启全自动模式自动换节点');
-                    Log.error('下载链路全失败', result.trace);
+                    if (btn) { btn.disabled = false; btn.innerHTML = Icons.download + '下载'; }
+                    View.Toast.err('该节点预检失败（' + head.error + '），已记入健康度，试试其他节点');
                     return;
                 }
                 NodeStore.markOk(nodeUrl);
-                if (result.unsure) {
-                    View.Toast.warn('已提交下载，但未收到回执：' + result.hint + '。若无反应请改用「Blob 中转」');
-                } else {
-                    View.Toast.ok('已交给浏览器下载 · ' + this.name +
-                        (result.size ? '（' + Utils.bytes(result.size) + '）' : '') +
-                        '｜Gopeed 等工具会自动接管');
-                }
-                this.root.classList.remove('ghb-open');
+                this.close();
+                Downloader.deliver(target, this.name);
+                View.Toast.ok('已交给浏览器下载 · ' + this.name + '｜Gopeed 等工具会自动接管');
             }
         }
     };
