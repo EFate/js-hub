@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.0.5
+// @version      0.0.6
 // @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
@@ -61,7 +61,8 @@
         nodes: NS + '_nodes',
         visible: NS + '_visible',
         updatedAt: NS + '_updated_at',
-        fails: NS + '_fails'
+        fails: NS + '_fails',
+        lastOk: NS + '_last_ok'
     };
 
     const NODE_TTL = 60 * 60 * 1000;      // 节点缓存 1 小时
@@ -69,7 +70,9 @@
     const NODE_RETRY_MAX = 4;             // 自动下载最多轮换几个节点
     const PROBE_TIMEOUT = 4000;           // 单节点测速超时
     const PROBE_CONCURRENCY = 8;          // 并发测速路数
-    const HEAD_TIMEOUT = 8000;            // 直链 HEAD 预检超时
+    const HEAD_TIMEOUT = 8000;            // 直链 HEAD 预检超时(冷启动 / 全败兜底)
+    const HEAD_TIMEOUT_FAST = 2500;       // 有候选但无 fresh 时的短预检
+    const PRECHECK_TTL = 5 * 60 * 1000;   // 5 分钟:命中此窗口的预检成功节点视为 fresh,直接 fire
     const LATENCY_FAST = 300;             // 延迟分档（ms）
     const LATENCY_MID = 800;
     const LATENCY_SCALE = 1500;           // 进度条满格基准
@@ -483,6 +486,8 @@
             }
             this.visible = Store.read(K.visible, []);
             this.fails = Store.read(K.fails, {}) || {};
+            this.lastOk = Store.read(K.lastOk, {}) || {};
+            this.pruneLastOk();
             this.pruneVisible();
             if (!this.visible.length && this.nodes.length) this.resetVisible();
         },
@@ -538,9 +543,18 @@
 
         /** 下载成功：清零该节点的失败计数 */
         markOk(url) {
-            if (!(url in this.fails)) return;
             delete this.fails[url];
+            this.lastOk[url] = Date.now();
             Store.write(K.fails, this.fails);
+            Store.write(K.lastOk, this.lastOk);
+        },
+        pruneLastOk() {
+            const cutoff = Date.now() - PRECHECK_TTL * 2;
+            let dirty = false;
+            for (const k in this.lastOk) {
+                if (this.lastOk[k] < cutoff) { delete this.lastOk[k]; dirty = true; }
+            }
+            if (dirty) Store.write(K.lastOk, this.lastOk);
         },
 
         /**
@@ -564,6 +578,8 @@
             const picked = pool.filter((n) => this.visible.includes(n.url));
             return picked.length ? picked : pool.slice(0, 10);
         },
+        isFresh(url) { return (this.lastOk[url] || 0) > Date.now() - PRECHECK_TTL; },
+        freshCandidates() { return this.candidates().filter((n) => this.isFresh(n.url)); },
 
         isStale() {
             return !this.nodes.length || (Date.now() - this.updatedAt > NODE_TTL);
@@ -626,8 +642,8 @@
     }
 
     /** HEAD 预检：确认镜像真的能给文件，再把直链交给浏览器 */
-    function precheck(url) {
-        return gmRequest({ url, method: 'HEAD', timeout: HEAD_TIMEOUT })
+    function precheck(url, timeoutMs) {
+        return gmRequest({ url, method: 'HEAD', timeout: timeoutMs || HEAD_TIMEOUT })
             .then((res) => {
                 const m = /content-length:\s*(\d+)/i.exec(res.responseHeaders || '');
                 return { ok: true, size: m ? parseInt(m[1], 10) : -1 };
@@ -649,15 +665,23 @@
         async runAuto(githubUrl, filename, hooks) {
             hooks = hooks || {};
             if (!NodeStore.nodes.length) await loadNodes('自动下载');
+            const trace = [];
+            // fast-path:fresh 候选直接 fire,跳过预检
+            const fresh = NodeStore.freshCandidates().slice(0, NODE_RETRY_MAX);
+            if (fresh.length) {
+                const best = fresh[0];
+                if (hooks.onNode) hooks.onNode(best, 1, 1, false);
+                this.deliver(mirrorUrl(githubUrl, best.url), filename);
+                return { ok: true, nodeUrl: best.url, blind: false, trace };
+            }
             const list = NodeStore.candidates().slice(0, NODE_RETRY_MAX);
             if (!list.length) return { ok: false, error: '没有可用镜像节点', trace: [] };
-            const trace = [];
 
             for (let i = 0; i < list.length; i++) {
                 const node = list[i];
                 if (hooks.onNode) hooks.onNode(node, i + 1, list.length, false);
                 const target = mirrorUrl(githubUrl, node.url);
-                const head = await precheck(target);
+                const head = await precheck(target, HEAD_TIMEOUT_FAST);
                 if (head.ok) {
                     NodeStore.markOk(node.url);
                     this.deliver(target, filename);
@@ -1401,8 +1425,9 @@ html[data-color-mode="light"]{
                 btn.disabled = false;
                 btn.querySelector('svg').classList.remove('ghb-spin');
                 if (!list.length) { View.Toast.err('全部节点均不可达'); return; }
+                list.forEach((n) => NodeStore.markOk(n.url));
                 NodeStore.setNodes(list);
-                View.Toast.ok('测速完成，' + list.length + ' 个节点可用');
+                View.Toast.ok('测速完成，' + list.length + ' 个节点已就绪');
             },
 
             onTest(btn) {
@@ -1615,9 +1640,16 @@ html[data-color-mode="light"]{
             async onDownload(nodeUrl, btn) {
                 const target = mirrorUrl(this.url, nodeUrl);
                 if (!target) { View.Toast.err('链接拼装失败'); return; }
+                // fast-path:fresh 候选直接 fire
+                if (NodeStore.isFresh(nodeUrl)) {
+                    this.close();
+                    Downloader.deliver(target, this.name);
+                    View.Toast.ok('已交给浏览器下载 · ' + this.name + '｜Gopeed 等工具会自动接管');
+                    return;
+                }
 
                 if (btn) { btn.disabled = true; btn.textContent = '预检中…'; }
-                const head = await precheck(target);
+                const head = await precheck(target, HEAD_TIMEOUT_FAST);
 
                 if (!head.ok) {
                     NodeStore.markFail(nodeUrl);
@@ -1661,9 +1693,9 @@ html[data-color-mode="light"]{
     /** 清空全部持久化数据并恢复默认（油猴菜单与设置页共用，避免两处逻辑漂移） */
     function resetAll() {
         Settings.reset();
-        Store.remove(K.nodes); Store.remove(K.visible); Store.remove(K.updatedAt); Store.remove(K.fails);
+        Store.remove(K.nodes); Store.remove(K.visible); Store.remove(K.updatedAt); Store.remove(K.fails); Store.remove(K.lastOk);
         NodeStore.nodes = []; NodeStore.visible = [];
-        NodeStore.updatedAt = 0; NodeStore.fails = {};
+        NodeStore.updatedAt = 0; NodeStore.fails = {}; NodeStore.lastOk = {};
         NodeStore.emit();
     }
 
