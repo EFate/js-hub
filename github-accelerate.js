@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.0.6
+// @version      0.0.7
 // @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
@@ -473,6 +473,7 @@
         visible: [],
         updatedAt: 0,
         fails: {},           // url → 连续失败次数（持久化，镜像失效的自我记忆）
+        lastOk: {},          // url → 上次预检成功时间戳（持久化，新鲜度缓存）
         subs: [],
 
         subscribe(fn) { this.subs.push(fn); },
@@ -548,8 +549,23 @@
             Store.write(K.fails, this.fails);
             Store.write(K.lastOk, this.lastOk);
         },
+
+        /**
+         * 批量预检成功：只写盘 2 次，而非 2N 次。
+         * GM_setValue 是同步阻塞 API，测速后逐个写会让主线程明显卡顿。
+         */
+        markOkMany(urls) {
+            const now = Date.now();
+            (urls || []).forEach((u) => {
+                if (!u) return;
+                delete this.fails[u];
+                this.lastOk[u] = now;
+            });
+            Store.write(K.fails, this.fails);
+            Store.write(K.lastOk, this.lastOk);
+        },
         pruneLastOk() {
-            const cutoff = Date.now() - PRECHECK_TTL * 2;
+            const cutoff = Date.now() - PRECHECK_TTL;
             let dirty = false;
             for (const k in this.lastOk) {
                 if (this.lastOk[k] < cutoff) { delete this.lastOk[k]; dirty = true; }
@@ -658,8 +674,13 @@
         },
 
         /**
-         * 自动模式：候选镜像逐个 HEAD 预检，失败换下一个；全部失败时对最快节点
-         * 直接放行一次（仍是 clickAnchor 原生通道，下载工具照样能接管）。
+         * 自动模式两段式（先快后稳）：
+         *   ① fast-path：fresh 候选（5 分钟内预检成功过）直接 fire，跳过预检 → 0ms
+         *   ② 慢路径：逐个短预检（2.5s）轮换，失败换下一个
+         *   ③ 兜底：全部失败时对最快节点直接放行一次（仍是 clickAnchor 原生通道）
+         *
+         * 注意：fast-path 故意不刷新 lastOk 时间戳——采用固定窗口而非滑动窗口，
+         * 保证持续使用时仍会每 5 分钟重新验证一次，避免镜像悄悄失效却一直拿坏链接。
          * @returns Promise<{ok, nodeUrl?, blind?, size?, error?, trace:string[]}>
          */
         async runAuto(githubUrl, filename, hooks) {
@@ -1186,22 +1207,37 @@ html[data-color-mode="light"]{
             else this.autoDownload(githubUrl, name);
         },
 
-        /** 全自动：轮换镜像直到预检通过，常驻 Toast 反馈，不打扰页面 */
+        /**
+         * 全自动：fresh 候选直接 fire，否则轮换预检。
+         * 两个体验保障：
+         *   ① 延迟展示 sticky —— fast-path 常在 150ms 内完成，立刻弹 toast 会一闪而过反而碍眼
+         *   ② try/finally 释放 _autoBusy —— 异常时若不释放，自动下载将永久卡死只能刷新页面
+         */
         async autoDownload(githubUrl, filename) {
             if (this._autoBusy) { this.Toast.warn('已有下载任务在进行中'); return; }
             this._autoBusy = true;
-            const sticky = this.Toast.sticky('正在选择最快镜像…');
-            const r = await Downloader.runAuto(githubUrl, filename, {
-                onNode: (node, i, n, last) =>
-                    sticky.update('(' + i + '/' + n + ') 预检 ' + Utils.shortDomain(node.url) + (last ? '（兜底直连）' : '') + '…')
-            });
-            this._autoBusy = false;
-            if (r.ok && r.blind) {
-                sticky.warn('镜像预检均失败，已对最快节点直接放行 · ' + filename);
-            } else if (r.ok) {
-                sticky.ok('已交给浏览器下载 · ' + filename + '（' + Utils.shortDomain(r.nodeUrl) + '）');
-            } else {
-                sticky.err(r.error + '｜可点「复制链接」手动下载');
+            let sticky = null;
+            const timer = setTimeout(() => {
+                sticky = this.Toast.sticky('正在选择最快镜像…');
+            }, 150);
+            const done = (kind, msg) => { sticky ? sticky[kind](msg) : this.Toast[kind](msg); };
+            try {
+                const r = await Downloader.runAuto(githubUrl, filename, {
+                    onNode: (node, i, n, last) => {
+                        if (sticky) sticky.update('(' + i + '/' + n + ') 预检 ' + Utils.shortDomain(node.url) + (last ? '（兜底直连）' : '') + '…');
+                    }
+                });
+                clearTimeout(timer);
+                if (r.ok && r.blind) done('warn', '镜像预检均失败，已对最快节点直接放行 · ' + filename);
+                else if (r.ok) done('ok', '已交给浏览器下载 · ' + filename + '（' + Utils.shortDomain(r.nodeUrl) + '）');
+                else done('err', r.error + '｜可点「复制链接」手动下载');
+            } catch (e) {
+                clearTimeout(timer);
+                done('err', '下载失败：' + ((e && e.message) || '未知错误'));
+                Log.error('自动下载异常', e);
+            } finally {
+                clearTimeout(timer);
+                this._autoBusy = false;   // 异常路径也必须释放，否则功能永久卡死
             }
         },
 
@@ -1425,7 +1461,7 @@ html[data-color-mode="light"]{
                 btn.disabled = false;
                 btn.querySelector('svg').classList.remove('ghb-spin');
                 if (!list.length) { View.Toast.err('全部节点均不可达'); return; }
-                list.forEach((n) => NodeStore.markOk(n.url));
+                NodeStore.markOkMany(list.map((n) => n.url));
                 NodeStore.setNodes(list);
                 View.Toast.ok('测速完成，' + list.length + ' 个节点已就绪');
             },

@@ -36,7 +36,7 @@
   <rect x="40" y="234" width="600" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
   <text x="56" y="262" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#0C447C">L4 · STATE</text>
   <text x="170" y="254" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">NodeStore 单一数据源 · visible 勾选 · fails 健康度 · lastOk 新鲜度（持久化）</text>
-  <text x="170" y="274" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">candidates / freshCandidates · markFail / markOk（写时间戳）· 变更广播驱动视图重绘</text>
+  <text x="170" y="274" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">candidates / freshCandidates · markOk / markOkMany（批量写盘）· 变更广播驱动视图重绘</text>
 
   <rect x="40" y="300" width="600" height="92" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
   <text x="56" y="346" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#0C447C">L5 · CAPABILITY</text>
@@ -54,7 +54,7 @@
   <rect x="40" y="402" width="600" height="56" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
   <text x="56" y="430" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#0C447C">L6 · VIEW</text>
   <text x="170" y="422" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">View.download 统一入口 · askNode 分流（弹窗手选 / 全自动）</text>
-  <text x="170" y="442" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Launcher 右侧居中 · Panel 三页签 · DlModal 选节点（无内嵌进度） · Toast 状态</text>
+  <text x="170" y="442" dominant-baseline="central" font-family="sans-serif" font-size="12" fill="#0C447C">Launcher 右侧居中 · Panel 三页签 · DlModal 选节点 · Toast 延迟 150ms（fast-path 不闪烁）</text>
 
   <rect x="40" y="468" width="292" height="48" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
   <text x="56" y="486" dominant-baseline="central" font-family="sans-serif" font-size="13" font-weight="500" fill="#2C2C2A">L2 · FOUNDATION</text>
