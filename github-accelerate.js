@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         GitHub 加速助手
+// @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      0.0.8
-// @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
+// @version      1.0.0
+// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
@@ -191,6 +191,13 @@
         return acc;
     }, {});
 
+    const ENHANCE_DEFAULT = {
+        groupSort: true,          // 文件按平台分组、按当前系统/架构排序、推荐安装包
+        downloadCount: true,      // 显示各 Release 文件下载量（GitHub API）
+        replaceTime: false,       // 相对时间 → 精确时间
+        collapsibleNotes: true    // 更新日志可折叠
+    };
+
     const DEFAULT_SETTINGS = {
         refreshOnStart: true,
         showLauncher: true,
@@ -198,7 +205,8 @@
         showPageButtons: true,     // GitHub 页面内注入镜像加速按钮的主开关
         launcherPos: null,
         lastTab: 'nodes',
-        inject: Object.assign({}, DEFAULT_INJECT)
+        inject: Object.assign({}, DEFAULT_INJECT),
+        enhance: Object.assign({}, ENHANCE_DEFAULT)
     };
 
     /** 设置的唯一读写口：load 负责与默认值合并，set 负责落盘 */
@@ -209,6 +217,7 @@
             const saved = Store.read(K.settings, {}) || {};
             this.data = Object.assign({}, DEFAULT_SETTINGS, saved);
             this.data.inject = Object.assign({}, DEFAULT_INJECT, saved.inject || {});
+            this.data.enhance = Object.assign({}, ENHANCE_DEFAULT, saved.enhance || {});
             return this.data;
         },
         get() { return this.data; },
@@ -338,6 +347,202 @@
         reset: '<svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
         check: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'
     };
+    /* ======================================================================
+     * L2-b · FOUNDATION —— 增强显示工具（纯函数，无 DOM 依赖）
+     *   来源：github增强显示.js（caolib）核心解析逻辑，原样保留判定顺序。
+     *   只做「文件名 → 平台/架构/分组」与「当前环境 → OS/架构」的纯计算，
+     *   不触碰 DOM；DOM 编排全部在 L5-c 的 Enhancer 中。
+     * ==================================================================== */
+
+    const Arch = {
+        OS_OPTIONS: [
+            { value: 'windows', label: 'Windows' },
+            { value: 'mac', label: 'macOS' },
+            { value: 'linux', label: 'Linux' },
+            { value: 'android', label: 'Android' },
+            { value: 'ios', label: 'iOS' }
+        ],
+        ARCH_OPTIONS: [
+            { value: 'x86_64', label: 'x64' },
+            { value: 'arm64', label: 'arm64' },
+            { value: 'x86', label: 'x86' },
+            { value: 'arm32', label: 'arm32' }
+        ],
+
+        getCurrentOS() {
+            const ua = navigator.userAgent.toLowerCase();
+            if (ua.includes('win')) return 'windows';
+            if (ua.includes('mac')) return 'mac';
+            if (ua.includes('android')) return 'android';
+            if (ua.includes('iphone') || ua.includes('ipad')) return 'ios';
+            if (ua.includes('linux')) return 'linux';
+            return 'unknown';
+        },
+
+        getCurrentArch() {
+            // 优先 User-Agent Client Hints
+            if (navigator.userAgentData && navigator.userAgentData.arch) {
+                const a = String(navigator.userAgentData.arch).toLowerCase();
+                if (a.includes('arm64') || a.includes('aarch64')) return 'arm64';
+                if (a === 'arm' || a.includes('arm32') || a.includes('armv7')) return 'arm32';
+                if (a.includes('x86_64') || a === 'amd64' || a === 'x64') return 'x86_64';
+                if (a.includes('x86') || a.includes('i386') || a.includes('i686')) return 'x86';
+            }
+            const p = String(navigator.platform || '').toLowerCase();
+            const ua = navigator.userAgent.toLowerCase();
+            if (p.includes('aarch64') || p.includes('arm64') || ua.includes('aarch64') || ua.includes('arm64')) return 'arm64';
+            if (p.includes('win64') || p.includes('x64') || p.includes('x86_64') || ua.includes('win64') || ua.includes('x86_64') || ua.includes('wow64')) return 'x86_64';
+            if (p.includes('arm') || ua.includes('armv7') || ua.includes('armhf')) return 'arm32';
+            if (p.includes('i386') || p.includes('i686') || ua.includes('i386') || ua.includes('i686')) return 'x86';
+            const os = this.getCurrentOS();
+            if (os === 'mac') return 'arm64';   // Apple Silicon 已成主流
+            return 'x86_64';
+        },
+
+        // 从文件名解析架构；判定顺序关键：先 64 位后 32 位（arm64 含 arm、x86_64 含 x86）
+        parseFileArch(name) {
+            const n = String(name).toLowerCase();
+            if (n.includes('aarch64') || n.includes('arm64') || n.includes('armv8')) return 'arm64';
+            if (n.includes('x86_64') || n.includes('x64') || n.includes('amd64')) return 'x86_64';
+            if (n.includes('riscv64') || n.includes('riscv')) return 'riscv64';
+            if (n.includes('armv7') || n.includes('armeabi-v7a') || n.includes('armhf') || n.includes('armv6') || n.includes('armel') || n.includes('armeabi') || /\barm\b/.test(n)) return 'arm32';
+            if (n.includes('i386') || n.includes('i686') || n.includes('ia32') || n.includes('x86') || n.includes('32-bit') || n.includes('32bit')) return 'x86';
+            if (n.includes('mips64') || n.includes('mipsel') || n.includes('mips')) return 'mips';
+            if (n.includes('ppc64') || n.includes('ppc')) return 'ppc';
+            if (n.includes('universal')) return 'universal';
+            return null;
+        },
+
+        parseFileGroup(name) {
+            const n = String(name).toLowerCase();
+            if (n.endsWith('.sig') || n.endsWith('.sha256') || n.endsWith('.pem') || n.endsWith('.blockmap')) {
+                return { id: 'meta', showTag: false };
+            }
+            if (n.includes('source') || (n.endsWith('.tar.gz') && !n.endsWith('.app.tar.gz') && !n.includes('linux') && !n.includes('mac') && !n.includes('win'))) {
+                return { id: 'source', showTag: false };
+            }
+            if (n.endsWith('.exe') || n.endsWith('.msi') || n.includes('-win') || n.includes('_win')) {
+                return { id: 'windows', name: 'Win', showTag: true };
+            }
+            if (n.endsWith('.dmg') || n.endsWith('.pkg') || n.endsWith('.app.tar.gz') || n.includes('-mac') || n.includes('_mac') || n.includes('darwin')) {
+                return { id: 'mac', name: 'Mac', showTag: true };
+            }
+            if (n.endsWith('.apk') || n.endsWith('.aab')) {
+                return { id: 'android', name: 'Android', showTag: true };
+            }
+            if (n.endsWith('.ipa')) {
+                return { id: 'ios', name: 'iOS', showTag: true };
+            }
+            if (n.endsWith('.deb')) return { id: 'linux-deb', name: 'Debian', showTag: true };
+            if (n.endsWith('.rpm')) return { id: 'linux-rpm', name: 'RedHat', showTag: true };
+            if (n.endsWith('.appimage')) return { id: 'linux-appimage', name: 'AppImage', showTag: true };
+            if (n.endsWith('.flatpak')) return { id: 'linux-flatpak', name: 'Flatpak', showTag: true };
+            if (n.endsWith('.pacman') || n.endsWith('.pkg.tar.zst')) return { id: 'linux-arch', name: 'Arch', showTag: true };
+            if (n.includes('-linux') || n.includes('_linux') || n.endsWith('.tar.xz')) return { id: 'linux-other', name: 'Linux', showTag: true };
+            return { id: 'other', showTag: false };
+        },
+
+        getGroupClass(id) {
+            if (id === 'windows') return 'gh-group-win';
+            if (id === 'mac') return 'gh-group-mac';
+            if (id === 'linux-deb') return 'gh-group-linux-deb';
+            if (id === 'linux-rpm') return 'gh-group-linux-rpm';
+            if (id === 'linux-arch') return 'gh-group-linux-arch';
+            if (id === 'linux-appimage') return 'gh-group-linux-appimage';
+            if (id === 'linux-flatpak') return 'gh-group-linux-flatpak';
+            if (id.startsWith('linux')) return 'gh-group-linux-other';
+            if (id === 'android' || id === 'ios') return 'gh-group-mobile';
+            return 'gh-group-other';
+        },
+
+        getTagClass(id) {
+            if (id === 'windows') return 'gh-tag-win';
+            if (id === 'mac') return 'gh-tag-mac';
+            if (id === 'linux-deb') return 'gh-tag-linux-deb';
+            if (id === 'linux-rpm') return 'gh-tag-linux-rpm';
+            if (id === 'linux-arch') return 'gh-tag-linux-arch';
+            if (id === 'linux-appimage') return 'gh-tag-linux-appimage';
+            if (id === 'linux-flatpak') return 'gh-tag-linux-flatpak';
+            if (id.startsWith('linux')) return 'gh-tag-linux-other';
+            if (id === 'android' || id === 'ios') return 'gh-tag-mobile';
+            return '';
+        },
+
+        calculateMatchScore(fileName, currentOS, groupId, currentArch) {
+            let groupScore = 0;
+            let innerScore = 0;
+            const name = String(fileName).toLowerCase();
+            const isCurrentOS = (groupId === currentOS) || groupId.startsWith(currentOS + '-');
+
+            if (isCurrentOS) {
+                groupScore = 10000;
+                if (groupId === 'linux-deb') groupScore += 300;
+                else if (groupId === 'linux-rpm') groupScore += 200;
+                else if (groupId === 'linux-appimage' || groupId === 'linux-flatpak') groupScore += 100;
+            } else {
+                if (groupId === 'windows') groupScore = 9000;
+                else if (groupId === 'mac') groupScore = 8000;
+                else if (groupId === 'linux-deb') groupScore = 7000;
+                else if (groupId === 'linux-rpm') groupScore = 6000;
+                else if (groupId === 'linux-appimage') groupScore = 5200;
+                else if (groupId === 'linux-flatpak') groupScore = 5000;
+                else if (groupId === 'linux-arch') groupScore = 4500;
+                else if (groupId === 'linux-other') groupScore = 4000;
+                else if (groupId === 'android') groupScore = 3500;
+                else if (groupId === 'ios') groupScore = 3000;
+                else if (groupId === 'other') groupScore = 2000;
+                else if (groupId === 'meta') groupScore = -1000;
+                else if (groupId === 'source') groupScore = -2000;
+            }
+
+            // 架构匹配：用户所选架构权重最高，远超兜底默认偏好
+            const fileArch = this.parseFileArch(fileName);
+            if (fileArch === currentArch) innerScore += 500;
+            else if (fileArch === 'universal') innerScore += 60;
+            else if (fileArch === 'x86_64') innerScore += 50;
+            else if (fileArch === 'arm64') innerScore += 20;
+            else if (fileArch === 'x86') innerScore += 10;
+            else if (fileArch === 'arm32') innerScore += 5;
+
+            if (name.endsWith('.exe') || name.endsWith('.dmg') || name.endsWith('.appimage') || name.endsWith('.flatpak') || name.endsWith('.apk')) innerScore += 10;
+            if (name.endsWith('.zip') || name.endsWith('.7z')) innerScore += 5;
+
+            return groupScore + innerScore;
+        },
+
+        isAuxiliaryFile(name) {
+            const n = String(name).toLowerCase();
+            if (/\.sha\d*sum$/.test(n)) return true;
+            if (/\.md5sum$/.test(n)) return true;
+            if (/\.checksums?$/.test(n)) return true;
+            if (/\.sums$/.test(n)) return true;
+            if (/\.(bsdiff|delta|patch)$/.test(n)) return true;
+            return false;
+        },
+
+        getFileNameFromLink(link) {
+            const href = link.getAttribute('href');
+            if (href) {
+                const seg = decodeURIComponent(href.split('/').pop().split('?')[0]);
+                if (seg) return seg;
+            }
+            const span = link.querySelector('.Truncate-text');
+            return span ? span.textContent.trim() : link.textContent.trim();
+        },
+
+        getRepoInfo() {
+            const parts = location.pathname.split('/').filter(Boolean);
+            if (parts.length >= 2) return { owner: parts[0], repo: parts[1] };
+            return null;
+        },
+
+        formatCount(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm';
+            if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+            return String(num);
+        }
+    };
+
 
     /* ======================================================================
      * L3 · NETWORK —— Promise 化的 GM_xmlhttpRequest + 多源节点 + 并发测速
@@ -809,6 +1014,422 @@
             setInterval(() => this.schedule(), INJECT_INTERVAL);
         }
     };
+    /* ======================================================================
+     * L5-c · CAPABILITY —— Enhancer：Release 增强显示
+     *   来源：github增强显示.js（caolib）核心能力，合理化集成。
+     *   四大能力（均可独立开关，持久化于 Settings.enhance）：
+     *     groupSort        文件按平台分组、按当前系统/架构排序、推荐最可能安装包
+     *     downloadCount    通过 GitHub API 显示各文件下载量
+     *     replaceTime      相对时间 → 精确时间
+     *     collapsibleNotes 更新日志可折叠
+     *   主动排除与原脚本冲突/冗余的部分：代理下拉（依赖 XIU2 脚本）、回到顶部按钮。
+     *   纯计算在 L2-b（Arch.*），本层只做 DOM 编排与数据获取。
+     * ==================================================================== */
+
+    const Enhancer = {
+        _os: null,           // 用户手动覆盖的 OS
+        _arch: null,         // 用户手动覆盖的架构
+        _boxes: [],          // 已登记处理的 release details
+        _scanTimer: null,
+
+        active(key) { return !!Settings.get().enhance[key]; },
+
+        /* ---- 页面级扫描：releases 页做分组/下载量；全局做时间/日志 ---- */
+        scan() {
+            if (this.active('replaceTime')) this.replaceTimes();
+            if (this.active('collapsibleNotes')) this.processNotes();
+
+            if (!/^\/[^\/]+\/[^\/]+\/releases/.test(location.pathname)) return;
+            const repo = Arch.getRepoInfo();
+            if (!repo) return;
+            if (!(this.active('groupSort') || this.active('downloadCount'))) return;
+
+            document.querySelectorAll('details').forEach((details) => {
+                const summary = details.querySelector('summary');
+                if (summary && /Assets/i.test(summary.textContent)) {
+                    const tag = this.findTagName(details);
+                    if (tag) this.processBox(details, repo, tag);
+                }
+            });
+        },
+
+        init() {
+            this.scan();
+            let lastHref = location.href;
+            const mo = new MutationObserver((records) => {
+                if (location.href !== lastHref) { lastHref = location.href; this.scan(); return; }
+                const relevant = records.some((m) => {
+                    for (const n of m.addedNodes) {
+                        if (n.nodeType !== 1) continue;
+                        const h = (n.outerHTML || '').toLowerCase();
+                        if (h.includes('releases/download') || h.includes('relative-time') ||
+                            h.includes('markdown-body') || h.includes('assets') || h.includes('release')) return true;
+                    }
+                    return false;
+                });
+                if (relevant) {
+                    clearTimeout(this._scanTimer);
+                    this._scanTimer = setTimeout(() => this.scan(), 350);
+                }
+            });
+            mo.observe(document.body, { childList: true, subtree: true });
+            document.addEventListener('turbo:load', () => this.scan());
+            document.addEventListener('pjax:end', () => this.scan());
+        },
+
+        /* ---- 相对时间替换（兼容 Shadow DOM 与实际渲染层） ---- */
+        replaceTimes() {
+            document.querySelectorAll('relative-time:not([data-gh-replaced])').forEach((el) => {
+                const dt = el.getAttribute('datetime');
+                if (!dt) return;
+                const d = new Date(dt);
+                if (isNaN(d.getTime())) return;
+                const pad = (n) => String(n).padStart(2, '0');
+                const s = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+                          pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+                el.setAttribute('data-gh-replaced', '1');
+                if (el.shadowRoot) el.shadowRoot.textContent = s;
+                el.textContent = s;
+                el.style.cssText = 'font-variant-numeric: tabular-nums;';
+            });
+        },
+
+        /* ---- 更新日志手动折叠（默认展开） ---- */
+        processNotes() {
+            document.querySelectorAll('.markdown-body.tmp-my-3:not(.gh-notes-processed)').forEach((el) => {
+                el.classList.add('gh-notes-processed');
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'gh-notes-toggle';
+                btn.innerHTML = '<span class="gh-notes-chevron"></span>更新日志';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const collapsed = el.classList.toggle('gh-notes-collapsed');
+                    btn.classList.toggle('is-collapsed', collapsed);
+                });
+                el.parentNode.insertBefore(btn, el);
+            });
+        },
+
+        findTagName(details) {
+            const m = location.pathname.match(/\/releases\/tag\/([^/?]+)/);
+            if (m) return decodeURIComponent(m[1]);
+            const box = details.closest('section, .Box, .js-details-container, div[data-test-selector="release-card"]');
+            if (box) {
+                const link = box.querySelector('a[href*="/releases/tag/"]');
+                if (link) {
+                    const mm = link.getAttribute('href').match(/\/releases\/tag\/([^/?]+)/);
+                    if (mm) return decodeURIComponent(mm[1]);
+                }
+            }
+            return null;
+        },
+
+        /* ---- 处理单个 release 折叠块（幂等：首次登记监听，之后每次按需重排/重注控件） ---- */
+        processBox(details, repo, tag) {
+            const first = details.dataset.ghBox !== '1';
+            details.dataset.ghBox = '1';
+
+            if (first) {
+                this._boxes.push(details);
+                details.addEventListener('toggle', () => {
+                    if (details.open && this.active('groupSort')) this.formatAndSort(details);
+                });
+                const mo = new MutationObserver(() => {
+                    if (details.open && this.active('groupSort')) this.formatAndSort(details);
+                    if (details._assets) this.injectCounts(details, details._assets);
+                });
+                mo.observe(details, { childList: true, subtree: true });
+            }
+
+            this.injectControls(details, repo, tag);
+            if (details.open && this.active('groupSort')) this.formatAndSort(details);
+            if (details._assets) this.injectCounts(details, details._assets);
+        },
+
+        /* ---- 注入/移除摘要区的控件（按开关实时生效，可关闭即移除） ---- */
+        injectControls(details, repo, tag) {
+            const summary = details.querySelector('summary');
+            const titleSpan = summary ? (summary.querySelector('.d-inline-flex.flex-items-center') || summary) : null;
+            if (!titleSpan) return;
+            const dlBtn = titleSpan.querySelector('.gh-fetch-dl-btn');
+
+            // 下载量按钮
+            if (this.active('downloadCount') && !summary.dataset.ghDlBtn) {
+                summary.dataset.ghDlBtn = '1';
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'Button Button--secondary Button--small ml-3 gh-fetch-dl-btn';
+                btn.innerHTML = '<span class="Button-content"><span class="Button-label">显示下载量</span></span>';
+                btn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (details.dataset.ghFetching === '1') return;
+                    const refresh = !!details._assets;
+                    btn.querySelector('.Button-label').textContent = '获取中…';
+                    btn.disabled = true;
+                    this.fetchCounts(repo, tag).then((assets) => {
+                        details._assets = assets;
+                        this.injectCounts(details, assets);
+                        btn.querySelector('.Button-label').textContent = '刷新下载量';
+                        btn.disabled = false;
+                    }).catch(() => {
+                        btn.querySelector('.Button-label').textContent = '获取失败(限流)';
+                        btn.disabled = false;
+                    });
+                });
+                titleSpan.appendChild(btn);
+                if (details._assets) this.injectCounts(details, details._assets);
+            } else if (!this.active('downloadCount')) {
+                if (dlBtn) { dlBtn.remove(); summary.dataset.ghDlBtn = ''; }
+                // 同时清掉已注入的计数
+                details.querySelectorAll('.gh-dl-count').forEach((el) => el.remove());
+            }
+
+            // OS / 架构 下拉 + 架构说明（与 groupSort 绑定）
+            if (this.active('groupSort')) {
+                if (!summary.dataset.ghOsSel) {
+                    summary.dataset.ghOsSel = '1';
+                    const sel = document.createElement('select');
+                    sel.className = 'gh-os-select';
+                    const cur = Arch.getCurrentOS();
+                    Arch.OS_OPTIONS.forEach((o) => {
+                        const opt = document.createElement('option');
+                        opt.value = o.value; opt.textContent = o.label;
+                        if (o.value === (this._os || cur)) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                    sel.addEventListener('click', (e) => e.stopPropagation());
+                    sel.addEventListener('mousedown', (e) => e.stopPropagation());
+                    sel.addEventListener('change', () => {
+                        this._os = sel.value;
+                        document.querySelectorAll('.gh-os-select').forEach((s) => { s.value = this._os; });
+                        this._boxes.forEach((d) => { if (this.active('groupSort')) this.formatAndSort(d); });
+                    });
+                    titleSpan.appendChild(sel);
+                }
+                if (!summary.dataset.ghArchSel) {
+                    summary.dataset.ghArchSel = '1';
+                    const sel = document.createElement('select');
+                    sel.className = 'gh-arch-select';
+                    const cur = Arch.getCurrentArch();
+                    Arch.ARCH_OPTIONS.forEach((o) => {
+                        const opt = document.createElement('option');
+                        opt.value = o.value; opt.textContent = o.label;
+                        if (o.value === (this._arch || cur)) opt.selected = true;
+                        sel.appendChild(opt);
+                    });
+                    sel.addEventListener('click', (e) => e.stopPropagation());
+                    sel.addEventListener('mousedown', (e) => e.stopPropagation());
+                    sel.addEventListener('change', () => {
+                        this._arch = sel.value;
+                        document.querySelectorAll('.gh-arch-select').forEach((s) => { s.value = this._arch; });
+                        this._boxes.forEach((d) => { if (this.active('groupSort')) this.formatAndSort(d); });
+                    });
+                    titleSpan.appendChild(sel);
+
+                    const help = document.createElement('button');
+                    help.type = 'button';
+                    help.className = 'gh-arch-help-btn';
+                    help.textContent = '?';
+                    help.title = '架构说明';
+                    help.addEventListener('mousedown', (e) => e.stopPropagation());
+                    help.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); this.showArchHelp(); });
+                    titleSpan.appendChild(help);
+                }
+            } else {
+                const os = titleSpan.querySelector('.gh-os-select');
+                if (os) { os.remove(); summary.dataset.ghOsSel = ''; }
+                const arch = titleSpan.querySelector('.gh-arch-select');
+                if (arch) { arch.remove(); summary.dataset.ghArchSel = ''; }
+                const help = titleSpan.querySelector('.gh-arch-help-btn');
+                if (help) help.remove();
+            }
+        },
+
+        /* ---- 分组排序核心 ---- */
+        formatAndSort(details) {
+            const rows = Array.from(details.querySelectorAll('li')).filter((r) =>
+                r.querySelector('a[href*="/releases/download/"], a[href*="/archive/"], a[href*="/attestations/"]'));
+            if (!rows.length) return;
+
+            const parent = rows[0].parentNode;
+            const os = this._os || Arch.getCurrentOS();
+            const arch = this._arch || Arch.getCurrentArch();
+
+            // 幂等签名：行数 或 用户所选 OS/架构 任一变化才重排，避免 MutationObserver 死循环，
+            // 同时保证切换 OS/架构下拉时文件顺序会真正重新排序（仅比较行数会导致切换失效）。
+            const sig = os + '|' + arch + '|' + rows.length;
+            if (details.dataset.ghSortSig === sig) return;
+            details.dataset.ghSortSig = sig;
+
+            rows.forEach((row) => {
+                const link = row.querySelector('a[href*="/releases/download/"], a[href*="/archive/"], a[href*="/attestations/"]');
+                let group = { id: 'other', showTag: false };
+                let score = -10000;
+                if (link) {
+                    const href = link.getAttribute('href') || '';
+                    const fn = Arch.getFileNameFromLink(link);
+                    group = href.includes('/archive/') ? { id: 'source', showTag: false }
+                        : href.includes('/attestations/') ? { id: 'meta', showTag: false }
+                        : Arch.parseFileGroup(fn);
+                    score = Arch.calculateMatchScore(fn, os, group.id, arch);
+                }
+                row.dataset.matchScore = String(score);
+                row._group = group;
+                row._link = link;
+            });
+
+            rows.forEach((r) => r.remove());
+            parent.querySelectorAll('.gh-meta-files-wrapper, .gh-group-aux-wrapper').forEach((w) => w.remove());
+            rows.sort((a, b) => parseInt(b.dataset.matchScore) - parseInt(a.dataset.matchScore));
+
+            const normal = rows.filter((r) => r._group.id !== 'meta');
+            const meta = rows.filter((r) => r._group.id === 'meta');
+
+            const styleRow = (row) => {
+                row.style.borderTop = '';
+                row.style.borderLeft = '';
+                row.style.backgroundColor = '';
+                row.className = row.className.replace(/gh-group-\S+/g, '');
+                row.classList.add(Arch.getGroupClass(row._group.id));
+
+                let mc = row.querySelector('.gh-meta-container');
+                if (!mc) {
+                    mc = document.createElement('div');
+                    mc.className = 'gh-meta-container d-flex flex-items-center flex-shrink-0 mr-3';
+                    const right = row.querySelector('.col-md-6') || row.querySelector('.flex-auto.flex-justify-end');
+                    const sha = right ? right.querySelector('.flex-1') : null;
+                    if (sha) sha.insertBefore(mc, sha.firstChild);
+                    else if (right) right.insertBefore(mc, right.firstChild);
+                    else { const left = row.querySelector('.col-lg-6'); if (left) left.appendChild(mc); else row.appendChild(mc); }
+                }
+                row.querySelectorAll('.gh-platform-tag').forEach((t) => t.remove());
+                if (row._group.showTag) {
+                    const tag = document.createElement('span');
+                    tag.className = 'Label gh-platform-tag ' + Arch.getTagClass(row._group.id) + ' mr-2';
+                    tag.textContent = row._group.name;
+                    mc.appendChild(tag);
+                }
+            };
+
+            let gid = null, seg = [];
+            const flush = () => {
+                if (!seg.length) return;
+                const g = seg[0]._group.id;
+                const main = [], aux = [];
+                seg.forEach((r) => {
+                    const n = r._link ? Arch.getFileNameFromLink(r._link) : '';
+                    (Arch.isAuxiliaryFile(n) ? aux : main).push(r);
+                });
+                main.forEach((r) => { parent.appendChild(r); styleRow(r); });
+                if (aux.length) {
+                    const w = document.createElement('details');
+                    w.className = 'gh-group-aux-wrapper ' + Arch.getGroupClass(g);
+                    const s = document.createElement('summary');
+                    s.textContent = '校验/增量文件 (' + aux.length + ')';
+                    w.appendChild(s);
+                    aux.forEach((r) => { w.appendChild(r); styleRow(r); });
+                    parent.appendChild(w);
+                }
+                seg = [];
+            };
+            normal.forEach((r) => { if (r._group.id !== gid) flush(); gid = r._group.id; seg.push(r); });
+            flush();
+
+            if (meta.length) {
+                const w = document.createElement('details');
+                w.className = 'gh-meta-files-wrapper';
+                const s = document.createElement('summary');
+                s.textContent = '签名 / 校验文件 (' + meta.length + ')';
+                w.appendChild(s);
+                meta.forEach((r) => { w.appendChild(r); styleRow(r); });
+                parent.appendChild(w);
+            }
+
+            const showAll = Array.from(parent.children).find((c) =>
+                !c.querySelector('a[href*="/releases/download/"], a[href*="/archive/"]') &&
+                !c.classList.contains('gh-meta-files-wrapper') &&
+                !c.classList.contains('gh-group-aux-wrapper') &&
+                /show all/i.test(c.textContent));
+            if (showAll) parent.appendChild(showAll);
+        },
+
+        /* ---- 下载量：GitHub API ---- */
+        async fetchCounts(repo, tag) {
+            const res = await gmRequest({
+                url: 'https://api.github.com/repos/' + repo.owner + '/' + repo.repo + '/releases/tags/' + encodeURIComponent(tag),
+                headers: { 'Accept': 'application/vnd.github+json', 'User-Agent': 'GitHub-Boost-Helper/1.0.0' },
+                timeout: 12000
+            });
+            const data = typeof res.response === 'string' ? JSON.parse(res.response) : res.response;
+            return data.assets || [];
+        },
+
+        injectCounts(details, assets) {
+            if (!assets) return;
+            const rows = Array.from(details.querySelectorAll('li')).filter((r) =>
+                r.querySelector('a[href*="/releases/download/"], a[href*="/archive/"]'));
+            rows.forEach((row) => {
+                const link = row.querySelector('a[href*="/releases/download/"], a[href*="/archive/"]');
+                if (!link) return;
+                const fn = Arch.getFileNameFromLink(link);
+                const asset = assets.find((a) => a.name === fn);
+                if (asset && !row.querySelector('.gh-dl-count')) {
+                    const span = document.createElement('span');
+                    span.className = 'color-fg-muted flex-shrink-0 d-flex flex-items-center mr-2 gh-dl-count';
+                    span.style.whiteSpace = 'nowrap';
+                    span.innerHTML =
+                        '<svg aria-hidden="true" height="16" viewBox="0 0 16 16" version="1.1" width="16" data-view-component="true" class="octicon octicon-download mr-1" style="flex-shrink:0;min-width:16px;">' +
+                        '<path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"></path>' +
+                        '<path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"></path>' +
+                        '</svg><span>' + Arch.formatCount(asset.download_count) + '</span>';
+                    let mc = row.querySelector('.gh-meta-container');
+                    if (!mc) {
+                        mc = document.createElement('div');
+                        mc.className = 'gh-meta-container d-flex flex-items-center flex-shrink-0 mr-3';
+                        const right = row.querySelector('.col-md-6') || row.querySelector('.flex-auto.flex-justify-end');
+                        const sha = right ? right.querySelector('.flex-1') : null;
+                        if (sha) sha.insertBefore(mc, sha.firstChild);
+                        else if (right) right.insertBefore(mc, right.firstChild);
+                        else row.appendChild(mc);
+                    }
+                    mc.appendChild(span);
+                }
+            });
+        },
+
+        /* ---- 架构说明弹窗（全局复用） ---- */
+        _archModal: null,
+        showArchHelp() {
+            if (!this._archModal) {
+                const overlay = document.createElement('div');
+                overlay.className = 'gh-arch-help-overlay';
+                overlay.innerHTML =
+                    '<div class="gh-arch-help-modal">' +
+                    '  <button type="button" class="gh-arch-help-close" aria-label="关闭">×</button>' +
+                    '  <h3>设备架构说明</h3>' +
+                    '  <p class="gh-arch-help-tip">架构指 CPU 指令集架构(ISA)，决定软件能否运行，不同架构一般不兼容。</p>' +
+                    '  <table>' +
+                    '    <thead><tr><th>架构</th><th>别名</th><th>常见设备</th><th>说明</th></tr></thead>' +
+                    '    <tbody>' +
+                    '      <tr><td><strong>x86</strong></td><td>i386、i686、32 位</td><td>老电脑、旧工控机</td><td>Intel/AMD 32 位，已逐渐淘汰</td></tr>' +
+                    '      <tr><td><strong>x86_64</strong></td><td>amd64、x64</td><td>大多数 Windows/Linux PC</td><td>桌面与服务器最常见</td></tr>' +
+                    '      <tr><td><strong>ARM32</strong></td><td>armv7、armeabi-v7a</td><td>老安卓手机、树莓派早期</td><td>32 位 ARM</td></tr>' +
+                    '      <tr><td><strong>ARM64</strong></td><td>aarch64、arm64</td><td>新安卓手机、Apple Silicon、树莓派 3/4/5</td><td>移动设备主流</td></tr>' +
+                    '    </tbody>' +
+                    '  </table>' +
+                    '</div>';
+                overlay.querySelector('.gh-arch-help-close').addEventListener('click', () => { overlay.style.display = 'none'; });
+                overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+                overlay.style.display = 'none';
+                document.body.appendChild(overlay);
+                this._archModal = overlay;
+            }
+            this._archModal.style.display = 'flex';
+        }
+    };
+
 
     /* ======================================================================
      * L6 · VIEW —— 样式表 / 启动器 / 面板 / 下载弹窗 / Toast
@@ -1055,6 +1676,113 @@ html[data-color-mode="light"]{
 .ghb-toast.ghb-info{background:#1f6feb;}
 .ghb-toast.ghb-ok{background:var(--ghb-good);}
 .ghb-toast.ghb-warn{background:#9e6a03;}
+
+    /* ---------- 增强显示：Release 分组 / 平台标签 / OS·架构下拉 / 折叠 / 架构说明 ---------- */
+    .gh-group-win { border-left: 4px solid var(--color-accent-emphasis, #1f6feb) !important; background-color: var(--color-accent-subtle, rgba(56,139,253,0.1)) !important; }
+    .gh-group-win:hover { background-color: var(--color-accent-muted, rgba(56,139,253,0.15)) !important; }
+    .gh-group-win a[href*="/releases/download/"], .gh-group-win a[href*="/archive/"] { color: var(--color-accent-emphasis, #1f6feb) !important; }
+
+    .gh-group-mac { border-left: 4px solid var(--color-done-emphasis, #8957e5) !important; background-color: var(--color-done-subtle, rgba(137,87,229,0.1)) !important; }
+    .gh-group-mac:hover { background-color: var(--color-done-muted, rgba(137,87,229,0.15)) !important; }
+    .gh-group-mac a[href*="/releases/download/"], .gh-group-mac a[href*="/archive/"] { color: var(--color-done-emphasis, #8957e5) !important; }
+
+    .gh-group-mobile { border-left: 4px solid #e3b341 !important; background-color: rgba(227,179,65,0.12) !important; }
+    .gh-group-mobile:hover { background-color: rgba(227,179,65,0.18) !important; }
+    .gh-group-mobile a[href*="/releases/download/"], .gh-group-mobile a[href*="/archive/"] { color: #e3b341 !important; }
+
+    .gh-group-linux-rpm { border-left: 4px solid var(--color-danger-emphasis, #f85149) !important; background-color: var(--color-danger-subtle, rgba(248,81,73,0.1)) !important; }
+    .gh-group-linux-rpm:hover { background-color: var(--color-danger-muted, rgba(248,81,73,0.15)) !important; }
+    .gh-group-linux-rpm a[href*="/releases/download/"], .gh-group-linux-rpm a[href*="/archive/"] { color: var(--color-danger-emphasis, #f85149) !important; }
+
+    .gh-group-linux-deb { border-left: 4px solid var(--color-severe-emphasis, #db6d28) !important; background-color: var(--color-severe-subtle, rgba(219,109,40,0.1)) !important; }
+    .gh-group-linux-deb:hover { background-color: var(--color-severe-muted, rgba(219,109,40,0.15)) !important; }
+    .gh-group-linux-deb a[href*="/releases/download/"], .gh-group-linux-deb a[href*="/archive/"] { color: var(--color-severe-emphasis, #db6d28) !important; }
+
+    .gh-group-linux-arch { border-left: 4px solid var(--color-sponsors-emphasis, #bf4b8a) !important; background-color: var(--color-sponsors-subtle, rgba(191,75,138,0.1)) !important; }
+    .gh-group-linux-arch:hover { background-color: var(--color-sponsors-muted, rgba(191,75,138,0.15)) !important; }
+    .gh-group-linux-arch a[href*="/releases/download/"], .gh-group-linux-arch a[href*="/archive/"] { color: var(--color-sponsors-emphasis, #bf4b8a) !important; }
+
+    .gh-group-linux-appimage { border-left: 4px solid #20c997 !important; background-color: rgba(32,201,151,0.1) !important; }
+    .gh-group-linux-appimage:hover { background-color: rgba(32,201,151,0.15) !important; }
+    .gh-group-linux-appimage a[href*="/releases/download/"], .gh-group-linux-appimage a[href*="/archive/"] { color: #20c997 !important; }
+
+    .gh-group-linux-flatpak { border-left: 4px solid #0abda0 !important; background-color: rgba(10,189,160,0.1) !important; }
+    .gh-group-linux-flatpak:hover { background-color: rgba(10,189,160,0.15) !important; }
+    .gh-group-linux-flatpak a[href*="/releases/download/"], .gh-group-linux-flatpak a[href*="/archive/"] { color: #0abda0 !important; }
+
+    .gh-group-linux-other { border-left: 4px solid var(--color-attention-emphasis, #9e6a03) !important; background-color: var(--color-attention-subtle, rgba(210,153,34,0.1)) !important; }
+    .gh-group-linux-other:hover { background-color: var(--color-attention-muted, rgba(210,153,34,0.15)) !important; }
+    .gh-group-linux-other a[href*="/releases/download/"], .gh-group-linux-other a[href*="/archive/"] { color: var(--color-attention-emphasis, #9e6a03) !important; }
+
+    .gh-group-other { border-left: 4px solid transparent !important; }
+
+    .gh-platform-tag { background-color: transparent !important; }
+    .gh-platform-tag.gh-tag-win { color: var(--color-accent-emphasis, #1f6feb) !important; border-color: var(--color-accent-emphasis, #1f6feb) !important; }
+    .gh-platform-tag.gh-tag-mac { color: var(--color-done-emphasis, #8957e5) !important; border-color: var(--color-done-emphasis, #8957e5) !important; }
+    .gh-platform-tag.gh-tag-mobile { color: #e3b341 !important; border-color: #e3b341 !important; }
+    .gh-platform-tag.gh-tag-linux-rpm { color: var(--color-danger-emphasis, #f85149) !important; border-color: var(--color-danger-emphasis, #f85149) !important; }
+    .gh-platform-tag.gh-tag-linux-deb { color: var(--color-severe-emphasis, #db6d28) !important; border-color: var(--color-severe-emphasis, #db6d28) !important; }
+    .gh-platform-tag.gh-tag-linux-arch { color: var(--color-sponsors-emphasis, #bf4b8a) !important; border-color: var(--color-sponsors-emphasis, #bf4b8a) !important; }
+    .gh-platform-tag.gh-tag-linux-appimage { color: #20c997 !important; border-color: #20c997 !important; }
+    .gh-platform-tag.gh-tag-linux-flatpak { color: #0abda0 !important; border-color: #0abda0 !important; }
+    .gh-platform-tag.gh-tag-linux-other { color: var(--color-attention-emphasis, #9e6a03) !important; border-color: var(--color-attention-emphasis, #9e6a03) !important; }
+
+    .gh-os-select, .gh-arch-select {
+      appearance: auto; cursor: pointer; font-size: 12px; font-weight: 500; line-height: 20px;
+      padding: 3px 8px; margin-left: 8px;
+      background-color: var(--button-default-bgColor-rest, var(--color-btn-bg, #21262d));
+      border: 1px solid var(--button-default-borderColor-rest, var(--color-btn-border, rgba(240,246,252,0.1)));
+      border-radius: 6px; color: var(--button-default-fgColor-rest, var(--color-btn-text, #c9d1d9));
+    }
+    .gh-os-select:hover, .gh-arch-select:hover {
+      background-color: var(--button-default-bgColor-hover, var(--color-btn-hover-bg, #30363d));
+      border-color: var(--button-default-borderColor-hover, var(--color-btn-hover-border, rgba(240,246,252,0.3)));
+    }
+
+    .gh-meta-files-wrapper > summary, .gh-group-aux-wrapper > summary {
+      cursor: pointer; padding: 8px 16px; font-size: 12px; color: var(--fgColor-muted, var(--color-fg-muted, #8b949e));
+      border-top: 1px solid var(--borderColor-muted, var(--color-border-muted, #30363d));
+    }
+    .gh-meta-files-wrapper > summary:hover, .gh-group-aux-wrapper > summary:hover { color: var(--fgColor-default, var(--color-fg-default, #e6edf3)); }
+    .gh-group-aux-wrapper > li { border-left: none !important; background-color: transparent !important; }
+
+    .gh-notes-toggle {
+      appearance: none; background: none; border: none; padding: 0; margin: 0 0 8px;
+      display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+      color: var(--fgColor-muted, var(--color-fg-muted, #8b949e)); font-size: 14px; font-weight: 600;
+    }
+    .gh-notes-toggle:hover { color: var(--fgColor-default, var(--color-fg-default, #e6edf3)); }
+    .markdown-body.gh-notes-collapsed { display: none !important; }
+    .gh-notes-chevron { display: inline-block; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid currentColor; transition: transform 0.12s ease; transform-origin: 50% 40%; }
+    .gh-notes-toggle.is-collapsed .gh-notes-chevron { transform: rotate(-90deg); }
+
+    .gh-arch-help-btn {
+      appearance: none; width: 22px; height: 22px; line-height: 1; padding: 0; margin-left: 4px; flex-shrink: 0;
+      display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 12px; font-weight: 600;
+      background-color: var(--button-default-bgColor-rest, var(--color-btn-bg, #21262d));
+      border: 1px solid var(--button-default-borderColor-rest, var(--color-btn-border, rgba(240,246,252,0.1)));
+      border-radius: 6px; color: var(--button-default-fgColor-rest, var(--color-btn-text, #c9d1d9));
+    }
+    .gh-arch-help-btn:hover { background-color: var(--button-default-bgColor-hover, var(--color-btn-hover-bg, #30363d)); border-color: var(--button-default-borderColor-hover, var(--color-btn-hover-border, rgba(240,246,252,0.3))); }
+
+    .gh-arch-help-overlay { position: fixed; inset: 0; z-index: 2147482999; background-color: rgba(1,4,9,0.6); display: flex; align-items: center; justify-content: center; }
+    .gh-arch-help-modal {
+      background-color: var(--color-canvas-default, #0d1117); border: 1px solid var(--color-border-default, #30363d);
+      border-radius: 8px; padding: 16px 20px; max-width: 92vw; max-height: 85vh; overflow: auto; position: relative;
+      box-shadow: var(--shadow-floating-large, 0 8px 24px rgba(0,0,0,0.4));
+    }
+    .gh-arch-help-modal h3 { margin: 0 0 8px; font-size: 16px; }
+    .gh-arch-help-tip { margin: 0 0 12px; font-size: 12px; color: var(--color-fg-muted, #8b949e); }
+    .gh-arch-help-modal table { border-collapse: collapse; width: 100%; font-size: 13px; }
+    .gh-arch-help-modal th, .gh-arch-help-modal td { border: 1px solid var(--color-border-default, #30363d); padding: 6px 10px; text-align: left; vertical-align: top; }
+    .gh-arch-help-modal th { background-color: var(--color-canvas-subtle, #161b22); font-weight: 600; }
+    .gh-arch-help-close {
+      position: absolute; top: 6px; right: 10px; background: none; border: none; color: var(--color-fg-muted, #8b949e);
+      cursor: pointer; font-size: 22px; line-height: 1; padding: 0;
+    }
+    .gh-arch-help-close:hover { color: var(--color-fg-default, #e6edf3); }
+    .gh-dl-count { font-size: 12px; }
+
 .ghb-toast.ghb-err{background:#b62324;}
 `;
 
@@ -1315,11 +2043,13 @@ html[data-color-mode="light"]{
                     '  <button class="ghb-tab" data-tab="nodes">节点</button>' +
                     '  <button class="ghb-tab" data-tab="inject">注入</button>' +
                     '  <button class="ghb-tab" data-tab="settings">设置</button>' +
+                    '  <button class="ghb-tab" data-tab="enhance">增强</button>' +
                     '</div>' +
                     '<div class="ghb-body">' +
                     '  <div class="ghb-page" id="ghb-page-nodes"></div>' +
                     '  <div class="ghb-page" id="ghb-page-inject"></div>' +
                     '  <div class="ghb-page" id="ghb-page-settings"></div>' +
+                    '  <div class="ghb-page" id="ghb-page-enhance"></div>' +
                     '</div>' +
                     '<div class="ghb-foot"><span>作者 ' + AUTHOR + '</span><span id="ghb-panel-count"></span></div>';
 
@@ -1330,6 +2060,7 @@ html[data-color-mode="light"]{
                 this.renderNodesPage();
                 this.renderInjectPage();
                 this.renderSettingsPage();
+                this.renderEnhancePage();
                 this.switch(Settings.get().lastTab || 'nodes');
             },
 
@@ -1350,6 +2081,7 @@ html[data-color-mode="light"]{
             refresh() {
                 this.renderNodesPage();
                 this.renderInjectPage();
+                this.renderEnhancePage();
                 this.renderSettingsPage();
             },
 
@@ -1586,7 +2318,40 @@ html[data-color-mode="light"]{
                     this.refresh();
                     View.Toast.ok('已恢复默认设置');
                 });
-            }
+            },
+            renderEnhancePage() {
+                const page = this.root.querySelector('#ghb-page-enhance');
+                if (!page) return;
+                const cfg = Settings.get().enhance;
+                const rows = [
+                    { key: 'groupSort', t: '文件分组排序', d: '按平台分组、按当前系统/架构排序，高亮最可能安装的包，并提供 OS / 架构手动切换' },
+                    { key: 'downloadCount', t: '显示下载量', d: '通过 GitHub API 显示每个 Release 文件的下载次数（受 API 限流影响）' },
+                    { key: 'replaceTime', t: '相对时间转精确时间', d: '将「2 days ago」替换为「YYYY-MM-DD HH:MM:SS」' },
+                    { key: 'collapsibleNotes', t: '更新日志可折叠', d: '给 Release 更新日志增加折叠开关，默认展开' }
+                ];
+                page.innerHTML =
+                    '<div class="ghb-hint">增强显示能力来自社区脚本，已合理化集成。改动即时生效，部分需刷新页面。</div>' +
+                    rows.map((r) =>
+                        '<div class="ghb-setting">' +
+                        '  <label class="ghb-label" for="ghb-e-' + r.key + '">' +
+                        '    <span class="ghb-lt">' + Utils.esc(r.t) + '</span>' +
+                        '    <span class="ghb-ld">' + Utils.esc(r.d) + '</span>' +
+                        '  </label>' +
+                        '  <span class="ghb-switch"><input type="checkbox" id="ghb-e-' + r.key + '" data-key="' + r.key + '"' +
+                                (cfg[r.key] ? ' checked' : '') + '><i></i></span>' +
+                        '</div>').join('');
+
+                page.querySelectorAll('.ghb-switch input').forEach((cb) => {
+                    cb.addEventListener('change', () => {
+                        const key = cb.dataset.key;
+                        Settings.get().enhance[key] = cb.checked;
+                        Store.write(K.settings, Settings.get());
+                        View.Toast.info((cb.checked ? '已开启「' : '已关闭「') + (rows.find((x) => x.key === key).t) + '」');
+                        Enhancer.scan();
+                    });
+                });
+            },
+
         },
 
         /* ---------- 下载弹窗 ---------- */
@@ -1705,6 +2470,15 @@ html[data-color-mode="light"]{
      * L7 · BOOTSTRAP
      * ==================================================================== */
 
+    function toggleEnhance(key, label) {
+        const s = Settings.get();
+        const next = !s.enhance[key];
+        s.enhance[key] = next;
+        Store.write(K.settings, s);
+        View.Toast.info('「' + label + '」已' + (next ? '启用' : '禁用') + '，刷新页面后生效');
+        Enhancer.scan();
+    }
+
     function registerMenu() {
         const items = [
             ['打开加速面板', () => { if (!View.Panel.open) View.Panel.toggle(); }],
@@ -1719,7 +2493,11 @@ html[data-color-mode="light"]{
                 resetAll();
                 View.restoreLauncherPos();
                 View.Toast.ok('已重置，刷新页面后生效');
-            }]
+            }],
+            ['★ 增强：分组排序', () => toggleEnhance('groupSort', '文件分组排序')],
+            ['★ 增强：下载量', () => toggleEnhance('downloadCount', '显示下载量')],
+            ['★ 增强：精确时间', () => toggleEnhance('replaceTime', '相对时间替换')],
+            ['★ 增强：折叠日志', () => toggleEnhance('collapsibleNotes', '更新日志折叠')],
         ];
         if (typeof GM_registerMenuCommand === 'function') {
             items.forEach(([label, fn]) => GM_registerMenuCommand(label, fn));
@@ -1750,6 +2528,7 @@ html[data-color-mode="light"]{
 
         registerMenu();
         if (Settings.get().showPageButtons) Injector.start();
+        Enhancer.init();
 
         if (NodeStore.isStale() && Settings.get().refreshOnStart) {
             loadNodes('启动');
