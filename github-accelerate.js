@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.0.3
+// @version      0.0.4
 // @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
