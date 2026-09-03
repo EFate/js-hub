@@ -590,11 +590,15 @@
     }
 
     /* ======================================================================
-     * L5-a · CAPABILITY —— Downloader：直链交付 + 镜像轮转
+     * L5-a · CAPABILITY —— Downloader：只管「发射」，不接管下载
      *
-     * 本脚本不接管下载：只负责挑一个活着的镜像，
-     * 把拼好的直链通过原生 a[download] 点击交给浏览器。
-     * 这条通道正是 Gopeed / IDM 等下载工具拦截的入口，工具可正常接管。
+     * 职责边界：
+     *   脚本（本层）：挑选镜像 → HEAD 预检 → 原生 a[download] 点击
+     *   浏览器原生通道：把下载事件交给默认下载器 或 Gopeed 浏览器扩展
+     *   Gopeed 扩展：通过 chrome.downloads 事件监听原生下载并拦截
+     *
+     * 脚本一旦走 GM_download / blob / objectURL 中转，就绕开了原生下载事件，
+     * Gopeed 永远拦不到——所以这里只有 clickAnchor 一条路径。
      * 镜像可用性靠 HEAD 预检判断：失败记入健康度并自动换下一个。
      * ==================================================================== */
 
@@ -605,9 +609,9 @@
     }
 
     /**
-     * 通过原生 <a download> 触发浏览器下载。
-     * 关键点：Gopeed 之类的扩展拦截的是浏览器原生下载事件，
-     * 所以只要走这条通道，就一定会被接管到。
+     * 通过原生 <a download> 触发浏览器下载事件。
+     * 关键：Gopeed 浏览器扩展监听的就是这条原生事件——
+     * 因此脚本只此一条路径，不中转、不接字节，确保下载工具能正常接管。
      */
     function clickAnchor(href, filename) {
         const a = document.createElement('a');
@@ -631,18 +635,14 @@
     }
 
     const Downloader = {
-        /**
-         * 直链交付：本脚本不接管下载，只负责把拼好的镜像直链
-         * 通过 <a download> 原生点击交给浏览器——
-         * 这条通道正是 Gopeed / IDM 等下载工具拦截的入口，工具可正常接管。
-         */
+        /** 直链交付：原生 a[download] 点击，发射后即交还浏览器，脚本不再介入 */
         deliver(githubUrl, filename) {
             clickAnchor(githubUrl, filename);
         },
 
         /**
-         * 自动模式：候选镜像逐个 HEAD 预检，失败记入健康度并换下一个；
-         * 全部预检失败时，对最快节点直接放行一次（仍是原生通道，不拦截下载）。
+         * 自动模式：候选镜像逐个 HEAD 预检，失败换下一个；全部失败时对最快节点
+         * 直接放行一次（仍是 clickAnchor 原生通道，下载工具照样能接管）。
          * @returns Promise<{ok, nodeUrl?, blind?, size?, error?, trace:string[]}>
          */
         async runAuto(githubUrl, filename, hooks) {
@@ -711,8 +711,8 @@
         attach(container, link, scenario) {
             if (!container || !link || !link.href) return;
             if (container.querySelector(':scope > .ghb-dl-btn')) return;
+            // selector 已限定 github 域名（含 codeload.github.com），此处不再二次过滤
             const href = link.href;
-            if (!/github\.com|githubusercontent\.com/.test(href)) return;
             const name = scenario.name(link) || Utils.filenameFromUrl(href);
             container.appendChild(this.build(href, name));
         },
@@ -1131,7 +1131,9 @@ html[data-color-mode="light"]{
             const pos = Settings.get().launcherPos;
             const l = this.el.launcher;
             if (pos && pos.left && pos.top) {
+                // 必须把 right 置 auto，否则 CSS 的 right:0 会与 inline left 冲突导致贴右
                 l.style.transform = 'none';
+                l.style.right = 'auto';
                 l.style.left = pos.left;
                 l.style.top = pos.top;
             }
@@ -1151,7 +1153,7 @@ html[data-color-mode="light"]{
             if (cb) cb.checked = on;
         },
 
-        /** 统一下载入口：弹窗手选 或 全自动最快节点，由设置 askNode 决定 */
+        /** 统一下载入口：弹窗手选 / 全自动最快节点，由设置 askNode 决定（脚本不接管下载） */
         download(githubUrl, filename) {
             if (!githubUrl) { this.Toast.err('链接无效'); return; }
             const name = filename || Utils.filenameFromUrl(githubUrl);
