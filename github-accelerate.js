@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         GitHub 加速助手
 // @namespace    https://github.com/EFate
-// @version      0.0.2
+// @version      0.0.3
 // @description  GitHub 镜像加速下载：多源节点发现、并发测速、场景化下载按钮注入、直链交付（脚本不接管下载，兼容 Gopeed 等接管工具）。
 // @author       EFate
 // @license      MIT
+// @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
+// @downloadURL  https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
 // @icon         data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232da44e'/%3E%3Crect x='14.7' y='6.2' width='2.6' height='9.6' rx='1.3' fill='%23fff'/%3E%3Cpath d='M9.4 15.2h13.2l-6.6 6.8z' fill='%23fff'/%3E%3Crect x='9.2' y='22.4' width='13.6' height='2.5' rx='1.25' fill='%23fff' opacity='.85'/%3E%3Ccircle cx='24.5' cy='8' r='5.8' fill='%23000' opacity='.22'/%3E%3Cpath d='M25.7 4 22.4 8.9h2.1l-1.6 2.9 3-4.8h-1.9z' fill='%23fff'/%3E%3C/svg%3E
 // @match        *://github.com/*
 // @match        *://gist.github.com/*
@@ -34,7 +36,7 @@
  *   L3  NETWORK     gmRequest · 节点多源降级 · 并发测速
  *   L4  STATE       NodeStore（节点/可见集合/时间戳，变更即广播）
  *   L5  CAPABILITY  Downloader 直链交付（不接管下载） · Injector 规则表驱动
- *   L6  VIEW        Launcher(左中) · Panel(节点/注入/设置) · DlModal · Toast
+ *   L6  VIEW        Launcher(右中) · Panel(节点/注入/设置) · DlModal · Toast
  *   L7  BOOTSTRAP   装配与生命周期
  *
  */
@@ -496,7 +498,7 @@
 
         setNodes(list) {
             const prev = this.nodes;
-            this.nodes = Array.isArray(list) ? list.filter((n) => n && n.url) : [];
+            this.nodes = this.dedupe(list);
             if (this.nodes.length) {
                 this.updatedAt = Date.now();
                 Store.write(K.nodes, this.nodes);
@@ -508,6 +510,23 @@
                 this.nodes = prev;
             }
             this.emit();
+        },
+
+        /**
+         * 节点去重：两家接口会返回相同的代理地址，且可能带/不带尾斜杠。
+         * 以「去尾斜杠的 URL」为身份，重复时保留延迟更低的一条。
+         */
+        dedupe(list) {
+            const best = new Map();   // 归一化 URL → {url, latency}
+            for (const n of (Array.isArray(list) ? list : [])) {
+                if (!n || !n.url) continue;
+                const raw = String(n.url);
+                const key = raw.replace(/\/+$/, '');
+                const latency = Number(n.latency) || 0;
+                const old = best.get(key);
+                if (!old || latency < old.latency) best.set(key, { url: raw, latency });
+            }
+            return Array.from(best.values()).sort((a, b) => a.latency - b.latency);
         },
 
         setVisible(list) {
@@ -619,7 +638,6 @@
          */
         deliver(githubUrl, filename) {
             clickAnchor(githubUrl, filename);
-            return { ok: true, hint: '已交给浏览器下载' };
         },
 
         /**
@@ -694,7 +712,7 @@
             if (!container || !link || !link.href) return;
             if (container.querySelector(':scope > .ghb-dl-btn')) return;
             const href = link.href;
-            if (!/github\.com|githubusercontent\.com|codeload\.github\.com/.test(href)) return;
+            if (!/github\.com|githubusercontent\.com/.test(href)) return;
             const name = scenario.name(link) || Utils.filenameFromUrl(href);
             container.appendChild(this.build(href, name));
         },
@@ -776,10 +794,10 @@ html[data-color-mode="light"]{
 }
 .ghb-scope svg{width:1em;height:1em;fill:currentColor;flex:none;vertical-align:-.125em;}
 
-/* ---------- 启动器：左侧中部圆形按钮，可拖拽，不占右下角 ---------- */
+/* ---------- 启动器：右侧中部圆形按钮，可拖拽，默认贴右 ---------- */
 #ghb-launcher{
-  position:fixed; left:0; top:50%; transform:translateY(-50%);
-  margin-left:10px; z-index:2147483000;
+  position:fixed; right:0; top:50%; transform:translateY(-50%);
+  margin-right:10px; z-index:2147483000;
   width:44px; height:44px; padding:0;
   display:flex; align-items:center; justify-content:center;
   border:none; border-radius:50%;
@@ -1058,11 +1076,7 @@ html[data-color-mode="light"]{
                 '</div>';
             document.body.appendChild(dl);
 
-            const toasts = document.createElement('div');
-            toasts.id = 'ghb-toasts';
-            document.body.appendChild(toasts);
-
-            Object.assign(this.el, { launcher, overlay, panel, dl, toasts });
+            Object.assign(this.el, { launcher, overlay, panel, dl });
             this.applyTheme();
 
             const mo = new MutationObserver(() => this.applyTheme());
@@ -1086,6 +1100,7 @@ html[data-color-mode="light"]{
                     const dx = ev.clientX - sx, dy = ev.clientY - sy;
                     if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
                     moved = true;
+                    launcher.style.right = 'auto';
                     launcher.style.transform = 'none';
                     launcher.style.left = Math.max(0, Math.min(window.innerWidth - r.width, ox + dx)) + 'px';
                     launcher.style.top = Math.max(0, Math.min(window.innerHeight - r.height, oy + dy)) + 'px';
@@ -1138,8 +1153,8 @@ html[data-color-mode="light"]{
 
         /** 统一下载入口：弹窗手选 或 全自动最快节点，由设置 askNode 决定 */
         download(githubUrl, filename) {
-            const name = filename || Utils.filenameFromUrl(githubUrl);
             if (!githubUrl) { this.Toast.err('链接无效'); return; }
+            const name = filename || Utils.filenameFromUrl(githubUrl);
             if (Settings.get().askNode) this.DlModal.open(githubUrl, name);
             else this.autoDownload(githubUrl, name);
         },
@@ -1490,16 +1505,7 @@ html[data-color-mode="light"]{
                     View.Toast.info('侧边启动器已' + (e.target.checked ? '显示' : '隐藏'));
                 });
                 page.querySelector('#ghb-s-reset').addEventListener('click', () => {
-                    Settings.reset();
-                    Store.remove(K.nodes);
-                    Store.remove(K.visible);
-                    Store.remove(K.updatedAt);
-                    Store.remove(K.fails);
-                    NodeStore.nodes = [];
-                    NodeStore.visible = [];
-                    NodeStore.updatedAt = 0;
-                    NodeStore.fails = {};
-                    NodeStore.emit();
+                    resetAll();
                     View.restoreLauncherPos();
                     this.refresh();
                     View.Toast.ok('已恢复默认设置');
@@ -1627,18 +1633,23 @@ html[data-color-mode="light"]{
                 View.Toast.info('侧边启动器已' + (on ? '显示' : '隐藏'));
             }],
             ['重置全部设置', () => {
-                Settings.reset();
-                Store.remove(K.nodes);
-                Store.remove(K.visible);
-                Store.remove(K.updatedAt);
-                Store.remove(K.fails);
-                NodeStore.fails = {};
+                resetAll();
+                View.restoreLauncherPos();
                 View.Toast.ok('已重置，刷新页面后生效');
             }]
         ];
         if (typeof GM_registerMenuCommand === 'function') {
             items.forEach(([label, fn]) => GM_registerMenuCommand(label, fn));
         }
+    }
+
+    /** 清空全部持久化数据并恢复默认（油猴菜单与设置页共用，避免两处逻辑漂移） */
+    function resetAll() {
+        Settings.reset();
+        Store.remove(K.nodes); Store.remove(K.visible); Store.remove(K.updatedAt); Store.remove(K.fails);
+        NodeStore.nodes = []; NodeStore.visible = [];
+        NodeStore.updatedAt = 0; NodeStore.fails = {};
+        NodeStore.emit();
     }
 
     function bootstrap() {
