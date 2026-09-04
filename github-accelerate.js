@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.4.5
-// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底）、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
+// @version      1.5.0
+// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
 // @updateURL    https://gh-proxy.com/https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
@@ -33,15 +33,17 @@
  * ============================================================================
  *
  *   L1  CONFIG      常量、存储键、默认设置、注入场景规则表、内置镜像池（唯一事实来源）
- *   L2  FOUNDATION  Utils 格式化 · Store 持久化 · Icons 内联 SVG · Log · Arch/Route 纯函数
+ *   L2  FOUNDATION  Utils 格式化 · Store 持久化 · Icons 内联 SVG · Log · Arch 纯函数
  *   L3  NETWORK     gmRequest · 节点多源降级 · 并发测速
- *   L4  STATE       Settings(四组偏好) + NodeStore（变更即广播）
- *   L5  CAPABILITY  Downloader 直链交付 · Injector 规则表驱动 · Enhancer 增强显示 · Tools 页面工具
- *   L6  VIEW        Launcher(右中) · Panel(节点/注入/增强/工具/设置) · DlModal · Toast
+ *   L4  STATE       Settings(三组偏好) + NodeStore（变更即广播）
+ *   L5  CAPABILITY  Downloader 直链交付 · Injector 规则表驱动 · Enhancer 增强显示
+ *   L6  VIEW        Launcher(右中) · Panel(节点/注入/增强/设置) · DlModal · Toast
  *   L7  BOOTSTRAP   装配 · Watcher(SPA 统一重扫，单 MutationObserver 服务全模块) · 菜单
  *
- *   依赖自上而下单向；SPA 重扫统一由 L7 Watcher 驱动 Injector/Enhancer/Tools，
+ *   依赖自上而下单向；SPA 重扫统一由 L7 Watcher 驱动 Injector/Enhancer，
  *   各能力模块只暴露幂等的 run/scan，不再自建监听器。
+ *   性能红线：观察回调禁止 HTML 序列化（HIT_SEL 子树查询代替），
+ *   节点仅在缓存过期时拉取，无常驻轮询。
  */
 
 (function () {
@@ -81,7 +83,6 @@
     const LATENCY_SCALE = 1500;           // 进度条满格基准
     const LATENCY_UNKNOWN = 99999;        // 内置节点未测速标记（排序沉底，显示「未测速」）
     const INJECT_DEBOUNCE = 260;          // 注入防抖
-    const INJECT_INTERVAL = 5000;         // 兜底轮询
 
     /**
      * 节点接口源：按序尝试，哪家活着用哪家，无单点。
@@ -237,10 +238,6 @@
         collapsibleNotes: true    // 更新日志可折叠
     };
 
-    const TOOLS_DEFAULT = {
-        deepwiki: true            // 仓库页顶部注入 DeepWiki 跳转按钮
-    };
-
     const DEFAULT_SETTINGS = {
         refreshOnStart: true,
         showLauncher: true,
@@ -249,8 +246,7 @@
         launcherPos: null,
         lastTab: 'nodes',
         inject: Object.assign({}, DEFAULT_INJECT),
-        enhance: Object.assign({}, ENHANCE_DEFAULT),
-        tools: Object.assign({}, TOOLS_DEFAULT)
+        enhance: Object.assign({}, ENHANCE_DEFAULT)
     };
 
 
@@ -361,10 +357,7 @@
         download: '<svg viewBox="0 0 24 24"><path d="M11 3h2v8h3l-4 4-4-4h3V3zM4 19h16v2H4z"/></svg>',
         copy: '<svg viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/></svg>',
         bolt: '<svg viewBox="0 0 24 24"><path d="M14 2 5 13h5l-1 9 9-11h-5l1-9z"/></svg>',
-        search: '<svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>',
-        sliders: '<svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>',
-        reset: '<svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-        check: '<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>'
+        reset: '<svg viewBox="0 0 24 24"><path d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>'
     };
     /* ======================================================================
      * L2-b · FOUNDATION —— 增强显示工具（纯函数，无 DOM 依赖）
@@ -549,40 +542,6 @@
     };
 
     /* ======================================================================
-     * L2-c · FOUNDATION —— Route：GitHub 路径解析纯函数（无 DOM 依赖）
-     *   只做「pathname → owner/repo」与「repo → DeepWiki URL」的纯计算。
-     *   白名单式解析：settings / orgs 等非仓库页一律返回 null，绝不误注入。
-     * ==================================================================== */
-    const Route = {
-        // 一级路径为这些值时必非仓库页（GitHub 官方功能区）
-        SKIP: new Set([
-            'settings', 'orgs', 'topics', 'marketplace', 'explore', 'notifications',
-            'features', 'security', 'pricing', 'sponsors', 'collections', 'trending',
-            'events', 'dashboard', 'about', 'enterprise', 'login', 'logout', 'join',
-            'site', 'search', 'pulls', 'issues', 'watching', 'new', 'codespaces',
-            'account', 'users', 'showcases', 'customer-stories', 'readme', 'tools',
-            'git', 'apps', 'install', 'mine'
-        ]),
-
-        /** pathname → {owner, repo} | null（非仓库页返回 null） */
-        parseRepo(pathname) {
-            const seg = String(pathname || '').split('/').filter(Boolean);
-            if (seg.length < 2) return null;
-            const owner = seg[0];
-            const repo = seg[1].replace(/\.git$/i, '');
-            if (this.SKIP.has(owner.toLowerCase()) || this.SKIP.has(repo.toLowerCase())) return null;
-            if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(repo)) return null;
-            return { owner, repo };
-        },
-
-        /** repo → DeepWiki 地址（只取 owner/repo，丢弃更深的页面路径） */
-        deepWikiUrl(repo) {
-            return 'https://deepwiki.com/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo);
-        }
-    };
-
-
-    /* ======================================================================
      * L3 · NETWORK —— Promise 化的 GM_xmlhttpRequest + 多源节点 + 并发测速
      * ==================================================================== */
 
@@ -724,7 +683,7 @@
             this.data = Object.assign({}, DEFAULT_SETTINGS, saved);
             this.data.inject = Object.assign({}, DEFAULT_INJECT, saved.inject || {});
             this.data.enhance = Object.assign({}, ENHANCE_DEFAULT, saved.enhance || {});
-            this.data.tools = Object.assign({}, TOOLS_DEFAULT, saved.tools || {});
+            delete this.data.tools;   // v1.5.0 已移除工具组，清理旧版本残留配置
             return this.data;
         },
         get() { return this.data; },
@@ -739,8 +698,7 @@
         reset() {
             this.data = Object.assign({}, DEFAULT_SETTINGS, {
                 inject: Object.assign({}, DEFAULT_INJECT),
-                enhance: Object.assign({}, ENHANCE_DEFAULT),
-                tools: Object.assign({}, TOOLS_DEFAULT)
+                enhance: Object.assign({}, ENHANCE_DEFAULT)
             });
             Store.write(K.settings, this.data);
         }
@@ -1477,103 +1435,6 @@
     };
 
     /* ======================================================================
-     * L5-d · CAPABILITY —— Tools：仓库页工具注入（当前：DeepWiki 跳转）
-     *   scan()    按开关与页面类型决定「注入 / 校正 / 移除」，幂等可重入；
-     *   findBar() 锚点降级链（对照 github.com/microsoft/vscode 真实 DOM）：
-     *     ① 旧版 ul.pagehead-actions；
-     *     ② 新版仓库头 #repository-container-header 内，Star 计数器
-     *        （#repo-stars-counter-star，span→a→div→li→ul→…→header）或
-     *        Watchers/Stargazers 链接作种子向上爬升：
-     *        - 途经的第一个动作列表 <ul>（Watch/Fork/Star 所在列表）优先，
-     *          按列表语义追加 <li>，与原生按钮同排；
-     *        - 无列表则退到仓库头顶层操作容器（绝不注入 <button>/<a> 内部，
-     *          非法嵌套会被 React 重渲染吞掉——v1.2 按钮消失的根因）；
-     *     ③ 多种子设计：id 再次改版时仍有 a[href$="/watchers"] 兜底。
-     * ==================================================================== */
-    const Tools = {
-        id: 'gh-deepwiki-li',
-        enabled() {
-            const t = Settings.get().tools;
-            return !!(t && t.deepwiki);
-        },
-
-        /** 仓库头操作区锚点：动作列表 <ul> 或顶层操作容器，找不到返回 null */
-        findBar() {
-            // ① 旧版仓库头操作栏
-            const oldBar = document.querySelector('ul.pagehead-actions');
-            if (oldBar) return oldBar;
-            // ② 种子节点：Star 计数器优先，Watchers/Stargazers 链接兜底
-            const head = document.querySelector('#repository-container-header');
-            const seed = (head && head.querySelector('#repo-stars-counter-star')) ||
-                document.querySelector('a[href$="/watchers"], a[href$="/stargazers"]');
-            if (!seed) return null;
-            // ③ 爬升：记录途经的第一个动作列表，止于仓库头 / 主容器边界
-            let list = null, top = seed, bounded = false;
-            while (top.parentElement && top.parentElement !== document.body) {
-                top = top.parentElement;
-                if (top.tagName === 'UL' && !list && head && head.contains(top)) list = top;
-                if ((head && top === head) || top.tagName === 'MAIN') { bounded = true; break; }
-            }
-            if (list) return list;                                        // Watch/Fork/Star 列表
-            if (bounded && top !== head &&
-                top.tagName !== 'BUTTON' && top.tagName !== 'A') return top;  // 顶层操作容器
-            return null;
-        },
-
-        build(url) {
-            const li = document.createElement('li');
-            li.id = this.id;
-            li.style.cssText = 'list-style:none;display:inline-flex;align-items:center;margin-left:8px;';
-            const a = document.createElement('a');
-            a.setAttribute('href', url);
-            a.setAttribute('target', '_blank');
-            a.setAttribute('rel', 'noopener noreferrer');
-            a.setAttribute('title', '在 DeepWiki 打开该仓库（AI 生成的 Wiki 文档，新标签页）');
-            a.style.cssText =
-                'display:inline-flex;align-items:center;gap:6px;' +
-                'background:var(--button-default-bgColor-rest,var(--color-btn-bg));' +
-                'color:var(--button-default-fgColor-rest,var(--color-btn-text));' +
-                'border:1px solid var(--button-default-borderColor-rest,var(--color-btn-border));' +
-                'border-radius:6px;padding:3px 12px;font-size:12px;font-weight:500;' +
-                'line-height:20px;text-decoration:none;cursor:pointer;' +
-                'transition:background-color 80ms cubic-bezier(0.65,0,0.35,1);';
-            a.innerHTML =
-                '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor" style="flex-shrink:0">' +
-                '<path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>' +
-                '<span>DeepWiki</span>';
-            a.addEventListener('mouseenter', () => {
-                a.style.backgroundColor = 'var(--button-default-bgColor-hover,var(--color-btn-hover-bg))';
-            });
-            a.addEventListener('mouseleave', () => { a.style.backgroundColor = ''; });
-            li.appendChild(a);
-            return li;
-        },
-
-        scan() {
-            const el = document.getElementById(this.id);
-            const repo = this.enabled() ? Route.parseRepo(location.pathname) : null;
-            if (!repo) {
-                if (el) el.remove();
-                return false;
-            }
-            const url = Route.deepWikiUrl(repo);
-            if (el) {
-                // 幂等：已在页面则只校正 href（SPA 路由切换到另一仓库时跟随更新）
-                const a = el.querySelector('a');
-                if (a && a.getAttribute('href') !== url) a.setAttribute('href', url);
-                return true;
-            }
-            const bar = this.findBar();
-            if (!bar) return false;
-            const li = this.build(url);
-            if (bar.tagName === 'UL') bar.prepend(li);   // 动作列表：列表语义（与 Watch/Fork/Star 同排）
-            else bar.appendChild(li);                    // 顶层操作容器：行末追加
-            return true;
-        }
-    };
-
-
-    /* ======================================================================
      * L6 · VIEW —— 样式表 / 启动器 / 面板 / 下载弹窗 / Toast
      * ==================================================================== */
 
@@ -2197,14 +2058,12 @@ html[data-color-mode="light"]{
                     '  <button class="ghb-tab" data-tab="nodes">节点</button>' +
                     '  <button class="ghb-tab" data-tab="inject">注入</button>' +
                     '  <button class="ghb-tab" data-tab="enhance">增强</button>' +
-                    '  <button class="ghb-tab" data-tab="tools">工具</button>' +
                     '  <button class="ghb-tab" data-tab="settings">设置</button>' +
                     '</div>' +
                     '<div class="ghb-body">' +
                     '  <div class="ghb-page" id="ghb-page-nodes"></div>' +
                     '  <div class="ghb-page" id="ghb-page-inject"></div>' +
                     '  <div class="ghb-page" id="ghb-page-enhance"></div>' +
-                    '  <div class="ghb-page" id="ghb-page-tools"></div>' +
                     '  <div class="ghb-page" id="ghb-page-settings"></div>' +
                     '</div>' +
                     '<div class="ghb-foot"><span>作者 ' + AUTHOR + '</span><span id="ghb-panel-count"></span></div>';
@@ -2216,7 +2075,6 @@ html[data-color-mode="light"]{
                 this.renderNodesPage();
                 this.renderInjectPage();
                 this.renderEnhancePage();
-                this.renderToolsPage();
                 this.renderSettingsPage();
                 this.switch(Settings.get().lastTab || 'nodes');
             },
@@ -2229,6 +2087,8 @@ html[data-color-mode="light"]{
             },
 
             switch(tab) {
+                // 旧版本可能残留已废弃页签（如 tools），回落到节点页
+                if (!this.root.querySelector('#ghb-page-' + tab)) tab = 'nodes';
                 this.tab = tab;
                 Settings.set({ lastTab: tab });
                 this.root.querySelectorAll('.ghb-tab').forEach((b) => b.classList.toggle('ghb-on', b.dataset.tab === tab));
@@ -2239,7 +2099,6 @@ html[data-color-mode="light"]{
                 this.renderNodesPage();
                 this.renderInjectPage();
                 this.renderEnhancePage();
-                this.renderToolsPage();
                 this.renderSettingsPage();
             },
 
@@ -2473,24 +2332,6 @@ html[data-color-mode="light"]{
                         (rows.find((x) => x.key === cb.dataset.key) || {}).t, Enhancer);
                 });
             },
-
-            renderToolsPage() {
-                const page = this.root.querySelector('#ghb-page-tools');
-                if (!page) return;
-                const cfg = Settings.get().tools;
-                const rows = [
-                    { key: 'deepwiki', t: 'DeepWiki 跳转按钮', d: '在仓库页顶部操作区注入 DeepWiki 入口，新标签打开该仓库的 AI 生成 Wiki 文档；非仓库页（设置、组织等）不会注入' }
-                ];
-                page.innerHTML =
-                    '<div class="ghb-hint">仓库页辅助工具：页面级小功能，改动即时生效，无需刷新。</div>' +
-                    rows.map((r) => this.switchRow('ghb-t-' + r.key, r.t, r.d, cfg[r.key], r.key)).join('');
-
-                this.bindSwitches(page, (cb) => {
-                    togglePref('tools', cb.dataset.key,
-                        (rows.find((x) => x.key === cb.dataset.key) || {}).t, Tools);
-                });
-            },
-
         },
 
         /* ---------- 下载弹窗 ---------- */
@@ -2619,10 +2460,20 @@ html[data-color-mode="light"]{
     }
 
     /* ---- Watcher：SPA 统一重扫（全脚本唯一的 DOM/路由监听者） ----
-     * 路由变化 → 全模块重扫；DOM 增量命中关键词 → 防抖重扫；
-     * 外加 turbo/pjax 事件与 5s 兜底轮询（原 Injector 职责并入）。
-     * 三个能力模块只暴露幂等的 run/scan，此处可安全高频调用。 */
-    const RELEVANT_RE = /download|release|archive|codeload|raw|relative-time|markdown-body|assets|pagehead-actions|repository-container-header/i;
+     * 轻量保证（v1.5.0 性能重构）：
+     *   ① 命中判断只用一次 querySelector 子树查询（浏览器 C++ 侧执行），
+     *      绝不序列化 outerHTML——旧版在观察回调里对每个新增节点做 HTML
+     *      序列化，GitHub 加载期数千节点的大子树序列化把主线程塞满，
+     *      是页面卡顿、加载转圈的根因；
+     *   ② 无兜底轮询：初始扫描 + 路由变化 + turbo/pjax 事件 + 突变驱动
+     *      已全覆盖，轮询属纯冗余开销；
+     *   ③ 模块间 try/catch 隔离，单个模块异常不拖垮其余。 */
+    const HIT_SEL = [
+        'a[href*="codeload"]', 'a[href*="/releases/download"]', 'a[href*="/archive/"]',
+        'a[href*="/expanded_assets"]', 'a[href*="/releases/tag/"]', '#raw-url',
+        'a[href*="/raw/"]', 'a[download]', 'a[href$=".patch"]', 'a[href$=".diff"]',
+        'a[href*="/info/lfs/"]', 'relative-time', '.markdown-body'
+    ].join(',');
 
     const Watcher = {
         _timer: null,
@@ -2630,10 +2481,8 @@ html[data-color-mode="light"]{
         schedule(ms) {
             clearTimeout(this._timer);
             this._timer = setTimeout(() => {
-                // 模块间相互隔离：单个模块异常不拖垮其余注入（v1.4.0 前 Tools 会被前置异常掐死）
                 try { Injector.run(); } catch (e) { Log.warn('Injector 异常', e); }
                 try { Enhancer.scan(); } catch (e) { Log.warn('Enhancer 异常', e); }
-                try { Tools.scan(); } catch (e) { Log.warn('Tools 异常', e); }
             }, ms || 0);
         },
 
@@ -2642,23 +2491,20 @@ html[data-color-mode="light"]{
             let lastHref = location.href;
             const mo = new MutationObserver((records) => {
                 if (location.href !== lastHref) { lastHref = location.href; this.schedule(500); return; }
-                const relevant = records.some((m) => {
+                for (const m of records) {
                     for (const n of m.addedNodes) {
-                        // 只比对新增元素的开头片段：命中判断够用，且避免序列化大子树
-                        if (n.nodeType === 1 && RELEVANT_RE.test((n.outerHTML || '').slice(0, 6000))) return true;
+                        if (n.nodeType !== 1) continue;
+                        // 一次子树查询代替 HTML 序列化：成本差约两个数量级
+                        if ((n.matches && n.matches(HIT_SEL)) || n.querySelector(HIT_SEL)) {
+                            this.schedule(INJECT_DEBOUNCE);
+                            return;
+                        }
                     }
-                    return false;
-                });
-                if (relevant) this.schedule(INJECT_DEBOUNCE);
+                }
             });
             mo.observe(document.body, { childList: true, subtree: true });
             document.addEventListener('turbo:load', () => this.schedule(300));
             document.addEventListener('pjax:end', () => this.schedule(300));
-            // 兜底轮询：注入 + DeepWiki 补挂（GitHub 重渲染吞按钮后 ≤5s 自动恢复）
-            setInterval(() => {
-                try { Injector.run(); } catch (e) { Log.warn('Injector 异常', e); }
-                try { Tools.scan(); } catch (e) { Log.warn('Tools 异常', e); }
-            }, INJECT_INTERVAL);
         }
     };
 
@@ -2670,7 +2516,7 @@ html[data-color-mode="light"]{
 
     function buildMenuItems() {
         const st = Settings.get();
-        const eh = st.enhance, th = st.tools;
+        const eh = st.enhance;
         return [
             ['🚀 打开加速面板', () => { if (!View.Panel.open) View.Panel.toggle(); }],
             ['🔄 刷新镜像节点', () => loadNodes('菜单').then((ok) =>
@@ -2689,7 +2535,6 @@ html[data-color-mode="light"]{
             ['✨ 显示下载量' + onOff(eh.downloadCount), () => togglePref('enhance', 'downloadCount', '显示下载量', Enhancer)],
             ['✨ 精确时间' + onOff(eh.replaceTime), () => togglePref('enhance', 'replaceTime', '相对时间替换', Enhancer)],
             ['✨ 日志折叠' + onOff(eh.collapsibleNotes), () => togglePref('enhance', 'collapsibleNotes', '更新日志折叠', Enhancer)],
-            ['📖 DeepWiki 跳转' + onOff(th.deepwiki), () => togglePref('tools', 'deepwiki', 'DeepWiki 跳转', Tools)],
             ['⚙️ 重置全部设置', () => {
                 resetAll();
                 View.restoreLauncherPos();
@@ -2733,13 +2578,11 @@ html[data-color-mode="light"]{
 
         refreshMenu();
         try { Enhancer.scan(); } catch (e) { Log.warn('Enhancer 异常', e); }
-        try { Tools.scan(); } catch (e) { Log.warn('Tools 异常', e); }
-        Watcher.start();   // 唯一的 SPA 监听者：驱动 Injector / Enhancer / Tools 重扫
+        Watcher.start();   // 唯一的 SPA 监听者：驱动 Injector / Enhancer 重扫
 
+        // 仅缓存过期才拉节点：旧版每次开页都发「后台刷新」请求，徒增网络压力
         if (NodeStore.isStale() && Settings.get().refreshOnStart) {
             loadNodes('启动');
-        } else if (NodeStore.nodes.length) {
-            loadNodes('后台'); // 缓存可用，静默更新
         }
 
         setInterval(() => loadNodes('定时'), NODE_TTL);

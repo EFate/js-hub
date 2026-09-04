@@ -1,5 +1,5 @@
 <svg viewBox="0 0 680 756" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>github-accelerate.js v1.4.5 分层架构图</title>
+  <title>github-accelerate.js v1.5.0 分层架构图</title>
   <desc>七层单向依赖架构，Watcher 统一驱动 SPA 重扫，内置镜像池兜底，琥珀色为 v1.3 / v1.4.x 修改模块</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -22,7 +22,7 @@
     .arr{stroke:#85B7EB;stroke-width:1.5;fill:none;}
     .dsh{stroke:#EF9F27;stroke-width:1.5;fill:none;stroke-dasharray:5 4;}
   </style>
-  <text class="cap" x="60" y="38">github-accelerate.js v1.4.5 · 分层架构</text>
+  <text class="cap" x="60" y="38">github-accelerate.js v1.5.0 · 分层架构</text>
 
   <rect class="lyr" x="60" y="64" width="560" height="64" rx="10"/>
   <text class="t1" x="84" y="90">L1 · CONFIG</text>
@@ -47,7 +47,7 @@
   <rect class="chip" x="346" y="173" width="62" height="30" rx="7"/>
   <text class="tc" x="377" y="188" text-anchor="middle" dominant-baseline="central">Icons·Log</text>
   <rect class="chip" x="416" y="173" width="119" height="30" rx="7"/>
-  <text class="tc" x="475" y="188" text-anchor="middle" dominant-baseline="central">Arch·Route 纯函数</text>
+  <text class="tc" x="475" y="188" text-anchor="middle" dominant-baseline="central">Arch 纯函数</text>
 
   <path class="arr" d="M340 220 L340 242" marker-end="url(#arrow)"/>
   <rect class="lyr" x="60" y="248" width="560" height="64" rx="10"/>
@@ -65,7 +65,7 @@
   <text class="t1" x="84" y="366">L4 · STATE</text>
   <text class="t2" x="84" y="386">唯一数据源</text>
   <rect class="chip" x="250" y="357" width="114" height="30" rx="7"/>
-  <text class="tc" x="307" y="372" text-anchor="middle" dominant-baseline="central">Settings 四组偏好</text>
+  <text class="tc" x="307" y="372" text-anchor="middle" dominant-baseline="central">Settings 三组偏好</text>
   <rect class="chip" x="372" y="357" width="121" height="30" rx="7"/>
   <text class="tc" x="432" y="372" text-anchor="middle" dominant-baseline="central">NodeStore+内置池合并</text>
 
@@ -79,8 +79,6 @@
   <text class="tc" x="366" y="464" text-anchor="middle" dominant-baseline="central">Injector</text>
   <rect class="chip" x="408" y="449" width="62" height="30" rx="7"/>
   <text class="tc" x="439" y="464" text-anchor="middle" dominant-baseline="central">Enhancer</text>
-  <rect class="chipx" x="478" y="449" width="92" height="30" rx="7"/>
-  <text class="tcx" x="524" y="464" text-anchor="middle" dominant-baseline="central">Tools·DeepWiki</text>
 
   <path class="arr" d="M340 496 L340 518" marker-end="url(#arrow)"/>
   <rect class="lyr" x="60" y="524" width="560" height="64" rx="10"/>
@@ -89,7 +87,7 @@
   <rect class="chip" x="250" y="541" width="66" height="30" rx="7"/>
   <text class="tc" x="283" y="556" text-anchor="middle" dominant-baseline="central">Launcher</text>
   <rect class="chip" x="324" y="541" width="83" height="30" rx="7"/>
-  <text class="tc" x="365" y="556" text-anchor="middle" dominant-baseline="central">Panel 节点统一管理</text>
+  <text class="tc" x="365" y="556" text-anchor="middle" dominant-baseline="central">Panel 四页签</text>
   <rect class="chip" x="415" y="541" width="60" height="30" rx="7"/>
   <text class="tc" x="445" y="556" text-anchor="middle" dominant-baseline="central">DlModal</text>
   <rect class="chip" x="483" y="541" width="47" height="30" rx="7"/>
@@ -102,7 +100,7 @@
   <rect class="chip" x="250" y="633" width="98" height="30" rx="7"/>
   <text class="tc" x="299" y="648" text-anchor="middle" dominant-baseline="central">装配·生命周期</text>
   <rect class="chipx" x="356" y="633" width="108" height="30" rx="7"/>
-  <text class="tcx" x="410" y="648" text-anchor="middle" dominant-baseline="central">Watcher 统一重扫</text>
+  <text class="tcx" x="410" y="648" text-anchor="middle" dominant-baseline="central">Watcher 统一重扫·零序列化</text>
   <rect class="chipx" x="472" y="633" width="95" height="30" rx="7"/>
   <text class="tcx" x="519" y="648" text-anchor="middle" dominant-baseline="central">菜单 emoji 分组</text>
 
