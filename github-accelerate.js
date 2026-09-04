@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.2.0
+// @version      1.3.0
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
@@ -38,8 +38,10 @@
  *   L4  STATE       Settings(四组偏好) + NodeStore（变更即广播）
  *   L5  CAPABILITY  Downloader 直链交付 · Injector 规则表驱动 · Enhancer 增强显示 · Tools 页面工具
  *   L6  VIEW        Launcher(右中) · Panel(节点/注入/增强/工具/设置) · DlModal · Toast
- *   L7  BOOTSTRAP   装配 · 分组菜单 · 生命周期
+ *   L7  BOOTSTRAP   装配 · Watcher(SPA 统一重扫，单 MutationObserver 服务全模块) · 菜单
  *
+ *   依赖自上而下单向；SPA 重扫统一由 L7 Watcher 驱动 Injector/Enhancer/Tools，
+ *   各能力模块只暴露幂等的 run/scan，不再自建监听器。
  */
 
 (function () {
@@ -423,35 +425,33 @@
             return { id: 'other', showTag: false };
         },
 
+        // 分组 id → 样式类（linux-* 细分缺失时回退 linux-other，移动端合并）
+        GROUP_CLASS: {
+            windows: 'gh-group-win', mac: 'gh-group-mac',
+            'linux-deb': 'gh-group-linux-deb', 'linux-rpm': 'gh-group-linux-rpm',
+            'linux-arch': 'gh-group-linux-arch', 'linux-appimage': 'gh-group-linux-appimage',
+            'linux-flatpak': 'gh-group-linux-flatpak'
+        },
         getGroupClass(id) {
-            if (id === 'windows') return 'gh-group-win';
-            if (id === 'mac') return 'gh-group-mac';
-            if (id === 'linux-deb') return 'gh-group-linux-deb';
-            if (id === 'linux-rpm') return 'gh-group-linux-rpm';
-            if (id === 'linux-arch') return 'gh-group-linux-arch';
-            if (id === 'linux-appimage') return 'gh-group-linux-appimage';
-            if (id === 'linux-flatpak') return 'gh-group-linux-flatpak';
-            if (id.startsWith('linux')) return 'gh-group-linux-other';
-            if (id === 'android' || id === 'ios') return 'gh-group-mobile';
-            return 'gh-group-other';
+            return this.GROUP_CLASS[id]
+                || (id.startsWith('linux') ? 'gh-group-linux-other'
+                    : (id === 'android' || id === 'ios') ? 'gh-group-mobile' : 'gh-group-other');
+        },
+        getTagClass(id) {
+            const g = this.getGroupClass(id);
+            return g === 'gh-group-other' ? '' : g.replace('gh-group', 'gh-tag');
         },
 
-        getTagClass(id) {
-            if (id === 'windows') return 'gh-tag-win';
-            if (id === 'mac') return 'gh-tag-mac';
-            if (id === 'linux-deb') return 'gh-tag-linux-deb';
-            if (id === 'linux-rpm') return 'gh-tag-linux-rpm';
-            if (id === 'linux-arch') return 'gh-tag-linux-arch';
-            if (id === 'linux-appimage') return 'gh-tag-linux-appimage';
-            if (id === 'linux-flatpak') return 'gh-tag-linux-flatpak';
-            if (id.startsWith('linux')) return 'gh-tag-linux-other';
-            if (id === 'android' || id === 'ios') return 'gh-tag-mobile';
-            return '';
+        // 非当前 OS 时的组间排序基准分（当前 OS 组 = 10000 + 包管理器加分）
+        GROUP_BASE: {
+            windows: 9000, mac: 8000, 'linux-deb': 7000, 'linux-rpm': 6000,
+            'linux-appimage': 5200, 'linux-flatpak': 5000, 'linux-arch': 4500,
+            'linux-other': 4000, android: 3500, ios: 3000, other: 2000,
+            meta: -1000, source: -2000
         },
 
         calculateMatchScore(fileName, currentOS, groupId, currentArch) {
-            let groupScore = 0;
-            let innerScore = 0;
+            let groupScore;
             const name = String(fileName).toLowerCase();
             const isCurrentOS = (groupId === currentOS) || groupId.startsWith(currentOS + '-');
 
@@ -461,22 +461,11 @@
                 else if (groupId === 'linux-rpm') groupScore += 200;
                 else if (groupId === 'linux-appimage' || groupId === 'linux-flatpak') groupScore += 100;
             } else {
-                if (groupId === 'windows') groupScore = 9000;
-                else if (groupId === 'mac') groupScore = 8000;
-                else if (groupId === 'linux-deb') groupScore = 7000;
-                else if (groupId === 'linux-rpm') groupScore = 6000;
-                else if (groupId === 'linux-appimage') groupScore = 5200;
-                else if (groupId === 'linux-flatpak') groupScore = 5000;
-                else if (groupId === 'linux-arch') groupScore = 4500;
-                else if (groupId === 'linux-other') groupScore = 4000;
-                else if (groupId === 'android') groupScore = 3500;
-                else if (groupId === 'ios') groupScore = 3000;
-                else if (groupId === 'other') groupScore = 2000;
-                else if (groupId === 'meta') groupScore = -1000;
-                else if (groupId === 'source') groupScore = -2000;
+                groupScore = this.GROUP_BASE[groupId] != null ? this.GROUP_BASE[groupId] : 0;
             }
 
             // 架构匹配：用户所选架构权重最高，远超兜底默认偏好
+            let innerScore = 0;
             const fileArch = this.parseFileArch(fileName);
             if (fileArch === currentArch) innerScore += 500;
             else if (fileArch === 'universal') innerScore += 60;
@@ -1018,6 +1007,7 @@
         },
 
         run() {
+            if (!Settings.get().showPageButtons) return;   // 主开关：关闭则页面内不注入按钮
             this.activeScenarios().forEach((s) => {
                 let links;
                 try {
@@ -1034,34 +1024,8 @@
         schedule(delay) {
             clearTimeout(this.timer);
             this.timer = setTimeout(() => this.run(), delay || 0);
-        },
-
-        start() {
-            this.schedule(400);
-
-            // GitHub 是 SPA：监听路由变化与相关 DOM 增量
-            let lastHref = location.href;
-            const mo = new MutationObserver((records) => {
-                if (location.href !== lastHref) {
-                    lastHref = location.href;
-                    this.schedule(700);
-                    return;
-                }
-                const relevant = records.some((m) => {
-                    for (const node of m.addedNodes) {
-                        if (node.nodeType !== 1) continue;
-                        const html = (node.outerHTML || '').toLowerCase();
-                        if (html.includes('download') || html.includes('release') ||
-                            html.includes('archive') || html.includes('raw') ||
-                            html.includes('codeload')) return true;
-                    }
-                    return false;
-                });
-                if (relevant) this.schedule(INJECT_DEBOUNCE);
-            });
-            mo.observe(document.body, { childList: true, subtree: true });
-            setInterval(() => this.schedule(), INJECT_INTERVAL);
         }
+        // SPA 重扫由 L7 Watcher 统一驱动（路由变化 / 相关 DOM 增量 / 兜底轮询）
     };
     /* ======================================================================
      * L5-c · CAPABILITY —— Enhancer：Release 增强显示
@@ -1078,9 +1042,23 @@
         _os: null,           // 用户手动覆盖的 OS
         _arch: null,         // 用户手动覆盖的架构
         _boxes: [],          // 已登记处理的 release details
-        _scanTimer: null,
 
         active(key) { return !!Settings.get().enhance[key]; },
+
+        /** 行内 meta 容器（平台标签 / 下载量共同挂载点），幂等创建 */
+        ensureMetaContainer(row) {
+            let mc = row.querySelector('.gh-meta-container');
+            if (!mc) {
+                mc = document.createElement('div');
+                mc.className = 'gh-meta-container d-flex flex-items-center flex-shrink-0 mr-3';
+                const right = row.querySelector('.col-md-6') || row.querySelector('.flex-auto.flex-justify-end');
+                const sha = right ? right.querySelector('.flex-1') : null;
+                if (sha) sha.insertBefore(mc, sha.firstChild);
+                else if (right) right.insertBefore(mc, right.firstChild);
+                else { const left = row.querySelector('.col-lg-6'); if (left) left.appendChild(mc); else row.appendChild(mc); }
+            }
+            return mc;
+        },
 
         /* ---- 页面级扫描：releases 页做分组/下载量；全局做时间/日志 ---- */
         scan() {
@@ -1100,30 +1078,7 @@
                 }
             });
         },
-
-        init() {
-            this.scan();
-            let lastHref = location.href;
-            const mo = new MutationObserver((records) => {
-                if (location.href !== lastHref) { lastHref = location.href; this.scan(); return; }
-                const relevant = records.some((m) => {
-                    for (const n of m.addedNodes) {
-                        if (n.nodeType !== 1) continue;
-                        const h = (n.outerHTML || '').toLowerCase();
-                        if (h.includes('releases/download') || h.includes('relative-time') ||
-                            h.includes('markdown-body') || h.includes('assets') || h.includes('release')) return true;
-                    }
-                    return false;
-                });
-                if (relevant) {
-                    clearTimeout(this._scanTimer);
-                    this._scanTimer = setTimeout(() => this.scan(), 350);
-                }
-            });
-            mo.observe(document.body, { childList: true, subtree: true });
-            document.addEventListener('turbo:load', () => this.scan());
-            document.addEventListener('pjax:end', () => this.scan());
-        },
+        // SPA 重扫由 L7 Watcher 统一驱动
 
         /* ---- 相对时间替换（兼容 Shadow DOM 与实际渲染层） ---- */
         replaceTimes() {
@@ -1342,16 +1297,7 @@
                 row.className = row.className.replace(/gh-group-\S+/g, '');
                 row.classList.add(Arch.getGroupClass(row._group.id));
 
-                let mc = row.querySelector('.gh-meta-container');
-                if (!mc) {
-                    mc = document.createElement('div');
-                    mc.className = 'gh-meta-container d-flex flex-items-center flex-shrink-0 mr-3';
-                    const right = row.querySelector('.col-md-6') || row.querySelector('.flex-auto.flex-justify-end');
-                    const sha = right ? right.querySelector('.flex-1') : null;
-                    if (sha) sha.insertBefore(mc, sha.firstChild);
-                    else if (right) right.insertBefore(mc, right.firstChild);
-                    else { const left = row.querySelector('.col-lg-6'); if (left) left.appendChild(mc); else row.appendChild(mc); }
-                }
+                let mc = this.ensureMetaContainer(row);
                 row.querySelectorAll('.gh-platform-tag').forEach((t) => t.remove());
                 if (row._group.showTag) {
                     const tag = document.createElement('span');
@@ -1432,17 +1378,7 @@
                         '<path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"></path>' +
                         '<path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"></path>' +
                         '</svg><span>' + Arch.formatCount(asset.download_count) + '</span>';
-                    let mc = row.querySelector('.gh-meta-container');
-                    if (!mc) {
-                        mc = document.createElement('div');
-                        mc.className = 'gh-meta-container d-flex flex-items-center flex-shrink-0 mr-3';
-                        const right = row.querySelector('.col-md-6') || row.querySelector('.flex-auto.flex-justify-end');
-                        const sha = right ? right.querySelector('.flex-1') : null;
-                        if (sha) sha.insertBefore(mc, sha.firstChild);
-                        else if (right) right.insertBefore(mc, right.firstChild);
-                        else row.appendChild(mc);
-                    }
-                    mc.appendChild(span);
+                    this.ensureMetaContainer(row).appendChild(span);
                 }
             });
         },
@@ -1480,41 +1416,41 @@
 
     /* ======================================================================
      * L5-d · CAPABILITY —— Tools：仓库页工具注入（当前：DeepWiki 跳转）
-     *   scan()  按开关与页面类型决定「注入 / 更新 / 移除」按钮，幂等可重入；
-     *   inject() 锚点降级：旧版 ul.pagehead-actions → 新版仓库头 → 留待重扫；
-     *   init()  复用 turbo/pjax/MutationObserver 的 SPA 重扫模式。
+     *   scan()   按开关与页面类型决定「注入 / 校正 / 移除」，幂等可重入；
+     *   findBar() 锚点降级链：
+     *     ① 旧版 ul.pagehead-actions
+     *     ② 新版 React 仓库头：从 Star 计数器/Watchers 链接向上爬到
+     *        「仓库头的直接子级」顶层操作容器（Star/Fork/Watch 所在行）。
+     *        绝不注入到按钮内部——非法嵌套会被 React 重渲染直接吞掉（v1.2 按钮
+     *        不显示的根因）。
+     *     ③ 都没有 → 返回 null 留待 Watcher 重扫。
      * ==================================================================== */
     const Tools = {
         id: 'gh-deepwiki-li',
-        _scanTimer: null,
-
         enabled() {
             const t = Settings.get().tools;
             return !!(t && t.deepwiki);
         },
 
-        scan() {
-            const el = document.getElementById(this.id);
-            const repo = this.enabled() ? Route.parseRepo(location.pathname) : null;
-            if (!repo) {
-                if (el) el.remove();
-                return false;
+        /** 仓库头操作容器：li（旧版）或带样式的顶层容器（新版），找不到返回 null */
+        findBar() {
+            const oldBar = document.querySelector('ul.pagehead-actions');
+            if (oldBar) return oldBar;
+            const head = document.querySelector('#repository-container-header');
+            if (!head) return null;
+            const seed = head.querySelector('#repo-stars-counter-star, a[href$="/watchers"]');
+            if (!seed) return null;
+            let top = seed;
+            while (top.parentElement && top.parentElement !== head && top.parentElement !== document.body) {
+                top = top.parentElement;
             }
-            const url = Route.deepWikiUrl(repo);
-            if (el) {
-                // 幂等：已在页面则只校正 href（SPA 路由切换到另一仓库时跟随更新）
-                const a = el.querySelector('a');
-                if (a && a.getAttribute('href') !== url) a.setAttribute('href', url);
-                return true;
-            }
-            return this.inject(url);
+            return (top.parentElement === head) ? top : null;
         },
 
-        inject(url) {
+        build(url) {
             const li = document.createElement('li');
             li.id = this.id;
-
-            // 关键属性走 DOM API（可测、不受 innerHTML 解析影响），图标内容走 innerHTML
+            li.style.cssText = 'list-style:none;display:inline-flex;align-items:center;margin-left:8px;';
             const a = document.createElement('a');
             a.setAttribute('href', url);
             a.setAttribute('target', '_blank');
@@ -1532,54 +1468,34 @@
                 '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor" style="flex-shrink:0">' +
                 '<path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>' +
                 '<span>DeepWiki</span>';
-
-            // 悬停态用 JS 挂（GitHub CSP 不保证允许内联 onmouseover 属性）
             a.addEventListener('mouseenter', () => {
                 a.style.backgroundColor = 'var(--button-default-bgColor-hover,var(--color-btn-hover-bg))';
             });
             a.addEventListener('mouseleave', () => { a.style.backgroundColor = ''; });
             li.appendChild(a);
-
-            // 锚点降级：旧版仓库头操作栏 → 新版仓库头容器；都找不到则返回 false 留待重扫
-            const oldBar = document.querySelector('ul.pagehead-actions');
-            if (oldBar) { oldBar.prepend(li); return true; }
-            const newHead = document.querySelector('#repository-container-header');
-            if (newHead) {
-                li.style.listStyle = 'none';
-                const star = newHead.querySelector('#repo-stars-counter-star');
-                const row = star ? star.closest('div, section') : null;
-                if (row && row !== newHead) {
-                    row.appendChild(li);
-                } else {
-                    li.style.position = 'relative';
-                    li.style.marginLeft = 'auto';
-                    newHead.appendChild(li);
-                }
-                return true;
-            }
-            li.remove();
-            return false;
+            return li;
         },
 
-        init() {
-            this.scan();
-            let lastHref = location.href;
-            const mo = new MutationObserver(() => {
-                if (location.href !== lastHref) {
-                    lastHref = location.href;
-                    clearTimeout(this._scanTimer);
-                    this._scanTimer = setTimeout(() => this.scan(), 200);
-                    return;
-                }
-                // 同一页面内按钮被 GitHub 重渲染吞掉时补挂（已存在则零开销）
-                if (!document.getElementById(this.id) && this.enabled() && Route.parseRepo(location.pathname)) {
-                    clearTimeout(this._scanTimer);
-                    this._scanTimer = setTimeout(() => this.scan(), 500);
-                }
-            });
-            mo.observe(document.body, { childList: true, subtree: true });
-            document.addEventListener('turbo:load', () => this.scan());
-            document.addEventListener('pjax:end', () => this.scan());
+        scan() {
+            const el = document.getElementById(this.id);
+            const repo = this.enabled() ? Route.parseRepo(location.pathname) : null;
+            if (!repo) {
+                if (el) el.remove();
+                return false;
+            }
+            const url = Route.deepWikiUrl(repo);
+            if (el) {
+                // 幂等：已在页面则只校正 href（SPA 路由切换到另一仓库时跟随更新）
+                const a = el.querySelector('a');
+                if (a && a.getAttribute('href') !== url) a.setAttribute('href', url);
+                return true;
+            }
+            const bar = this.findBar();
+            if (!bar) return false;
+            const li = this.build(url);
+            if (bar.tagName === 'UL') bar.prepend(li);       // 旧版：列表首位
+            else bar.appendChild(li);                        // 新版：操作行末尾（Star 右侧）
+            return true;
         }
     };
 
@@ -2376,30 +2292,36 @@ html[data-color-mode="light"]{
                 });
             },
 
+            switchRow(id, title, desc, checked, key) {
+                return '<div class="ghb-setting">' +
+                    '  <label class="ghb-label" for="' + id + '">' +
+                    '    <span class="ghb-lt">' + Utils.esc(title) + '</span>' +
+                    '    <span class="ghb-ld">' + Utils.esc(desc || '') + '</span>' +
+                    '  </label>' +
+                    '  <span class="ghb-switch"><input type="checkbox" id="' + id + '"' +
+                            (key ? ' data-key="' + key + '"' : '') +
+                            (checked ? ' checked' : '') + '><i></i></span>' +
+                    '</div>';
+            },
+
+            bindSwitches(page, onToggle) {
+                page.querySelectorAll('.ghb-switch input').forEach((cb) => {
+                    cb.addEventListener('change', () => onToggle(cb));
+                });
+            },
+
             renderInjectPage() {
                 const page = this.root.querySelector('#ghb-page-inject');
                 const cfg = Settings.get().inject;
                 page.innerHTML =
                     '<div class="ghb-hint">控制各位置「镜像下载」按钮的显示。改动立即生效，已渲染的按钮需刷新页面才移除。</div>' +
-                    SCENARIOS.map((s) =>
-                        '<div class="ghb-setting">' +
-                        '  <label class="ghb-label" for="ghb-inj-' + s.key + '">' +
-                        '    <span class="ghb-lt">' + Utils.esc(s.label) + '</span>' +
-                        '    <span class="ghb-ld">' + Utils.esc(s.desc) + '</span>' +
-                        '  </label>' +
-                        '  <span class="ghb-switch">' +
-                        '    <input type="checkbox" id="ghb-inj-' + s.key + '" data-key="' + s.key + '"' +
-                                (cfg[s.key] ? ' checked' : '') + '><i></i>' +
-                        '  </span>' +
-                        '</div>').join('');
+                    SCENARIOS.map((s) => this.switchRow('ghb-inj-' + s.key, s.label, s.desc, cfg[s.key], s.key)).join('');
 
-                page.querySelectorAll('.ghb-switch input').forEach((cb) => {
-                    cb.addEventListener('change', () => {
-                        Settings.setInject(cb.dataset.key, cb.checked);
-                        const s = SCENARIOS.find((x) => x.key === cb.dataset.key);
-                        View.Toast.info((cb.checked ? '已开启「' : '已关闭「') + (s ? s.label : cb.dataset.key) + '」');
-                        Injector.schedule(150);
-                    });
+                this.bindSwitches(page, (cb) => {
+                    Settings.setInject(cb.dataset.key, cb.checked);
+                    const s = SCENARIOS.find((x) => x.key === cb.dataset.key);
+                    View.Toast.info((cb.checked ? '已开启「' : '已关闭「') + (s ? s.label : cb.dataset.key) + '」');
+                    Injector.schedule(150);
                 });
             },
 
@@ -2408,38 +2330,10 @@ html[data-color-mode="light"]{
                 const s = Settings.get();
 
                 page.innerHTML =
-                    '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-autorefresh">' +
-                    '    <span class="ghb-lt">启动时刷新节点</span>' +
-                    '    <span class="ghb-ld">打开页面时若缓存过期则自动拉取最新节点</span>' +
-                    '  </label>' +
-                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-autorefresh"' +
-                        (s.refreshOnStart ? ' checked' : '') + '><i></i></span>' +
-                    '</div>' +
-                    '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-launcher">' +
-                    '    <span class="ghb-lt">显示侧边启动器</span>' +
-                    '    <span class="ghb-ld">关闭后可用油猴菜单「打开加速面板」呼出</span>' +
-                    '  </label>' +
-                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-launcher"' +
-                        (s.showLauncher ? ' checked' : '') + '><i></i></span>' +
-                    '</div>' +
-                    '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-pagebtn">' +
-                    '    <span class="ghb-lt">显示页面内镜像按钮</span>' +
-                    '    <span class="ghb-ld">关闭后 GitHub 页面不出现注入的加速按钮，可用面板或启动器手动打开弹窗</span>' +
-                    '  </label>' +
-                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-pagebtn"' +
-                        (s.showPageButtons ? ' checked' : '') + '><i></i></span>' +
-                    '</div>' +
-                    '<div class="ghb-setting">' +
-                    '  <label class="ghb-label" for="ghb-s-auto">' +
-                    '    <span class="ghb-lt">全自动下载</span>' +
-                    '    <span class="ghb-ld">开启：自动选最快镜像直发（无感，失败自动换下一个）；关闭：每次下载先弹窗手选镜像</span>' +
-                    '  </label>' +
-                    '  <span class="ghb-switch"><input type="checkbox" id="ghb-s-auto"' +
-                        (s.autoDownload ? ' checked' : '') + '><i></i></span>' +
-                    '</div>' +
+                    this.switchRow('ghb-s-autorefresh', '启动时刷新节点', '打开页面时若缓存过期则自动拉取最新节点', s.refreshOnStart) +
+                    this.switchRow('ghb-s-launcher', '显示侧边启动器', '关闭后可用油猴菜单「打开加速面板」呼出', s.showLauncher) +
+                    this.switchRow('ghb-s-pagebtn', '显示页面内镜像按钮', '关闭后 GitHub 页面不出现注入的加速按钮，可用面板或启动器手动打开弹窗', s.showPageButtons) +
+                    this.switchRow('ghb-s-auto', '全自动下载', '开启：自动选最快镜像直发（无感，失败自动换下一个）；关闭：每次下载先弹窗手选镜像', s.autoDownload) +
                     '<div class="ghb-setting">' +
                     '  <span class="ghb-label"><span class="ghb-lt">恢复默认设置</span>' +
                     '  <span class="ghb-ld">清空节点缓存与全部偏好</span></span>' +
@@ -2488,26 +2382,14 @@ html[data-color-mode="light"]{
                 ];
                 page.innerHTML =
                     '<div class="ghb-hint">Release 增强显示：文件分组排序、下载量、精确时间、日志折叠，均可独立开关。改动即时生效，部分需刷新页面。</div>' +
-                    rows.map((r) =>
-                        '<div class="ghb-setting">' +
-                        '  <label class="ghb-label" for="ghb-e-' + r.key + '">' +
-                        '    <span class="ghb-lt">' + Utils.esc(r.t) + '</span>' +
-                        '    <span class="ghb-ld">' + Utils.esc(r.d) + '</span>' +
-                        '  </label>' +
-                        '  <span class="ghb-switch"><input type="checkbox" id="ghb-e-' + r.key + '" data-key="' + r.key + '"' +
-                                (cfg[r.key] ? ' checked' : '') + '><i></i></span>' +
-                        '</div>').join('');
+                    rows.map((r) => this.switchRow('ghb-e-' + r.key, r.t, r.d, cfg[r.key], r.key)).join('');
 
-                page.querySelectorAll('.ghb-switch input').forEach((cb) => {
-                    cb.addEventListener('change', () => {
-                        const key = cb.dataset.key;
-                        Settings.get().enhance[key] = cb.checked;
-                        Store.write(K.settings, Settings.get());
-                        View.Toast.info((cb.checked ? '已开启「' : '已关闭「') + (rows.find((x) => x.key === key).t) + '」');
-                        Enhancer.scan();
-                    });
+                this.bindSwitches(page, (cb) => {
+                    togglePref('enhance', cb.dataset.key,
+                        (rows.find((x) => x.key === cb.dataset.key) || {}).t, Enhancer);
                 });
             },
+
             renderToolsPage() {
                 const page = this.root.querySelector('#ghb-page-tools');
                 if (!page) return;
@@ -2517,24 +2399,11 @@ html[data-color-mode="light"]{
                 ];
                 page.innerHTML =
                     '<div class="ghb-hint">仓库页辅助工具：页面级小功能，改动即时生效，无需刷新。</div>' +
-                    rows.map((r) =>
-                        '<div class="ghb-setting">' +
-                        '  <label class="ghb-label" for="ghb-t-' + r.key + '">' +
-                        '    <span class="ghb-lt">' + Utils.esc(r.t) + '</span>' +
-                        '    <span class="ghb-ld">' + Utils.esc(r.d) + '</span>' +
-                        '  </label>' +
-                        '  <span class="ghb-switch"><input type="checkbox" id="ghb-t-' + r.key + '" data-key="' + r.key + '"' +
-                                (cfg[r.key] ? ' checked' : '') + '><i></i></span>' +
-                        '</div>').join('');
+                    rows.map((r) => this.switchRow('ghb-t-' + r.key, r.t, r.d, cfg[r.key], r.key)).join('');
 
-                page.querySelectorAll('.ghb-switch input').forEach((cb) => {
-                    cb.addEventListener('change', () => {
-                        const key = cb.dataset.key;
-                        Settings.get().tools[key] = cb.checked;
-                        Store.write(K.settings, Settings.get());
-                        View.Toast.info((cb.checked ? '已开启「' : '已关闭「') + (rows.find((x) => x.key === key).t) + '」');
-                        Tools.scan();
-                    });
+                this.bindSwitches(page, (cb) => {
+                    togglePref('tools', cb.dataset.key,
+                        (rows.find((x) => x.key === cb.dataset.key) || {}).t, Tools);
                 });
             },
 
@@ -2653,65 +2522,88 @@ html[data-color-mode="light"]{
     };
 
     /* ======================================================================
-     * L7 · BOOTSTRAP
+     * L7 · BOOTSTRAP —— 装配 · Watcher(SPA 统一重扫) · 菜单 · 生命周期
      * ==================================================================== */
 
-    function toggleEnhance(key, label) {
+    /** 统一偏好开关：面板与油猴菜单共用同一条路径，杜绝两处逻辑漂移 */
+    function togglePref(group, key, label, scanner) {
         const s = Settings.get();
-        const next = !s.enhance[key];
-        s.enhance[key] = next;
-        Store.write(K.settings, s);
-        View.Toast.info('「' + label + '」已' + (next ? '启用' : '禁用') + '，刷新页面后生效');
-        Enhancer.scan();
-        refreshMenu();
-    }
-
-    function toggleTool(key, label) {
-        const s = Settings.get();
-        const next = !s.tools[key];
-        s.tools[key] = next;
+        const next = !s[group][key];
+        s[group][key] = next;
         Store.write(K.settings, s);
         View.Toast.info('「' + label + '」已' + (next ? '启用' : '禁用') + '，页面即时生效');
-        Tools.scan();
+        scanner.scan();
         refreshMenu();
     }
 
-    /* ---- 分组菜单：面板｜节点｜下载｜增强｜工具｜设置 ----
-     * 组名行（fn 为 null）仅作视觉分组；开关项标签带「开/关」状态，
-     * 任何切换后 refreshMenu() 注销重注册，让菜单文字始终与实际一致。 */
+    /* ---- Watcher：SPA 统一重扫（全脚本唯一的 DOM/路由监听者） ----
+     * 路由变化 → 全模块重扫；DOM 增量命中关键词 → 防抖重扫；
+     * 外加 turbo/pjax 事件与 5s 兜底轮询（原 Injector 职责并入）。
+     * 三个能力模块只暴露幂等的 run/scan，此处可安全高频调用。 */
+    const RELEVANT_RE = /download|release|archive|codeload|raw|relative-time|markdown-body|assets|pagehead-actions|repository-container-header/i;
+
+    const Watcher = {
+        _timer: null,
+
+        schedule(ms) {
+            clearTimeout(this._timer);
+            this._timer = setTimeout(() => {
+                Injector.run();
+                Enhancer.scan();
+                Tools.scan();
+            }, ms || 0);
+        },
+
+        start() {
+            this.schedule(500);
+            let lastHref = location.href;
+            const mo = new MutationObserver((records) => {
+                if (location.href !== lastHref) { lastHref = location.href; this.schedule(500); return; }
+                const relevant = records.some((m) => {
+                    for (const n of m.addedNodes) {
+                        // 只比对新增元素的开头片段：命中判断够用，且避免序列化大子树
+                        if (n.nodeType === 1 && RELEVANT_RE.test((n.outerHTML || '').slice(0, 6000))) return true;
+                    }
+                    return false;
+                });
+                if (relevant) this.schedule(INJECT_DEBOUNCE);
+            });
+            mo.observe(document.body, { childList: true, subtree: true });
+            document.addEventListener('turbo:load', () => this.schedule(300));
+            document.addEventListener('pjax:end', () => this.schedule(300));
+            setInterval(() => Injector.run(), INJECT_INTERVAL);   // 兜底轮询
+        }
+    };
+
+    /* ---- 油猴菜单：emoji 前缀分组（原「─── 组名 ───」占位行是死菜单项，已移除） ----
+     * 开关项标签带「：开 ✓ / ：关」状态，任何切换后 refreshMenu() 重注册保持一致。 */
     let menuCmds = [];
 
-    function menuStateTag(v) { return v ? '：开 ✓' : '：关'; }
+    const onOff = (v) => v ? '：开 ✓' : '：关';
 
     function buildMenuItems() {
         const st = Settings.get();
         const eh = st.enhance, th = st.tools;
         return [
-            ['打开加速面板', () => { if (!View.Panel.open) View.Panel.toggle(); }],
-            ['─── 节点 ───', null],
-            ['刷新镜像节点', () => loadNodes('菜单').then((ok) =>
+            ['🚀 打开加速面板', () => { if (!View.Panel.open) View.Panel.toggle(); }],
+            ['🔄 刷新镜像节点', () => loadNodes('菜单').then((ok) =>
                 ok ? View.Toast.ok('已刷新 ' + NodeStore.nodes.length + ' 个节点') : View.Toast.err('刷新失败'))],
-            ['显示 / 隐藏侧边启动器', () => {
-                const on = !st.showLauncher;
-                View.setLauncherVisible(on);
-                View.Toast.info('侧边启动器已' + (on ? '显示' : '隐藏'));
+            ['👁 侧边启动器' + onOff(st.showLauncher), () => {
+                View.setLauncherVisible(!Settings.get().showLauncher);
+                View.Toast.info('侧边启动器已' + (Settings.get().showLauncher ? '显示' : '隐藏'));
                 refreshMenu();
             }],
-            ['─── 下载 ───', null],
-            ['全自动下载' + menuStateTag(st.autoDownload), () => {
+            ['⚡ 全自动下载' + onOff(st.autoDownload), () => {
                 Settings.set({ autoDownload: !Settings.get().autoDownload });
                 View.Toast.info('全自动下载已' + (Settings.get().autoDownload ? '开启' : '关闭'));
                 refreshMenu();
             }],
-            ['─── 增强 ───', null],
-            ['★ 分组排序' + menuStateTag(eh.groupSort), () => toggleEnhance('groupSort', '文件分组排序')],
-            ['★ 显示下载量' + menuStateTag(eh.downloadCount), () => toggleEnhance('downloadCount', '显示下载量')],
-            ['★ 精确时间' + menuStateTag(eh.replaceTime), () => toggleEnhance('replaceTime', '相对时间替换')],
-            ['★ 日志折叠' + menuStateTag(eh.collapsibleNotes), () => toggleEnhance('collapsibleNotes', '更新日志折叠')],
-            ['─── 工具 ───', null],
-            ['DeepWiki 跳转' + menuStateTag(th.deepwiki), () => toggleTool('deepwiki', 'DeepWiki 跳转')],
-            ['─── 设置 ───', null],
-            ['重置全部设置', () => {
+            ['✨ 分组排序' + onOff(eh.groupSort), () => togglePref('enhance', 'groupSort', '文件分组排序', Enhancer)],
+            ['✨ 显示下载量' + onOff(eh.downloadCount), () => togglePref('enhance', 'downloadCount', '显示下载量', Enhancer)],
+            ['✨ 精确时间' + onOff(eh.replaceTime), () => togglePref('enhance', 'replaceTime', '相对时间替换', Enhancer)],
+            ['✨ 日志折叠' + onOff(eh.collapsibleNotes), () => togglePref('enhance', 'collapsibleNotes', '更新日志折叠', Enhancer)],
+            ['📖 DeepWiki 跳转' + onOff(th.deepwiki), () => togglePref('tools', 'deepwiki', 'DeepWiki 跳转', Tools)],
+            ['⚙️ 重置全部设置', () => {
                 resetAll();
                 View.restoreLauncherPos();
                 View.Toast.ok('已重置，刷新页面后生效');
@@ -2729,8 +2621,6 @@ html[data-color-mode="light"]{
             menuCmds.push(GM_registerMenuCommand(label, fn || (() => {})));
         });
     }
-
-    function registerMenu() { refreshMenu(); }
 
     /** 清空全部持久化数据并恢复默认（油猴菜单与设置页共用，避免两处逻辑漂移） */
     function resetAll() {
@@ -2754,10 +2644,10 @@ html[data-color-mode="light"]{
             View.DlModal.renderNodes();
         });
 
-        registerMenu();
-        if (Settings.get().showPageButtons) Injector.start();
-        Enhancer.init();
-        Tools.init();
+        refreshMenu();
+        Enhancer.scan();
+        Tools.scan();
+        Watcher.start();   // 唯一的 SPA 监听者：驱动 Injector / Enhancer / Tools 重扫
 
         if (NodeStore.isStale() && Settings.get().refreshOnStart) {
             loadNodes('启动');
