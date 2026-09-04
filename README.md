@@ -2,7 +2,7 @@
 
 ## github-accelerate.js
 
-基于 Tampermonkey / Violentmonkey 的 GitHub 下载加速、Release 页面增强与仓库工具脚本（v1.4.2，单文件）。脚本安装后会在 GitHub 页面右侧注入一个可拖拽的圆形启动器，通过面板统一管理全部功能。
+基于 Tampermonkey / Violentmonkey 的 GitHub 下载加速、Release 页面增强与仓库工具脚本（v1.4.5，单文件）。脚本安装后会在 GitHub 页面右侧注入一个可拖拽的圆形启动器，通过面板统一管理全部功能。
 
 > **升级提示**：面板标题显示的版本即当前运行版本。更新脚本后面板仍显示旧版本号 = 浏览器里跑的还是旧代码，需在 Tampermonkey 中重新安装/覆盖脚本，并强制刷新（Ctrl+F5）GitHub 页面。
 
@@ -24,6 +24,7 @@
 |------|------|
 | 场景覆盖 | 9 类下载场景：Release 资产、源码包（tag/archive）、Raw 文件、Clone 弹框 ZIP、LFS 大文件、Gist、patch / diff 等 |
 | 镜像来源 | 三级降级：公开聚合接口 A → 聚合接口 B → 内置镜像池（32 源）本地连通性测速筛选。**内置池始终并入「节点」页签统一管理**（带「内置」标签，未测速显示「未测速」），可直接勾选、单独测速或「全部测速」，测完按真实延迟重新排序 |
+| 节点统一管理 | **内置源与聚合接口节点合并入同一列表**（内置源带「内置」标签）：统一勾选、筛选、单节点测速、「全部测速」；未测速显示「未测速」沉底，测后按真实延迟归位；**测挂的节点保留在池中沉底（不删除）**，内置源历史测速延迟跨刷新保留 |
 | 节点管理 | 节点列表面板：刷新、全量测速、全选 / 全不选 / Top10、域名筛选、单节点测速、勾选启用 |
 | 健康度管理 | 镜像连续失败 2 次即移出候选队列，恢复后自动重新入队 |
 | 预检缓存 | 预检通过的镜像在 5 分钟内视为有效，后续下载跳过探测、直接发起 |
@@ -107,7 +108,7 @@
 
 ```bash
 node --check github-accelerate.js            # 语法校验
-node github-accelerate.core.test.js          # Route / Arch / mirrorUrl / NodeStore 纯函数回归（46 用例）
+node github-accelerate.core.test.js          # Route / Arch / mirrorUrl / NodeStore 纯函数回归（51 用例）
 node github-accelerate.tools.test.js         # DeepWiki 注入锚点回归（13 用例）
 ```
 

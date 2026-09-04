@@ -1,5 +1,5 @@
 <svg viewBox="0 0 680 756" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>github-accelerate.js v1.4.2 分层架构图</title>
+  <title>github-accelerate.js v1.4.5 分层架构图</title>
   <desc>七层单向依赖架构，Watcher 统一驱动 SPA 重扫，内置镜像池兜底，琥珀色为 v1.3 / v1.4.x 修改模块</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -22,7 +22,7 @@
     .arr{stroke:#85B7EB;stroke-width:1.5;fill:none;}
     .dsh{stroke:#EF9F27;stroke-width:1.5;fill:none;stroke-dasharray:5 4;}
   </style>
-  <text class="cap" x="60" y="38">github-accelerate.js v1.4.2 · 分层架构</text>
+  <text class="cap" x="60" y="38">github-accelerate.js v1.4.5 · 分层架构</text>
 
   <rect class="lyr" x="60" y="64" width="560" height="64" rx="10"/>
   <text class="t1" x="84" y="90">L1 · CONFIG</text>
@@ -109,5 +109,5 @@
   <path class="dsh" d="M464 648 L632 648 L632 464 L622 464" marker-end="url(#arrowA)"/>
   <path class="dsh" d="M60 704 L100 704"/>
   <text class="leg" x="110" y="708">琥珀 = v1.3 / v1.4 修改模块 · 蓝 = 既有分层（依赖自上而下）</text>
-  <text class="leg" x="60" y="734">镜像统一管理：API 节点 + 内置池 32 源合并入列（未测速沉底，测速后按延迟归位）</text>
+  <text class="leg" x="60" y="734">镜像统一管理：API+内置池合并入列 · 未测速沉底 · 测挂不删 · 历史延迟跨刷新保留</text>
 </svg>

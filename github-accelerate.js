@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.4.3
+// @version      1.4.5
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底）、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
@@ -486,6 +486,9 @@
             meta: -1000, source: -2000
         },
 
+        // 非所选架构时的兜底偏好分（所选架构 +500，通用 +60）
+        ARCH_SCORE: { universal: 60, x86_64: 50, arm64: 20, x86: 10, arm32: 5 },
+
         calculateMatchScore(fileName, currentOS, groupId, currentArch) {
             let groupScore;
             const name = String(fileName).toLowerCase();
@@ -504,11 +507,7 @@
             let innerScore = 0;
             const fileArch = this.parseFileArch(fileName);
             if (fileArch === currentArch) innerScore += 500;
-            else if (fileArch === 'universal') innerScore += 60;
-            else if (fileArch === 'x86_64') innerScore += 50;
-            else if (fileArch === 'arm64') innerScore += 20;
-            else if (fileArch === 'x86') innerScore += 10;
-            else if (fileArch === 'arm32') innerScore += 5;
+            else innerScore += this.ARCH_SCORE[fileArch] || 0;
 
             if (name.endsWith('.exe') || name.endsWith('.dmg') || name.endsWith('.appimage') || name.endsWith('.flatpak') || name.endsWith('.apk')) innerScore += 10;
             if (name.endsWith('.zip') || name.endsWith('.7z')) innerScore += 5;
@@ -562,7 +561,7 @@
             'events', 'dashboard', 'about', 'enterprise', 'login', 'logout', 'join',
             'site', 'search', 'pulls', 'issues', 'watching', 'new', 'codespaces',
             'account', 'users', 'showcases', 'customer-stories', 'readme', 'tools',
-            'git', 'apps', 'install', 'new', 'mine'
+            'git', 'apps', 'install', 'mine'
         ]),
 
         /** pathname → {owner, repo} | null（非仓库页返回 null） */
@@ -818,18 +817,33 @@
 
         /**
          * 合并内置镜像池：无论聚合接口是否可用，内置源始终纳入节点面板
-         * 统一管理（显示、勾选、测速）。已在线列表中的节点优先（有实测延迟），
-         * 其余内置源以「未测速」（LATENCY_UNKNOWN）追加，排序自然沉底，
-         * 点「测速 / 全部测速」后按真实延迟重新归位。
+         * 统一管理（显示、勾选、测速）。已在线列表中的节点优先（有实测延迟）；
+         * 内置源此前测出的延迟跨刷新保留（存于 this.nodes，不因重置为未测速）。
          */
         mergeBuiltin(list) {
             const known = new Set((Array.isArray(list) ? list : [])
                 .map((n) => String(n.url).replace(/\/+$/, '')));
+            const prevLat = new Map((this.nodes || [])
+                .filter((n) => n.builtin && n.latency < LATENCY_UNKNOWN)
+                .map((n) => [n.url, n.latency]));
             const extra = BUILTIN_MIRRORS
                 .map((u) => u.replace(/\/+$/, ''))
                 .filter((u) => !known.has(u))
-                .map((u) => ({ url: u, latency: LATENCY_UNKNOWN, builtin: true }));
+                .map((u) => ({
+                    url: u,
+                    latency: prevLat.has(u) ? prevLat.get(u) : LATENCY_UNKNOWN,
+                    builtin: true
+                }));
             return (Array.isArray(list) ? list : []).concat(extra);
+        },
+
+        /** 测速结果落库：测通的更新延迟，未测通的保留在池中沉底（不删除，保持统一管理） */
+        applyProbe(list) {
+            const okUrls = new Set((list || []).map((n) => n.url));
+            const rest = (this.nodes || [])
+                .filter((n) => !okUrls.has(n.url))
+                .map((n) => ({ url: n.url, latency: LATENCY_UNKNOWN, builtin: !!n.builtin }));
+            this.setNodes(this.mergeBuiltin((list || []).concat(rest)));
         },
 
         setVisible(list) {
@@ -1206,6 +1220,26 @@
             if (details._assets) this.injectCounts(details, details._assets);
         },
 
+        /** 通用下拉构造（OS / 架构共用）：写入选中值、同步页面同名下拉、全量重排 */
+        buildSelect(cls, options, selected, onPick) {
+            const sel = document.createElement('select');
+            sel.className = cls;
+            options.forEach((o) => {
+                const opt = document.createElement('option');
+                opt.value = o.value; opt.textContent = o.label;
+                if (o.value === selected) opt.selected = true;
+                sel.appendChild(opt);
+            });
+            sel.addEventListener('click', (e) => e.stopPropagation());
+            sel.addEventListener('mousedown', (e) => e.stopPropagation());
+            sel.addEventListener('change', () => {
+                onPick(sel.value);
+                document.querySelectorAll('.' + cls).forEach((s) => { s.value = sel.value; });
+                this._boxes.forEach((d) => { if (this.active('groupSort')) this.formatAndSort(d); });
+            });
+            return sel;
+        },
+
         /* ---- 注入/移除摘要区的控件（按开关实时生效，可关闭即移除） ---- */
         injectControls(details, repo, tag) {
             const summary = details.querySelector('summary');
@@ -1245,47 +1279,19 @@
                 details.querySelectorAll('.gh-dl-count').forEach((el) => el.remove());
             }
 
-            // OS / 架构 下拉 + 架构说明（与 groupSort 绑定）
+            // OS / 架构 下拉 + 架构说明（与 groupSort 绑定，共用 buildSelect）
             if (this.active('groupSort')) {
                 if (!summary.dataset.ghOsSel) {
                     summary.dataset.ghOsSel = '1';
-                    const sel = document.createElement('select');
-                    sel.className = 'gh-os-select';
-                    const cur = Arch.getCurrentOS();
-                    Arch.OS_OPTIONS.forEach((o) => {
-                        const opt = document.createElement('option');
-                        opt.value = o.value; opt.textContent = o.label;
-                        if (o.value === (this._os || cur)) opt.selected = true;
-                        sel.appendChild(opt);
-                    });
-                    sel.addEventListener('click', (e) => e.stopPropagation());
-                    sel.addEventListener('mousedown', (e) => e.stopPropagation());
-                    sel.addEventListener('change', () => {
-                        this._os = sel.value;
-                        document.querySelectorAll('.gh-os-select').forEach((s) => { s.value = this._os; });
-                        this._boxes.forEach((d) => { if (this.active('groupSort')) this.formatAndSort(d); });
-                    });
-                    titleSpan.appendChild(sel);
+                    titleSpan.appendChild(this.buildSelect(
+                        'gh-os-select', Arch.OS_OPTIONS, this._os || Arch.getCurrentOS(),
+                        (v) => { this._os = v; }));
                 }
                 if (!summary.dataset.ghArchSel) {
                     summary.dataset.ghArchSel = '1';
-                    const sel = document.createElement('select');
-                    sel.className = 'gh-arch-select';
-                    const cur = Arch.getCurrentArch();
-                    Arch.ARCH_OPTIONS.forEach((o) => {
-                        const opt = document.createElement('option');
-                        opt.value = o.value; opt.textContent = o.label;
-                        if (o.value === (this._arch || cur)) opt.selected = true;
-                        sel.appendChild(opt);
-                    });
-                    sel.addEventListener('click', (e) => e.stopPropagation());
-                    sel.addEventListener('mousedown', (e) => e.stopPropagation());
-                    sel.addEventListener('change', () => {
-                        this._arch = sel.value;
-                        document.querySelectorAll('.gh-arch-select').forEach((s) => { s.value = this._arch; });
-                        this._boxes.forEach((d) => { if (this.active('groupSort')) this.formatAndSort(d); });
-                    });
-                    titleSpan.appendChild(sel);
+                    titleSpan.appendChild(this.buildSelect(
+                        'gh-arch-select', Arch.ARCH_OPTIONS, this._arch || Arch.getCurrentArch(),
+                        (v) => { this._arch = v; }));
 
                     const help = document.createElement('button');
                     help.type = 'button';
@@ -2105,6 +2111,18 @@ html[data-color-mode="light"]{
             }
         },
 
+        /** 按钮旋转态包装：执行期间加 ghb-spin 并禁用，结束（含异常路径）统一恢复 */
+        async spinLoad(btn, task) {
+            const svg = btn.querySelector('svg');
+            if (svg) svg.classList.add('ghb-spin');
+            btn.disabled = true;
+            try { return await task(); }
+            finally {
+                if (svg) svg.classList.remove('ghb-spin');
+                btn.disabled = false;
+            }
+        },
+
         /* ---------- Toast ---------- */
         Toast: {
             host() {
@@ -2319,11 +2337,7 @@ html[data-color-mode="light"]{
             },
 
             async onRefresh(btn) {
-                btn.disabled = true;
-                btn.querySelector('svg').classList.add('ghb-spin');
-                const ok = await loadNodes('手动');
-                btn.disabled = false;
-                btn.querySelector('svg').classList.remove('ghb-spin');
+                const ok = await View.spinLoad(btn, () => loadNodes('手动'));
                 ok ? View.Toast.ok('已刷新，共 ' + NodeStore.nodes.length + ' 个节点')
                    : View.Toast.err('刷新失败，请检查网络或稍后重试');
             },
@@ -2337,7 +2351,7 @@ html[data-color-mode="light"]{
                 btn.querySelector('svg').classList.remove('ghb-spin');
                 if (!list.length) { View.Toast.err('全部节点均不可达'); return; }
                 NodeStore.markOkMany(list.map((n) => n.url));
-                NodeStore.setNodes(list);
+                NodeStore.applyProbe(list);   // 测挂节点保留池中（沉底为未测速），不删除
                 View.Toast.ok('测速完成，' + list.length + ' 个节点已就绪');
             },
 
@@ -2542,11 +2556,7 @@ html[data-color-mode="light"]{
             },
 
             async onRefresh(btn) {
-                btn.querySelector('svg').classList.add('ghb-spin');
-                btn.disabled = true;
-                await loadNodes('弹窗');
-                btn.disabled = false;
-                btn.querySelector('svg').classList.remove('ghb-spin');
+                await View.spinLoad(btn, () => loadNodes('弹窗'));
                 this.renderNodes();
                 View.Toast.info('节点已刷新');
             },
