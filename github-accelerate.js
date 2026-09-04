@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.5.0
+// @version      1.5.1
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
@@ -999,6 +999,14 @@
     const Injector = {
         timer: null,
 
+        /**
+         * 下载入口回调：由 L7 装配层注入（View.download，按全自动/手动弹窗分流）。
+         * L5 能力层不反向依赖 L6 视图层——未装配时退化为直发浏览器。
+         */
+        onDownload(githubUrl, filename) {
+            Downloader.deliver(githubUrl, filename || Utils.filenameFromUrl(githubUrl));
+        },
+
         activeScenarios() {
             const cfg = Settings.get().inject;
             const host = location.hostname;
@@ -1020,7 +1028,7 @@
             btn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                View.download(githubUrl, filename || Utils.filenameFromUrl(githubUrl));
+                this.onDownload(githubUrl, filename || Utils.filenameFromUrl(githubUrl));
             });
             return btn;
         },
@@ -2577,6 +2585,7 @@ html[data-color-mode="light"]{
         });
 
         refreshMenu();
+        Injector.onDownload = (u, n) => View.download(u, n);   // 装配层注入下载入口（解除 L5→L6 依赖）
         try { Enhancer.scan(); } catch (e) { Log.warn('Enhancer 异常', e); }
         Watcher.start();   // 唯一的 SPA 监听者：驱动 Injector / Enhancer 重扫
 
