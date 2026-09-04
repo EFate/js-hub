@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.3.0
-// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
+// @version      1.4.0
+// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底）、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
@@ -32,7 +32,7 @@
  *  GitHub 加速助手 · 架构总览（单文件，自顶向下分层，禁止跨层反向依赖）
  * ============================================================================
  *
- *   L1  CONFIG      常量、存储键、默认设置、注入场景规则表（唯一事实来源）
+ *   L1  CONFIG      常量、存储键、默认设置、注入场景规则表、内置镜像池（唯一事实来源）
  *   L2  FOUNDATION  Utils 格式化 · Store 持久化 · Icons 内联 SVG · Log · Arch/Route 纯函数
  *   L3  NETWORK     gmRequest · 节点多源降级 · 并发测速
  *   L4  STATE       Settings(四组偏好) + NodeStore（变更即广播）
@@ -93,14 +93,49 @@
         { url: 'https://git.mxg.pub/api/github/list', parse: parseMxg }
     ];
 
-    // 网络全断时的最后保险：只做连通性测速，不依赖任何第三方接口
-    const LAST_RESORT_NODES = [
+    /**
+     * 内置镜像池：双聚合接口全挂时的最后保险（本地连通性测速筛选，不依赖任何第三方接口）。
+     * 均为长期维护的公益加速源，校验日期 2026-09，失效节点请自行增删。
+     * 收录规则：仅收「前缀 + 完整 GitHub URL」兼容格式，可直接参与 mirrorUrl 直链拼装；
+     * 路径拼接式 / 专用源（gitclone、jsdelivr 等）与该规则不兼容，未收入。
+     */
+    const BUILTIN_MIRRORS = [
+        // 原 v1.2 兜底六节点
         'https://gh-proxy.com/',
         'https://ghproxy.net/',
         'https://gh.llkk.cc/',
         'https://hub.ddayh.com/',
         'https://gh.con.sh/',
-        'https://ghproxy.053000.xyz/'
+        'https://ghproxy.053000.xyz/',
+        // 公益源 · 美国 Cloudflare CDN
+        'https://gh.h233.eu.org/',
+        'https://gh.ddlc.top/',
+        'https://ghproxy.it/',
+        'https://github.boki.moe/',
+        'https://gh.jasonzeng.dev/',
+        'https://gh.monlor.com/',
+        'https://github.geekery.cn/',
+        'https://github.ednovas.xyz/',
+        'https://ghfile.geekertao.top/',
+        'https://ghp.keleyaa.com/',
+        'https://gh.chjina.com/',
+        'https://ghpxy.hwinzniej.top/',
+        'https://cdn.crashmc.com/',
+        'https://git.yylx.win/',
+        'https://gitproxy.mrhjx.cn/',
+        'https://ghproxy.cxkpro.top/',
+        'https://gh.xxooo.cf/',
+        'https://gh.idayer.com/',
+        'https://gh.zwy.one/',
+        'https://ghproxy.monkeyray.net/',
+        // 公益源 · 多区域 / 其他 CDN
+        'https://hk.gh-proxy.org/',
+        'https://cdn.gh-proxy.org/',
+        'https://edgeone.gh-proxy.org/',
+        'https://ghfast.top/',
+        'https://wget.la/',
+        // 查询串拼接式（mirrorUrl 对 ?/& 结尾免斜杠直拼）
+        'https://down.npee.cn/?'
     ];
 
     // 注入场景规则表：新增/调整位置只改这里，注入器是通用执行器
@@ -667,7 +702,7 @@
     }
 
     async function nodesFromProbe() {
-        const list = await probeMany(LAST_RESORT_NODES);
+        const list = await probeMany(BUILTIN_MIRRORS);
         if (!list.length) throw new Error('内置节点全部不可达');
         return list;
     }
@@ -878,10 +913,13 @@
      * 镜像可用性靠 HEAD 预检判断：失败记入健康度并自动换下一个。
      * ==================================================================== */
 
-    /** GitHub 原链 + 镜像前缀 → 镜像直链 */
+    /** GitHub 原链 + 镜像前缀 → 镜像直链
+     *  常规前缀以 / 拼接；以 ? & = 结尾的查询串式前缀（如 down.npee.cn/?）免斜杠直拼 */
     function mirrorUrl(githubUrl, nodeUrl) {
         if (!githubUrl || !nodeUrl) return '';
-        return String(nodeUrl).replace(/\/+$/, '') + '/' + String(githubUrl).replace(/^\/+/, '');
+        const node = String(nodeUrl).replace(/\/+$/, '');
+        const sep = /[?=&]$/.test(node) ? '' : '/';
+        return node + sep + String(githubUrl).replace(/^\/+/, '');
     }
 
     /**
@@ -1034,7 +1072,7 @@
      *     downloadCount    通过 GitHub API 显示各文件下载量
      *     replaceTime      相对时间 → 精确时间
      *     collapsibleNotes 更新日志可折叠
-     *   主动排除与原脚本冲突/冗余的部分：代理下拉（依赖 XIU2 脚本）、回到顶部按钮。
+     *   主动排除冲突/冗余的部分：代理下拉（易与其他脚本重复）、回到顶部按钮。
      *   纯计算在 L2-b（Arch.*），本层只做 DOM 编排与数据获取。
      * ==================================================================== */
 
