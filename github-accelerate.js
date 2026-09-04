@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.4.0
+// @version      1.4.3
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底）、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
-// @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
-// @downloadURL  https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
+// @updateURL    https://gh-proxy.com/https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
+// @downloadURL  https://gh-proxy.com/https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
 // @icon         data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232da44e'/%3E%3Crect x='14.7' y='6.2' width='2.6' height='9.6' rx='1.3' fill='%23fff'/%3E%3Cpath d='M9.4 15.2h13.2l-6.6 6.8z' fill='%23fff'/%3E%3Crect x='9.2' y='22.4' width='13.6' height='2.5' rx='1.25' fill='%23fff' opacity='.85'/%3E%3Ccircle cx='24.5' cy='8' r='5.8' fill='%23000' opacity='.22'/%3E%3Cpath d='M25.7 4 22.4 8.9h2.1l-1.6 2.9 3-4.8h-1.9z' fill='%23fff'/%3E%3C/svg%3E
 // @match        *://github.com/*
 // @match        *://gist.github.com/*
@@ -79,6 +79,7 @@
     const LATENCY_FAST = 300;             // 延迟分档（ms）
     const LATENCY_MID = 800;
     const LATENCY_SCALE = 1500;           // 进度条满格基准
+    const LATENCY_UNKNOWN = 99999;        // 内置节点未测速标记（排序沉底，显示「未测速」）
     const INJECT_DEBOUNCE = 260;          // 注入防抖
     const INJECT_INTERVAL = 5000;         // 兜底轮询
 
@@ -760,7 +761,8 @@
         hydrate() {
             const cached = Store.read(K.nodes, []);
             if (Array.isArray(cached) && cached.length) {
-                this.nodes = cached.filter((n) => n && n.url);
+                // 缓存同样并入内置镜像池：即使刷新接口全挂，内置源也在面板可见可测
+                this.nodes = this.mergeBuiltin(cached.filter((n) => n && n.url));
                 this.updatedAt = Store.read(K.updatedAt, 0);
             }
             this.visible = Store.read(K.visible, []);
@@ -809,9 +811,25 @@
                 const key = raw.replace(/\/+$/, '');
                 const latency = Number(n.latency) || 0;
                 const old = best.get(key);
-                if (!old || latency < old.latency) best.set(key, { url: raw, latency });
+                if (!old || latency < old.latency) best.set(key, { url: raw, latency, builtin: !!n.builtin });
             }
             return Array.from(best.values()).sort((a, b) => a.latency - b.latency);
+        },
+
+        /**
+         * 合并内置镜像池：无论聚合接口是否可用，内置源始终纳入节点面板
+         * 统一管理（显示、勾选、测速）。已在线列表中的节点优先（有实测延迟），
+         * 其余内置源以「未测速」（LATENCY_UNKNOWN）追加，排序自然沉底，
+         * 点「测速 / 全部测速」后按真实延迟重新归位。
+         */
+        mergeBuiltin(list) {
+            const known = new Set((Array.isArray(list) ? list : [])
+                .map((n) => String(n.url).replace(/\/+$/, '')));
+            const extra = BUILTIN_MIRRORS
+                .map((u) => u.replace(/\/+$/, ''))
+                .filter((u) => !known.has(u))
+                .map((u) => ({ url: u, latency: LATENCY_UNKNOWN, builtin: true }));
+            return (Array.isArray(list) ? list : []).concat(extra);
         },
 
         setVisible(list) {
@@ -880,17 +898,17 @@
         }
     };
 
-    /** 节点加载：API → 内置连通测速 → 保留旧值 */
+    /** 节点加载：API → 内置测速 → 保留旧值；两条路径均并入内置镜像池统一管理 */
     async function loadNodes(reason) {
         try {
-            NodeStore.setNodes(await nodesFromApi());
-            Log.info(reason + '刷新：接口返回 ' + NodeStore.nodes.length + ' 个节点');
+            NodeStore.setNodes(NodeStore.mergeBuiltin(await nodesFromApi()));
+            Log.info(reason + '刷新：接口返回 ' + NodeStore.nodes.length + ' 个节点（含内置池）');
             return true;
         } catch (e) {
             Log.warn(reason + '刷新：接口失败 →', e.message);
         }
         try {
-            NodeStore.setNodes(await nodesFromProbe());
+            NodeStore.setNodes(NodeStore.mergeBuiltin(await nodesFromProbe()));
             Log.info(reason + '刷新：内置测速得到 ' + NodeStore.nodes.length + ' 个节点');
             return true;
         } catch (e) {
@@ -1454,14 +1472,17 @@
 
     /* ======================================================================
      * L5-d · CAPABILITY —— Tools：仓库页工具注入（当前：DeepWiki 跳转）
-     *   scan()   按开关与页面类型决定「注入 / 校正 / 移除」，幂等可重入；
-     *   findBar() 锚点降级链：
-     *     ① 旧版 ul.pagehead-actions
-     *     ② 新版 React 仓库头：从 Star 计数器/Watchers 链接向上爬到
-     *        「仓库头的直接子级」顶层操作容器（Star/Fork/Watch 所在行）。
-     *        绝不注入到按钮内部——非法嵌套会被 React 重渲染直接吞掉（v1.2 按钮
-     *        不显示的根因）。
-     *     ③ 都没有 → 返回 null 留待 Watcher 重扫。
+     *   scan()    按开关与页面类型决定「注入 / 校正 / 移除」，幂等可重入；
+     *   findBar() 锚点降级链（对照 github.com/microsoft/vscode 真实 DOM）：
+     *     ① 旧版 ul.pagehead-actions；
+     *     ② 新版仓库头 #repository-container-header 内，Star 计数器
+     *        （#repo-stars-counter-star，span→a→div→li→ul→…→header）或
+     *        Watchers/Stargazers 链接作种子向上爬升：
+     *        - 途经的第一个动作列表 <ul>（Watch/Fork/Star 所在列表）优先，
+     *          按列表语义追加 <li>，与原生按钮同排；
+     *        - 无列表则退到仓库头顶层操作容器（绝不注入 <button>/<a> 内部，
+     *          非法嵌套会被 React 重渲染吞掉——v1.2 按钮消失的根因）；
+     *     ③ 多种子设计：id 再次改版时仍有 a[href$="/watchers"] 兜底。
      * ==================================================================== */
     const Tools = {
         id: 'gh-deepwiki-li',
@@ -1470,19 +1491,27 @@
             return !!(t && t.deepwiki);
         },
 
-        /** 仓库头操作容器：li（旧版）或带样式的顶层容器（新版），找不到返回 null */
+        /** 仓库头操作区锚点：动作列表 <ul> 或顶层操作容器，找不到返回 null */
         findBar() {
+            // ① 旧版仓库头操作栏
             const oldBar = document.querySelector('ul.pagehead-actions');
             if (oldBar) return oldBar;
+            // ② 种子节点：Star 计数器优先，Watchers/Stargazers 链接兜底
             const head = document.querySelector('#repository-container-header');
-            if (!head) return null;
-            const seed = head.querySelector('#repo-stars-counter-star, a[href$="/watchers"]');
+            const seed = (head && head.querySelector('#repo-stars-counter-star')) ||
+                document.querySelector('a[href$="/watchers"], a[href$="/stargazers"]');
             if (!seed) return null;
-            let top = seed;
-            while (top.parentElement && top.parentElement !== head && top.parentElement !== document.body) {
+            // ③ 爬升：记录途经的第一个动作列表，止于仓库头 / 主容器边界
+            let list = null, top = seed, bounded = false;
+            while (top.parentElement && top.parentElement !== document.body) {
                 top = top.parentElement;
+                if (top.tagName === 'UL' && !list && head && head.contains(top)) list = top;
+                if ((head && top === head) || top.tagName === 'MAIN') { bounded = true; break; }
             }
-            return (top.parentElement === head) ? top : null;
+            if (list) return list;                                        // Watch/Fork/Star 列表
+            if (bounded && top !== head &&
+                top.tagName !== 'BUTTON' && top.tagName !== 'A') return top;  // 顶层操作容器
+            return null;
         },
 
         build(url) {
@@ -1531,8 +1560,8 @@
             const bar = this.findBar();
             if (!bar) return false;
             const li = this.build(url);
-            if (bar.tagName === 'UL') bar.prepend(li);       // 旧版：列表首位
-            else bar.appendChild(li);                        // 新版：操作行末尾（Star 右侧）
+            if (bar.tagName === 'UL') bar.prepend(li);   // 动作列表：列表语义（与 Watch/Fork/Star 同排）
+            else bar.appendChild(li);                    // 顶层操作容器：行末追加
             return true;
         }
     };
@@ -2256,16 +2285,19 @@ html[data-color-mode="light"]{
                 }
 
                 list.innerHTML = nodes.map((n) => {
+                    const unknown = (n.latency || 0) >= LATENCY_UNKNOWN;
                     const ms = n.latency || 0;
-                    const lv = Utils.level(ms);
+                    const lv = Utils.level(unknown ? LATENCY_SCALE : ms);
                     const on = NodeStore.visible.includes(n.url);
                     return '<div class="ghb-row">' +
                         '<label class="ghb-cb"><input type="checkbox" class="ghb-n-cb" data-url="' + Utils.esc(n.url) + '"' +
                             (on ? ' checked' : '') + '><span></span></label>' +
                         '<div class="ghb-main">' +
-                        '  <div class="ghb-name" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) + '</div>' +
+                        '  <div class="ghb-name" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) +
+                                (n.builtin ? '<span class="ghb-tag" style="margin-left:6px;">内置</span>' : '') + '</div>' +
                         '  <div class="ghb-meta ghb-t-' + lv + '"><span class="ghb-bar"><i class="ghb-f-' + lv +
-                        '" style="width:' + Utils.pct(ms) + '%"></i></span><span>' + ms + 'ms</span></div>' +
+                        '" style="width:' + (unknown ? 2 : Utils.pct(ms)) + '%"></i></span><span>' +
+                                (unknown ? '未测速' : ms + 'ms') + '</span></div>' +
                         '</div>' +
                         '<button class="ghb-btn ghb-n-test" data-url="' + Utils.esc(n.url) + '">测速</button>' +
                         '</div>';
@@ -2497,10 +2529,12 @@ html[data-color-mode="light"]{
                     return;
                 }
                 host.innerHTML = list.map((n) => {
+                    const unknown = (n.latency || 0) >= LATENCY_UNKNOWN;
                     const ms = n.latency || 0;
                     return '<div class="ghb-nrow">' +
                         '<span class="ghb-nd" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) + '</span>' +
-                        '<span class="ghb-tag ghb-t-' + Utils.level(ms) + '">' + ms + 'ms</span>' +
+                        '<span class="ghb-tag ghb-t-' + Utils.level(unknown ? LATENCY_SCALE : ms) + '">' +
+                            (unknown ? '未测速' : ms + 'ms') + '</span>' +
                         '<button class="ghb-btn ghb-dl-go" data-node="' + Utils.esc(n.url) + '">' +
                             Icons.download + '下载</button>' +
                         '</div>';
@@ -2586,9 +2620,10 @@ html[data-color-mode="light"]{
         schedule(ms) {
             clearTimeout(this._timer);
             this._timer = setTimeout(() => {
-                Injector.run();
-                Enhancer.scan();
-                Tools.scan();
+                // 模块间相互隔离：单个模块异常不拖垮其余注入（v1.4.0 前 Tools 会被前置异常掐死）
+                try { Injector.run(); } catch (e) { Log.warn('Injector 异常', e); }
+                try { Enhancer.scan(); } catch (e) { Log.warn('Enhancer 异常', e); }
+                try { Tools.scan(); } catch (e) { Log.warn('Tools 异常', e); }
             }, ms || 0);
         },
 
@@ -2609,7 +2644,11 @@ html[data-color-mode="light"]{
             mo.observe(document.body, { childList: true, subtree: true });
             document.addEventListener('turbo:load', () => this.schedule(300));
             document.addEventListener('pjax:end', () => this.schedule(300));
-            setInterval(() => Injector.run(), INJECT_INTERVAL);   // 兜底轮询
+            // 兜底轮询：注入 + DeepWiki 补挂（GitHub 重渲染吞按钮后 ≤5s 自动恢复）
+            setInterval(() => {
+                try { Injector.run(); } catch (e) { Log.warn('Injector 异常', e); }
+                try { Tools.scan(); } catch (e) { Log.warn('Tools 异常', e); }
+            }, INJECT_INTERVAL);
         }
     };
 
@@ -2683,8 +2722,8 @@ html[data-color-mode="light"]{
         });
 
         refreshMenu();
-        Enhancer.scan();
-        Tools.scan();
+        try { Enhancer.scan(); } catch (e) { Log.warn('Enhancer 异常', e); }
+        try { Tools.scan(); } catch (e) { Log.warn('Tools 异常', e); }
         Watcher.start();   // 唯一的 SPA 监听者：驱动 Injector / Enhancer / Tools 重扫
 
         if (NodeStore.isStale() && Settings.get().refreshOnStart) {
