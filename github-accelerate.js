@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.0.1
+// @version      1.2.0
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现、并发测速、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
@@ -23,6 +23,7 @@
 // @grant        GM_addStyle
 // @grant        GM_info
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -32,12 +33,12 @@
  * ============================================================================
  *
  *   L1  CONFIG      常量、存储键、默认设置、注入场景规则表（唯一事实来源）
- *   L2  FOUNDATION  Utils 格式化 · Store 持久化 · Icons 内联 SVG · Log
+ *   L2  FOUNDATION  Utils 格式化 · Store 持久化 · Icons 内联 SVG · Log · Arch/Route 纯函数
  *   L3  NETWORK     gmRequest · 节点多源降级 · 并发测速
- *   L4  STATE       NodeStore（节点/可见集合/时间戳，变更即广播）
- *   L5  CAPABILITY  Downloader 直链交付（不接管下载） · Injector 规则表驱动
- *   L6  VIEW        Launcher(右中) · Panel(节点/注入/设置) · DlModal · Toast
- *   L7  BOOTSTRAP   装配与生命周期
+ *   L4  STATE       Settings(四组偏好) + NodeStore（变更即广播）
+ *   L5  CAPABILITY  Downloader 直链交付 · Injector 规则表驱动 · Enhancer 增强显示 · Tools 页面工具
+ *   L6  VIEW        Launcher(右中) · Panel(节点/注入/增强/工具/设置) · DlModal · Toast
+ *   L7  BOOTSTRAP   装配 · 分组菜单 · 生命周期
  *
  */
 
@@ -198,6 +199,10 @@
         collapsibleNotes: true    // 更新日志可折叠
     };
 
+    const TOOLS_DEFAULT = {
+        deepwiki: true            // 仓库页顶部注入 DeepWiki 跳转按钮
+    };
+
     const DEFAULT_SETTINGS = {
         refreshOnStart: true,
         showLauncher: true,
@@ -206,7 +211,8 @@
         launcherPos: null,
         lastTab: 'nodes',
         inject: Object.assign({}, DEFAULT_INJECT),
-        enhance: Object.assign({}, ENHANCE_DEFAULT)
+        enhance: Object.assign({}, ENHANCE_DEFAULT),
+        tools: Object.assign({}, TOOLS_DEFAULT)
     };
 
 
@@ -518,6 +524,39 @@
         }
     };
 
+    /* ======================================================================
+     * L2-c · FOUNDATION —— Route：GitHub 路径解析纯函数（无 DOM 依赖）
+     *   只做「pathname → owner/repo」与「repo → DeepWiki URL」的纯计算。
+     *   白名单式解析：settings / orgs 等非仓库页一律返回 null，绝不误注入。
+     * ==================================================================== */
+    const Route = {
+        // 一级路径为这些值时必非仓库页（GitHub 官方功能区）
+        SKIP: new Set([
+            'settings', 'orgs', 'topics', 'marketplace', 'explore', 'notifications',
+            'features', 'security', 'pricing', 'sponsors', 'collections', 'trending',
+            'events', 'dashboard', 'about', 'enterprise', 'login', 'logout', 'join',
+            'site', 'search', 'pulls', 'issues', 'watching', 'new', 'codespaces',
+            'account', 'users', 'showcases', 'customer-stories', 'readme', 'tools',
+            'git', 'apps', 'install', 'new', 'mine'
+        ]),
+
+        /** pathname → {owner, repo} | null（非仓库页返回 null） */
+        parseRepo(pathname) {
+            const seg = String(pathname || '').split('/').filter(Boolean);
+            if (seg.length < 2) return null;
+            const owner = seg[0];
+            const repo = seg[1].replace(/\.git$/i, '');
+            if (this.SKIP.has(owner.toLowerCase()) || this.SKIP.has(repo.toLowerCase())) return null;
+            if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(repo)) return null;
+            return { owner, repo };
+        },
+
+        /** repo → DeepWiki 地址（只取 owner/repo，丢弃更深的页面路径） */
+        deepWikiUrl(repo) {
+            return 'https://deepwiki.com/' + encodeURIComponent(repo.owner) + '/' + encodeURIComponent(repo.repo);
+        }
+    };
+
 
     /* ======================================================================
      * L3 · NETWORK —— Promise 化的 GM_xmlhttpRequest + 多源节点 + 并发测速
@@ -661,6 +700,7 @@
             this.data = Object.assign({}, DEFAULT_SETTINGS, saved);
             this.data.inject = Object.assign({}, DEFAULT_INJECT, saved.inject || {});
             this.data.enhance = Object.assign({}, ENHANCE_DEFAULT, saved.enhance || {});
+            this.data.tools = Object.assign({}, TOOLS_DEFAULT, saved.tools || {});
             return this.data;
         },
         get() { return this.data; },
@@ -673,7 +713,11 @@
             Store.write(K.settings, this.data);
         },
         reset() {
-            this.data = Object.assign({}, DEFAULT_SETTINGS, { inject: Object.assign({}, DEFAULT_INJECT) });
+            this.data = Object.assign({}, DEFAULT_SETTINGS, {
+                inject: Object.assign({}, DEFAULT_INJECT),
+                enhance: Object.assign({}, ENHANCE_DEFAULT),
+                tools: Object.assign({}, TOOLS_DEFAULT)
+            });
             Store.write(K.settings, this.data);
         }
     };
@@ -1434,6 +1478,111 @@
         }
     };
 
+    /* ======================================================================
+     * L5-d · CAPABILITY —— Tools：仓库页工具注入（当前：DeepWiki 跳转）
+     *   scan()  按开关与页面类型决定「注入 / 更新 / 移除」按钮，幂等可重入；
+     *   inject() 锚点降级：旧版 ul.pagehead-actions → 新版仓库头 → 留待重扫；
+     *   init()  复用 turbo/pjax/MutationObserver 的 SPA 重扫模式。
+     * ==================================================================== */
+    const Tools = {
+        id: 'gh-deepwiki-li',
+        _scanTimer: null,
+
+        enabled() {
+            const t = Settings.get().tools;
+            return !!(t && t.deepwiki);
+        },
+
+        scan() {
+            const el = document.getElementById(this.id);
+            const repo = this.enabled() ? Route.parseRepo(location.pathname) : null;
+            if (!repo) {
+                if (el) el.remove();
+                return false;
+            }
+            const url = Route.deepWikiUrl(repo);
+            if (el) {
+                // 幂等：已在页面则只校正 href（SPA 路由切换到另一仓库时跟随更新）
+                const a = el.querySelector('a');
+                if (a && a.getAttribute('href') !== url) a.setAttribute('href', url);
+                return true;
+            }
+            return this.inject(url);
+        },
+
+        inject(url) {
+            const li = document.createElement('li');
+            li.id = this.id;
+
+            // 关键属性走 DOM API（可测、不受 innerHTML 解析影响），图标内容走 innerHTML
+            const a = document.createElement('a');
+            a.setAttribute('href', url);
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener noreferrer');
+            a.setAttribute('title', '在 DeepWiki 打开该仓库（AI 生成的 Wiki 文档，新标签页）');
+            a.style.cssText =
+                'display:inline-flex;align-items:center;gap:6px;' +
+                'background:var(--button-default-bgColor-rest,var(--color-btn-bg));' +
+                'color:var(--button-default-fgColor-rest,var(--color-btn-text));' +
+                'border:1px solid var(--button-default-borderColor-rest,var(--color-btn-border));' +
+                'border-radius:6px;padding:3px 12px;font-size:12px;font-weight:500;' +
+                'line-height:20px;text-decoration:none;cursor:pointer;' +
+                'transition:background-color 80ms cubic-bezier(0.65,0,0.35,1);';
+            a.innerHTML =
+                '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="currentColor" style="flex-shrink:0">' +
+                '<path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>' +
+                '<span>DeepWiki</span>';
+
+            // 悬停态用 JS 挂（GitHub CSP 不保证允许内联 onmouseover 属性）
+            a.addEventListener('mouseenter', () => {
+                a.style.backgroundColor = 'var(--button-default-bgColor-hover,var(--color-btn-hover-bg))';
+            });
+            a.addEventListener('mouseleave', () => { a.style.backgroundColor = ''; });
+            li.appendChild(a);
+
+            // 锚点降级：旧版仓库头操作栏 → 新版仓库头容器；都找不到则返回 false 留待重扫
+            const oldBar = document.querySelector('ul.pagehead-actions');
+            if (oldBar) { oldBar.prepend(li); return true; }
+            const newHead = document.querySelector('#repository-container-header');
+            if (newHead) {
+                li.style.listStyle = 'none';
+                const star = newHead.querySelector('#repo-stars-counter-star');
+                const row = star ? star.closest('div, section') : null;
+                if (row && row !== newHead) {
+                    row.appendChild(li);
+                } else {
+                    li.style.position = 'relative';
+                    li.style.marginLeft = 'auto';
+                    newHead.appendChild(li);
+                }
+                return true;
+            }
+            li.remove();
+            return false;
+        },
+
+        init() {
+            this.scan();
+            let lastHref = location.href;
+            const mo = new MutationObserver(() => {
+                if (location.href !== lastHref) {
+                    lastHref = location.href;
+                    clearTimeout(this._scanTimer);
+                    this._scanTimer = setTimeout(() => this.scan(), 200);
+                    return;
+                }
+                // 同一页面内按钮被 GitHub 重渲染吞掉时补挂（已存在则零开销）
+                if (!document.getElementById(this.id) && this.enabled() && Route.parseRepo(location.pathname)) {
+                    clearTimeout(this._scanTimer);
+                    this._scanTimer = setTimeout(() => this.scan(), 500);
+                }
+            });
+            mo.observe(document.body, { childList: true, subtree: true });
+            document.addEventListener('turbo:load', () => this.scan());
+            document.addEventListener('pjax:end', () => this.scan());
+        }
+    };
+
 
     /* ======================================================================
      * L6 · VIEW —— 样式表 / 启动器 / 面板 / 下载弹窗 / Toast
@@ -2046,14 +2195,16 @@ html[data-color-mode="light"]{
                     '<div class="ghb-tabs">' +
                     '  <button class="ghb-tab" data-tab="nodes">节点</button>' +
                     '  <button class="ghb-tab" data-tab="inject">注入</button>' +
-                    '  <button class="ghb-tab" data-tab="settings">设置</button>' +
                     '  <button class="ghb-tab" data-tab="enhance">增强</button>' +
+                    '  <button class="ghb-tab" data-tab="tools">工具</button>' +
+                    '  <button class="ghb-tab" data-tab="settings">设置</button>' +
                     '</div>' +
                     '<div class="ghb-body">' +
                     '  <div class="ghb-page" id="ghb-page-nodes"></div>' +
                     '  <div class="ghb-page" id="ghb-page-inject"></div>' +
-                    '  <div class="ghb-page" id="ghb-page-settings"></div>' +
                     '  <div class="ghb-page" id="ghb-page-enhance"></div>' +
+                    '  <div class="ghb-page" id="ghb-page-tools"></div>' +
+                    '  <div class="ghb-page" id="ghb-page-settings"></div>' +
                     '</div>' +
                     '<div class="ghb-foot"><span>作者 ' + AUTHOR + '</span><span id="ghb-panel-count"></span></div>';
 
@@ -2063,8 +2214,9 @@ html[data-color-mode="light"]{
                 });
                 this.renderNodesPage();
                 this.renderInjectPage();
-                this.renderSettingsPage();
                 this.renderEnhancePage();
+                this.renderToolsPage();
+                this.renderSettingsPage();
                 this.switch(Settings.get().lastTab || 'nodes');
             },
 
@@ -2086,6 +2238,7 @@ html[data-color-mode="light"]{
                 this.renderNodesPage();
                 this.renderInjectPage();
                 this.renderEnhancePage();
+                this.renderToolsPage();
                 this.renderSettingsPage();
             },
 
@@ -2355,6 +2508,35 @@ html[data-color-mode="light"]{
                     });
                 });
             },
+            renderToolsPage() {
+                const page = this.root.querySelector('#ghb-page-tools');
+                if (!page) return;
+                const cfg = Settings.get().tools;
+                const rows = [
+                    { key: 'deepwiki', t: 'DeepWiki 跳转按钮', d: '在仓库页顶部操作区注入 DeepWiki 入口，新标签打开该仓库的 AI 生成 Wiki 文档；非仓库页（设置、组织等）不会注入' }
+                ];
+                page.innerHTML =
+                    '<div class="ghb-hint">仓库页辅助工具：页面级小功能，改动即时生效，无需刷新。</div>' +
+                    rows.map((r) =>
+                        '<div class="ghb-setting">' +
+                        '  <label class="ghb-label" for="ghb-t-' + r.key + '">' +
+                        '    <span class="ghb-lt">' + Utils.esc(r.t) + '</span>' +
+                        '    <span class="ghb-ld">' + Utils.esc(r.d) + '</span>' +
+                        '  </label>' +
+                        '  <span class="ghb-switch"><input type="checkbox" id="ghb-t-' + r.key + '" data-key="' + r.key + '"' +
+                                (cfg[r.key] ? ' checked' : '') + '><i></i></span>' +
+                        '</div>').join('');
+
+                page.querySelectorAll('.ghb-switch input').forEach((cb) => {
+                    cb.addEventListener('change', () => {
+                        const key = cb.dataset.key;
+                        Settings.get().tools[key] = cb.checked;
+                        Store.write(K.settings, Settings.get());
+                        View.Toast.info((cb.checked ? '已开启「' : '已关闭「') + (rows.find((x) => x.key === key).t) + '」');
+                        Tools.scan();
+                    });
+                });
+            },
 
         },
 
@@ -2481,32 +2663,74 @@ html[data-color-mode="light"]{
         Store.write(K.settings, s);
         View.Toast.info('「' + label + '」已' + (next ? '启用' : '禁用') + '，刷新页面后生效');
         Enhancer.scan();
+        refreshMenu();
     }
 
-    function registerMenu() {
-        const items = [
+    function toggleTool(key, label) {
+        const s = Settings.get();
+        const next = !s.tools[key];
+        s.tools[key] = next;
+        Store.write(K.settings, s);
+        View.Toast.info('「' + label + '」已' + (next ? '启用' : '禁用') + '，页面即时生效');
+        Tools.scan();
+        refreshMenu();
+    }
+
+    /* ---- 分组菜单：面板｜节点｜下载｜增强｜工具｜设置 ----
+     * 组名行（fn 为 null）仅作视觉分组；开关项标签带「开/关」状态，
+     * 任何切换后 refreshMenu() 注销重注册，让菜单文字始终与实际一致。 */
+    let menuCmds = [];
+
+    function menuStateTag(v) { return v ? '：开 ✓' : '：关'; }
+
+    function buildMenuItems() {
+        const st = Settings.get();
+        const eh = st.enhance, th = st.tools;
+        return [
             ['打开加速面板', () => { if (!View.Panel.open) View.Panel.toggle(); }],
+            ['─── 节点 ───', null],
             ['刷新镜像节点', () => loadNodes('菜单').then((ok) =>
                 ok ? View.Toast.ok('已刷新 ' + NodeStore.nodes.length + ' 个节点') : View.Toast.err('刷新失败'))],
             ['显示 / 隐藏侧边启动器', () => {
-                const on = !Settings.get().showLauncher;
+                const on = !st.showLauncher;
                 View.setLauncherVisible(on);
                 View.Toast.info('侧边启动器已' + (on ? '显示' : '隐藏'));
+                refreshMenu();
             }],
+            ['─── 下载 ───', null],
+            ['全自动下载' + menuStateTag(st.autoDownload), () => {
+                Settings.set({ autoDownload: !Settings.get().autoDownload });
+                View.Toast.info('全自动下载已' + (Settings.get().autoDownload ? '开启' : '关闭'));
+                refreshMenu();
+            }],
+            ['─── 增强 ───', null],
+            ['★ 分组排序' + menuStateTag(eh.groupSort), () => toggleEnhance('groupSort', '文件分组排序')],
+            ['★ 显示下载量' + menuStateTag(eh.downloadCount), () => toggleEnhance('downloadCount', '显示下载量')],
+            ['★ 精确时间' + menuStateTag(eh.replaceTime), () => toggleEnhance('replaceTime', '相对时间替换')],
+            ['★ 日志折叠' + menuStateTag(eh.collapsibleNotes), () => toggleEnhance('collapsibleNotes', '更新日志折叠')],
+            ['─── 工具 ───', null],
+            ['DeepWiki 跳转' + menuStateTag(th.deepwiki), () => toggleTool('deepwiki', 'DeepWiki 跳转')],
+            ['─── 设置 ───', null],
             ['重置全部设置', () => {
                 resetAll();
                 View.restoreLauncherPos();
                 View.Toast.ok('已重置，刷新页面后生效');
-            }],
-            ['★ 增强：分组排序', () => toggleEnhance('groupSort', '文件分组排序')],
-            ['★ 增强：下载量', () => toggleEnhance('downloadCount', '显示下载量')],
-            ['★ 增强：精确时间', () => toggleEnhance('replaceTime', '相对时间替换')],
-            ['★ 增强：折叠日志', () => toggleEnhance('collapsibleNotes', '更新日志折叠')],
+            }]
         ];
-        if (typeof GM_registerMenuCommand === 'function') {
-            items.forEach(([label, fn]) => GM_registerMenuCommand(label, fn));
-        }
     }
+
+    function refreshMenu() {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+        if (typeof GM_unregisterMenuCommand === 'function') {
+            menuCmds.forEach((h) => { try { GM_unregisterMenuCommand(h); } catch (e) { /* 忽略 */ } });
+        }
+        menuCmds = [];
+        buildMenuItems().forEach(([label, fn]) => {
+            menuCmds.push(GM_registerMenuCommand(label, fn || (() => {})));
+        });
+    }
+
+    function registerMenu() { refreshMenu(); }
 
     /** 清空全部持久化数据并恢复默认（油猴菜单与设置页共用，避免两处逻辑漂移） */
     function resetAll() {
@@ -2533,6 +2757,7 @@ html[data-color-mode="light"]{
         registerMenu();
         if (Settings.get().showPageButtons) Injector.start();
         Enhancer.init();
+        Tools.init();
 
         if (NodeStore.isStale() && Settings.get().refreshOnStart) {
             loadNodes('启动');
