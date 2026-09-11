@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.5.4
+// @version      1.5.5
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底 + 自建节点，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
@@ -843,7 +843,7 @@
                     best.set(key, {
                         url: raw, latency,
                         builtin: !!n.builtin, custom: !!n.custom,
-                        region: n.region || ''
+                        region: n.region || '', down: !!n.down
                     });
                 } else {
                     best.set(key, {
@@ -851,7 +851,8 @@
                         latency: Math.min(latency, old.latency),
                         builtin: old.builtin || !!n.builtin,
                         custom: old.custom || !!n.custom,
-                        region: old.region || n.region || ''
+                        region: old.region || n.region || '',
+                        down: !!n.down || !!old.down   // 不可达标记透传，防止 setNodes 重建对象时丢失
                     });
                 }
             }
@@ -904,24 +905,26 @@
         },
 
         /**
-         * 测速结果落库：测通的更新延迟，未测通的保留在池中沉底（不删除，保持统一管理）。
+         * 测速结果落库：测通的更新延迟；测挂的保留在池中沉底并标记 down（显示「不可达」，不删除，保持统一管理）。
          * 测速结果只带 {url, latency}，标记（内置/自建/地区）从当前池回填，防丢失。
          */
-        applyProbe(list) {
+        applyProbe(list, failedUrls) {
+            const failSet = new Set(failedUrls || []);
             const flags = new Map((this.nodes || []).map((n) => [n.url, n]));
             const enriched = (list || []).map((n) => {
                 const prev = flags.get(n.url) || {};
                 return {
                     url: n.url, latency: n.latency,
                     builtin: !!prev.builtin, custom: !!prev.custom, region: prev.region || ''
-                };
+                };   // 测通节点重建对象时不带 down，不可达标记自动清除
             });
             const okUrls = new Set(enriched.map((n) => n.url));
             const rest = (this.nodes || [])
                 .filter((n) => !okUrls.has(n.url))
                 .map((n) => ({
                     url: n.url, latency: LATENCY_UNKNOWN,
-                    builtin: !!n.builtin, custom: !!n.custom, region: n.region || ''
+                    builtin: !!n.builtin, custom: !!n.custom, region: n.region || '',
+                    down: failSet.has(n.url) ? true : !!n.down   // 本轮测挂 → 标记不可达；未参与本轮 → 沿用旧标记
                 }));
             this.setNodes(this.mergeBuiltin(enriched.concat(rest)));
         },
@@ -937,6 +940,8 @@
         markOk(url) {
             delete this.fails[url];
             this.lastOk[url] = Date.now();
+            const n = (this.nodes || []).find((m) => m.url === url);
+            if (n) n.down = false;   // 内存即时清除不可达标记；落盘随下次 setNodes
             Store.write(K.fails, this.fails);
             Store.write(K.lastOk, this.lastOk);
         },
@@ -2387,7 +2392,7 @@ html[data-color-mode="light"]{
                         '  <div class="ghb-name" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) + tags + '</div>' +
                         '  <div class="ghb-meta ghb-t-' + lv + '"><span class="ghb-bar"><i class="ghb-f-' + lv +
                         '" style="width:' + (unknown ? 2 : Utils.pct(ms)) + '%"></i></span><span>' +
-                                (unknown ? '未测速' : ms + 'ms') + '</span></div>' +
+                                (unknown ? (n.down ? '不可达' : '未测速') : ms + 'ms') + '</span></div>' +
                         '</div>' +
                         '<button class="ghb-btn ghb-n-test" data-url="' + Utils.esc(n.url) + '">测速</button>' +
                         (n.custom ? '<button class="ghb-btn ghb-n-del" data-url="' + Utils.esc(n.url) + '">删</button>' : '') +
@@ -2423,10 +2428,17 @@ html[data-color-mode="light"]{
 
             async onProbe(btn) {
                 if (!NodeStore.nodes.length) { View.Toast.warn('暂无节点可测速'); return; }
-                const list = await View.spinLoad(btn, () => probeMany(NodeStore.nodes.map((n) => n.url)));
-                if (!list.length) { View.Toast.err('全部节点均不可达'); return; }
+                const urls = NodeStore.nodes.map((n) => n.url);
+                const list = await View.spinLoad(btn, () => probeMany(urls));
+                if (!list.length) {   // 全挂：不重排延迟，只把全部节点标记为不可达（此前会停留在「未测速」）
+                    NodeStore.nodes.forEach((n) => { n.down = true; });
+                    NodeStore.setNodes(NodeStore.nodes.slice());
+                    View.Toast.err('全部节点均不可达');
+                    return;
+                }
                 NodeStore.markOkMany(list.map((n) => n.url));
-                NodeStore.applyProbe(list);   // 测挂节点保留池中（沉底为未测速），不删除
+                const okUrls = new Set(list.map((n) => n.url));
+                NodeStore.applyProbe(list, urls.filter((u) => !okUrls.has(u)));   // 测挂节点保留池中沉底并标记不可达，不删除
                 View.Toast.ok('测速完成，' + list.length + ' 个节点已就绪');
             },
 
@@ -2439,8 +2451,15 @@ html[data-color-mode="light"]{
                     btn.textContent = r.ok ? r.ms + 'ms' : '不可达';
                     btn.style.color = r.ok ? 'var(--ghb-good)' : 'var(--ghb-bad)';
                     const node = NodeStore.nodes.find((n) => n.url === url);
-                    if (node && r.ok) {
-                        node.latency = r.ms;
+                    if (node) {
+                        if (r.ok) {
+                            node.latency = r.ms;
+                            node.down = false;
+                        } else {
+                            NodeStore.markFail(url);        // 失败记忆与下载/预检路径一致
+                            node.latency = LATENCY_UNKNOWN;
+                            node.down = true;               // 延迟区持久显示「不可达」，不再停留「未测速」
+                        }
                         NodeStore.setNodes(NodeStore.nodes.slice().sort((a, b) => a.latency - b.latency));
                     }
                     setTimeout(() => {
@@ -2605,7 +2624,7 @@ html[data-color-mode="light"]{
                     return '<div class="ghb-nrow">' +
                         '<span class="ghb-nd" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) + '</span>' +
                         '<span class="ghb-tag ghb-t-' + Utils.level(unknown ? LATENCY_SCALE : ms) + '">' +
-                            (unknown ? '未测速' : ms + 'ms') + '</span>' +
+                            (unknown ? (n.down ? '不可达' : '未测速') : ms + 'ms') + '</span>' +
                         '<button class="ghb-btn ghb-dl-go" data-node="' + Utils.esc(n.url) + '">' +
                             Icons.download + '下载</button>' +
                         '</div>';
