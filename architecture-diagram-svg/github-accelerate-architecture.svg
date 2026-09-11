@@ -1,5 +1,5 @@
 <svg viewBox="0 0 680 756" width="100%" role="img" xmlns="http://www.w3.org/2000/svg">
-  <title>github-accelerate.js v1.5.1 分层架构图</title>
+  <title>github-accelerate.js v1.5.3 分层架构图</title>
   <desc>七层单向依赖架构，Watcher 统一驱动 SPA 重扫，内置镜像池兜底，琥珀色为 v1.3 / v1.4.x 修改模块</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -22,7 +22,7 @@
     .arr{stroke:#85B7EB;stroke-width:1.5;fill:none;}
     .dsh{stroke:#EF9F27;stroke-width:1.5;fill:none;stroke-dasharray:5 4;}
   </style>
-  <text class="cap" x="60" y="38">github-accelerate.js v1.5.1 · 分层架构</text>
+  <text class="cap" x="60" y="38">github-accelerate.js v1.5.3 · 分层架构</text>
 
   <rect class="lyr" x="60" y="64" width="560" height="64" rx="10"/>
   <text class="t1" x="84" y="90">L1 · CONFIG</text>
@@ -34,7 +34,7 @@
   <rect class="chip" x="392" y="81" width="112" height="30" rx="7"/>
   <text class="tc" x="448" y="96" text-anchor="middle" dominant-baseline="central">SCENARIOS 规则表</text>
   <rect class="chipx" x="510" y="81" width="100" height="30" rx="7"/>
-  <text class="tcx" x="560" y="96" text-anchor="middle" dominant-baseline="central">内置镜像池·32</text>
+  <text class="tcx" x="560" y="96" text-anchor="middle" dominant-baseline="central">内置镜像池·32·地区</text>
 
   <path class="arr" d="M340 128 L340 150" marker-end="url(#arrow)"/>
   <rect class="lyr" x="60" y="156" width="560" height="64" rx="10"/>
@@ -67,7 +67,7 @@
   <rect class="chip" x="250" y="357" width="114" height="30" rx="7"/>
   <text class="tc" x="307" y="372" text-anchor="middle" dominant-baseline="central">Settings 三组偏好</text>
   <rect class="chip" x="372" y="357" width="121" height="30" rx="7"/>
-  <text class="tc" x="432" y="372" text-anchor="middle" dominant-baseline="central">NodeStore+内置池合并</text>
+  <text class="tc" x="432" y="372" text-anchor="middle" dominant-baseline="central">NodeStore 三源统一合并</text>
 
   <path class="arr" d="M340 404 L340 426" marker-end="url(#arrow)"/>
   <rect class="lyr" x="60" y="432" width="560" height="64" rx="10"/>
@@ -100,12 +100,12 @@
   <rect class="chip" x="250" y="633" width="98" height="30" rx="7"/>
   <text class="tc" x="299" y="648" text-anchor="middle" dominant-baseline="central">装配·生命周期</text>
   <rect class="chipx" x="356" y="633" width="108" height="30" rx="7"/>
-  <text class="tcx" x="410" y="648" text-anchor="middle" dominant-baseline="central">Watcher 统一重扫·零序列化</text>
+  <text class="tcx" x="410" y="648" text-anchor="middle" dominant-baseline="central">Watcher·事件驱动</text>
   <rect class="chipx" x="472" y="633" width="95" height="30" rx="7"/>
   <text class="tcx" x="519" y="648" text-anchor="middle" dominant-baseline="central">菜单 emoji 分组</text>
 
   <path class="dsh" d="M464 648 L632 648 L632 464 L622 464" marker-end="url(#arrowA)"/>
   <path class="dsh" d="M60 704 L100 704"/>
-  <text class="leg" x="110" y="708">琥珀 = v1.3 / v1.4 修改模块 · 蓝 = 既有分层（依赖自上而下 · L5→L6 经装配注入解耦）</text>
-  <text class="leg" x="60" y="734">镜像统一管理：API+内置池合并入列 · 未测速沉底 · 测挂不删 · 历史延迟跨刷新保留</text>
+  <text class="leg" x="110" y="708">琥珀 = 近期优化模块 · 蓝 = 既有分层（依赖自上而下 · L5→L6 经装配注入解耦）</text>
+  <text class="leg" x="60" y="734">镜像统一管理：API+内置池+自建节点入列 · 延迟档内随机均衡 · 测挂不删 · 历史延迟跨刷新保留</text>
 </svg>

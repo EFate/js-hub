@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.5.1
-// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
+// @version      1.5.3
+// @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底 + 自建节点，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
 // @updateURL    https://gh-proxy.com/https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
@@ -38,7 +38,7 @@
  *   L4  STATE       Settings(三组偏好) + NodeStore（变更即广播）
  *   L5  CAPABILITY  Downloader 直链交付 · Injector 规则表驱动 · Enhancer 增强显示
  *   L6  VIEW        Launcher(右中) · Panel(节点/注入/增强/设置) · DlModal · Toast
- *   L7  BOOTSTRAP   装配 · Watcher(SPA 统一重扫，单 MutationObserver 服务全模块) · 菜单
+ *   L7  BOOTSTRAP   装配 · Watcher(SPA 统一重扫：单 MutationObserver + turbo/pjax/soft-nav 三通道事件) · 菜单
  *
  *   依赖自上而下单向；SPA 重扫统一由 L7 Watcher 驱动 Injector/Enhancer，
  *   各能力模块只暴露幂等的 run/scan，不再自建监听器。
@@ -67,7 +67,8 @@
         visible: NS + '_visible',
         updatedAt: NS + '_updated_at',
         fails: NS + '_fails',
-        lastOk: NS + '_last_ok'
+        lastOk: NS + '_last_ok',
+        custom: NS + '_custom_nodes'
     };
 
     const NODE_TTL = 60 * 60 * 1000;      // 节点缓存 1 小时
@@ -78,6 +79,7 @@
     const HEAD_TIMEOUT = 8000;            // 直链 HEAD 预检超时(冷启动 / 全败兜底)
     const HEAD_TIMEOUT_FAST = 2500;       // 有候选但无 fresh 时的短预检
     const PRECHECK_TTL = 5 * 60 * 1000;   // 5 分钟:命中此窗口的预检成功节点视为 fresh,直接 fire
+    const DEGRADED_WINDOW = 60 * 1000;    // 预检全军覆没后的降级窗口:期间跳过逐个预检直接放行
     const LATENCY_FAST = 300;             // 延迟分档（ms）
     const LATENCY_MID = 800;
     const LATENCY_SCALE = 1500;           // 进度条满格基准
@@ -100,44 +102,45 @@
      * 均为长期维护的公益加速源，校验日期 2026-09，失效节点请自行增删。
      * 收录规则：仅收「前缀 + 完整 GitHub URL」兼容格式，可直接参与 mirrorUrl 直链拼装；
      * 路径拼接式 / 专用源（gitclone、jsdelivr 等）与该规则不兼容，未收入。
+     * region 仅用于面板地区徽章（用户选节点时参考）。
      */
     const BUILTIN_MIRRORS = [
         // 原 v1.2 兜底六节点
-        'https://gh-proxy.com/',
-        'https://ghproxy.net/',
-        'https://gh.llkk.cc/',
-        'https://hub.ddayh.com/',
-        'https://gh.con.sh/',
-        'https://ghproxy.053000.xyz/',
+        { url: 'https://gh-proxy.com', region: '多国' },
+        { url: 'https://ghproxy.net', region: '英国' },
+        { url: 'https://gh.llkk.cc', region: '多国' },
+        { url: 'https://hub.ddayh.com', region: '多国' },
+        { url: 'https://gh.con.sh', region: '多国' },
+        { url: 'https://ghproxy.053000.xyz', region: '多国' },
         // 公益源 · 美国 Cloudflare CDN
-        'https://gh.h233.eu.org/',
-        'https://gh.ddlc.top/',
-        'https://ghproxy.it/',
-        'https://github.boki.moe/',
-        'https://gh.jasonzeng.dev/',
-        'https://gh.monlor.com/',
-        'https://github.geekery.cn/',
-        'https://github.ednovas.xyz/',
-        'https://ghfile.geekertao.top/',
-        'https://ghp.keleyaa.com/',
-        'https://gh.chjina.com/',
-        'https://ghpxy.hwinzniej.top/',
-        'https://cdn.crashmc.com/',
-        'https://git.yylx.win/',
-        'https://gitproxy.mrhjx.cn/',
-        'https://ghproxy.cxkpro.top/',
-        'https://gh.xxooo.cf/',
-        'https://gh.idayer.com/',
-        'https://gh.zwy.one/',
-        'https://ghproxy.monkeyray.net/',
+        { url: 'https://gh.h233.eu.org', region: '美国' },
+        { url: 'https://gh.ddlc.top', region: '美国' },
+        { url: 'https://ghproxy.it', region: '美国' },
+        { url: 'https://github.boki.moe', region: '美国' },
+        { url: 'https://gh.jasonzeng.dev', region: '美国' },
+        { url: 'https://gh.monlor.com', region: '美国' },
+        { url: 'https://github.geekery.cn', region: '美国' },
+        { url: 'https://github.ednovas.xyz', region: '美国' },
+        { url: 'https://ghfile.geekertao.top', region: '美国' },
+        { url: 'https://ghp.keleyaa.com', region: '美国' },
+        { url: 'https://gh.chjina.com', region: '美国' },
+        { url: 'https://ghpxy.hwinzniej.top', region: '美国' },
+        { url: 'https://cdn.crashmc.com', region: '美国' },
+        { url: 'https://git.yylx.win', region: '美国' },
+        { url: 'https://gitproxy.mrhjx.cn', region: '美国' },
+        { url: 'https://ghproxy.cxkpro.top', region: '美国' },
+        { url: 'https://gh.xxooo.cf', region: '美国' },
+        { url: 'https://gh.idayer.com', region: '美国' },
+        { url: 'https://gh.zwy.one', region: '美国' },
+        { url: 'https://ghproxy.monkeyray.net', region: '美国' },
         // 公益源 · 多区域 / 其他 CDN
-        'https://hk.gh-proxy.org/',
-        'https://cdn.gh-proxy.org/',
-        'https://edgeone.gh-proxy.org/',
-        'https://ghfast.top/',
-        'https://wget.la/',
+        { url: 'https://hk.gh-proxy.org', region: '香港' },
+        { url: 'https://cdn.gh-proxy.org', region: '日本' },
+        { url: 'https://edgeone.gh-proxy.org', region: '多国' },
+        { url: 'https://ghfast.top', region: '多国' },
+        { url: 'https://wget.la', region: '多国' },
         // 查询串拼接式（mirrorUrl 对 ?/& 结尾免斜杠直拼）
-        'https://down.npee.cn/?'
+        { url: 'https://down.npee.cn/?', region: '美国' }
     ];
 
     // 注入场景规则表：新增/调整位置只改这里，注入器是通用执行器
@@ -295,15 +298,40 @@
             if (ms < LATENCY_MID) return 'mid';
             return 'slow';
         },
+        /**
+         * 延迟档内随机：整体保持按延迟分档有序（fast → mid → slow → 未测速），
+         * 但同档内部顺序随机。用于候选节点排序，在「优先选快」与
+         * 「分散公益源压力」之间取平衡（档间有序保证体验，档内随机保证公平）。
+         */
+        tierShuffle(list) {
+            const arr = (list || []).slice();
+            if (arr.length < 2) return arr;
+            const tier = (n) => (n.latency || 0) >= LATENCY_UNKNOWN ? 3
+                : (n.latency || 0) >= LATENCY_MID ? 2
+                : (n.latency || 0) >= LATENCY_FAST ? 1 : 0;
+            const byTier = new Map();
+            arr.forEach((n) => {
+                const t = tier(n);
+                if (!byTier.has(t)) byTier.set(t, []);
+                byTier.get(t).push(n);
+            });
+            const out = [];
+            [0, 1, 2, 3].forEach((t) => {
+                const group = byTier.get(t) || [];
+                for (let i = group.length - 1; i > 0; i--) {   // Fisher–Yates 档内洗牌
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [group[i], group[j]] = [group[j], group[i]];
+                }
+                out.push(...group);
+            });
+            return out;
+        },
         pct(ms) {
             return Math.max(2, Math.min(100, (ms / LATENCY_SCALE) * 100));
         },
         clock(ts) {
             if (!ts) return '—';
             return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-        },
-        sleep(ms) {
-            return new Promise((r) => setTimeout(r, ms));
         },
         /** 剪贴板：优先异步 API，失败回落到 execCommand */
         async copy(text) {
@@ -578,7 +606,9 @@
                 method: 'GET',
                 url: target,
                 timeout: PROBE_TIMEOUT,
-                onload: () => finish(true),
+                // 有响应即视为「服务器活着」（镜像根路径返回 404 也说明服务在跑，属正常）；
+                // 但 5xx 与 429 是明确的网关错误/限流，带上它们会把坏节点当低延迟好节点用。
+                onload: (res) => finish(!(res.status >= 500 || res.status === 429)),
                 onerror: () => finish(false),
                 ontimeout: () => finish(false)
             });
@@ -596,6 +626,7 @@
             const done = () => {
                 if (settled) return;
                 settled = true;
+                clearTimeout(netTimer);
                 resolve(out
                     .filter((r) => r.ok)
                     .sort((a, b) => a.ms - b.ms)
@@ -614,8 +645,8 @@
                 if (active === 0 && queue.length === 0) done();
             };
 
+            const netTimer = setTimeout(done, 30000); // 安全网：30 秒强制收口，收口后随 done 一并清理
             next();
-            setTimeout(done, 30000); // 安全网：30 秒强制收口
         });
     }
 
@@ -661,7 +692,7 @@
     }
 
     async function nodesFromProbe() {
-        const list = await probeMany(BUILTIN_MIRRORS);
+        const list = await probeMany(BUILTIN_MIRRORS.map((m) => m.url));
         if (!list.length) throw new Error('内置节点全部不可达');
         return list;
     }
@@ -708,6 +739,8 @@
         nodes: [],
         visible: [],
         updatedAt: 0,
+        customs: [],         // 自建节点 URL 列表（持久化，面板可增删）
+        hasVisible: false,   // 用户是否已有显式勾选（K.visible 写入即真；空数组代表主动「全不选」）
         fails: {},           // url → 连续失败次数（持久化，镜像失效的自我记忆）
         lastOk: {},          // url → 上次预检成功时间戳（持久化，新鲜度缓存）
         subs: [],
@@ -722,21 +755,48 @@
                 this.nodes = this.mergeBuiltin(cached.filter((n) => n && n.url));
                 this.updatedAt = Store.read(K.updatedAt, 0);
             }
-            this.visible = Store.read(K.visible, []);
+            const savedCustom = Store.read(K.custom, []);
+            this.customs = (Array.isArray(savedCustom) ? savedCustom : [])   // 存储被外部改坏时不致崩掉 bootstrap
+                .filter((u) => u && /^https?:\/\//.test(String(u)))
+                .map((u) => String(u).replace(/\/+$/, ''));
+            if (this.customs.length) {
+                this.nodes = this.mergeBuiltin(this.nodes);
+            }
+            // 区分「从未初始化」与「用户显式全不选」：后者是空数组也必须原样保留，
+            // 否则刷新页面会被 resetVisible() 静默改回 Top10（用户选择被覆盖）。
+            const rawVisible = Store.read(K.visible, null);
+            this.hasVisible = Array.isArray(rawVisible);
+            this.visible = this.hasVisible ? rawVisible.slice() : [];
             this.fails = Store.read(K.fails, {}) || {};
             this.lastOk = Store.read(K.lastOk, {}) || {};
             this.pruneLastOk();
             this.pruneVisible();
-            if (!this.visible.length && this.nodes.length) this.resetVisible();
+            if (!this.hasVisible && this.nodes.length) this.resetVisible();
         },
 
+        /**
+         * 勾选表剪枝：只保留仍存在于节点池里的 URL。
+         * 按「去尾斜杠」归一化比对并写回节点侧的规范 URL——
+         * 旧版本内置源 URL 带尾斜杠（v1.6.0 起已去），直接严格比对会把
+         * 老用户辛苦勾选的节点一次性清空（旧数据升级场景）。
+         */
         pruneVisible() {
-            const valid = new Set(this.nodes.map((n) => n.url));
-            this.visible = this.visible.filter((u) => valid.has(u));
+            if (!this.nodes.length) return;   // 节点池为空时无从剪枝，保留已保存的勾选
+            const canon = new Map(this.nodes.map((n) => [String(n.url).replace(/\/+$/, ''), n.url]));
+            const next = [];
+            (this.visible || []).forEach((u) => {
+                const hit = canon.get(String(u).replace(/\/+$/, ''));
+                if (hit && !next.includes(hit)) next.push(hit);
+            });
+            const changed = next.length !== (this.visible || []).length
+                || next.some((u, i) => u !== this.visible[i]);
+            this.visible = next;
+            if (changed) Store.write(K.visible, this.visible);
         },
 
         resetVisible() {
             this.visible = this.nodes.slice(0, 10).map((n) => n.url);
+            this.hasVisible = true;   // 自动初始化同样落定为显式选择，避免反复触发
             Store.write(K.visible, this.visible);
         },
 
@@ -748,7 +808,7 @@
                 Store.write(K.nodes, this.nodes);
                 Store.write(K.updatedAt, this.updatedAt);
                 this.pruneVisible();
-                if (!this.visible.length) this.resetVisible();
+                if (!this.hasVisible) this.resetVisible();
             } else {
                 // 全部来源失败：保留旧节点，绝不把界面清空
                 this.nodes = prev;
@@ -758,54 +818,107 @@
 
         /**
          * 节点去重：两家接口会返回相同的代理地址，且可能带/不带尾斜杠。
-         * 以「去尾斜杠的 URL」为身份，重复时保留延迟更低的一条。
+         * 以「去尾斜杠的 URL」为身份，重复时保留延迟更低的一条；
+         * 内置/自建/地区标记做并集合并，避免标记在去重中丢失。
          */
         dedupe(list) {
-            const best = new Map();   // 归一化 URL → {url, latency}
+            const best = new Map();   // 归一化 URL → {url, latency, ...标记}
             for (const n of (Array.isArray(list) ? list : [])) {
                 if (!n || !n.url) continue;
                 const raw = String(n.url);
                 const key = raw.replace(/\/+$/, '');
                 const latency = Number(n.latency) || 0;
                 const old = best.get(key);
-                if (!old || latency < old.latency) best.set(key, { url: raw, latency, builtin: !!n.builtin });
+                if (!old) {
+                    best.set(key, {
+                        url: raw, latency,
+                        builtin: !!n.builtin, custom: !!n.custom,
+                        region: n.region || ''
+                    });
+                } else {
+                    best.set(key, {
+                        url: latency < old.latency ? raw : old.url,
+                        latency: Math.min(latency, old.latency),
+                        builtin: old.builtin || !!n.builtin,
+                        custom: old.custom || !!n.custom,
+                        region: old.region || n.region || ''
+                    });
+                }
             }
             return Array.from(best.values()).sort((a, b) => a.latency - b.latency);
         },
 
         /**
-         * 合并内置镜像池：无论聚合接口是否可用，内置源始终纳入节点面板
-         * 统一管理（显示、勾选、测速）。已在线列表中的节点优先（有实测延迟）；
-         * 内置源此前测出的延迟跨刷新保留（存于 this.nodes，不因重置为未测速）。
+         * 合并内置镜像池 + 自建节点：无论聚合接口是否可用，两类节点始终纳入
+         * 面板统一管理（显示、勾选、测速）。已在线列表中的节点优先（有实测延迟）；
+         * 此前测出的延迟跨刷新保留（存于 this.nodes，不因重置为未测速）。
          */
         mergeBuiltin(list) {
-            const known = new Set((Array.isArray(list) ? list : [])
+            const incoming = Array.isArray(list) ? list : [];
+            const known = new Set(incoming
                 .map((n) => String(n.url).replace(/\/+$/, '')));
+            const norm = (u) => String(u).replace(/\/+$/, '');
             const prevLat = new Map((this.nodes || [])
-                .filter((n) => n.builtin && n.latency < LATENCY_UNKNOWN)
-                .map((n) => [n.url, n.latency]));
+                .filter((n) => (n.builtin || n.custom) && n.latency < LATENCY_UNKNOWN)
+                .map((n) => [norm(n.url), n.latency]));
+            const lat = (u) => (prevLat.has(norm(u)) ? prevLat.get(norm(u)) : LATENCY_UNKNOWN);
             const extra = BUILTIN_MIRRORS
-                .map((u) => u.replace(/\/+$/, ''))
-                .filter((u) => !known.has(u))
-                .map((u) => ({
-                    url: u,
-                    latency: prevLat.has(u) ? prevLat.get(u) : LATENCY_UNKNOWN,
-                    builtin: true
-                }));
-            return (Array.isArray(list) ? list : []).concat(extra);
+                .filter((m) => !known.has(norm(m.url)))
+                .map((m) => ({ url: m.url, region: m.region, latency: lat(m.url), builtin: true }));
+            const customExtra = (this.customs || [])
+                .filter((u) => !known.has(norm(u)))
+                .map((u) => ({ url: u, latency: lat(u), custom: true }));
+            return incoming.concat(customExtra, extra);
         },
 
-        /** 测速结果落库：测通的更新延迟，未测通的保留在池中沉底（不删除，保持统一管理） */
+        /** 添加自建节点（面板输入）：归一化 + 校验 + 持久化 + 并入统一管理 */
+        addCustom(url) {
+            const u = String(url || '').trim().replace(/\/+$/, '');
+            if (!/^https?:\/\/.+/.test(u)) return false;
+            if (this.customs.includes(u)) return false;
+            this.customs.push(u);
+            Store.write(K.custom, this.customs);
+            this.setNodes(this.mergeBuiltin(this.nodes));
+            return true;
+        },
+
+        /** 移除自建节点：三处落盘同步清（自建表 / 节点池 / 勾选），防止下次 hydrate 复活 */
+        removeCustom(url) {
+            this.customs = this.customs.filter((u) => u !== url);
+            Store.write(K.custom, this.customs);
+            this.nodes = this.nodes.filter((n) => n.url !== url);
+            this.visible = this.visible.filter((u) => u !== url);
+            Store.write(K.nodes, this.nodes);
+            Store.write(K.visible, this.visible);
+            this.emit();
+        },
+
+        /**
+         * 测速结果落库：测通的更新延迟，未测通的保留在池中沉底（不删除，保持统一管理）。
+         * 测速结果只带 {url, latency}，标记（内置/自建/地区）从当前池回填，防丢失。
+         */
         applyProbe(list) {
-            const okUrls = new Set((list || []).map((n) => n.url));
+            const flags = new Map((this.nodes || []).map((n) => [n.url, n]));
+            const enriched = (list || []).map((n) => {
+                const prev = flags.get(n.url) || {};
+                return {
+                    url: n.url, latency: n.latency,
+                    builtin: !!prev.builtin, custom: !!prev.custom, region: prev.region || ''
+                };
+            });
+            const okUrls = new Set(enriched.map((n) => n.url));
             const rest = (this.nodes || [])
                 .filter((n) => !okUrls.has(n.url))
-                .map((n) => ({ url: n.url, latency: LATENCY_UNKNOWN, builtin: !!n.builtin }));
-            this.setNodes(this.mergeBuiltin((list || []).concat(rest)));
+                .map((n) => ({
+                    url: n.url, latency: LATENCY_UNKNOWN,
+                    builtin: !!n.builtin, custom: !!n.custom, region: n.region || ''
+                }));
+            this.setNodes(this.mergeBuiltin(enriched.concat(rest)));
         },
 
         setVisible(list) {
             this.visible = list.slice();
+            this.hasVisible = true;   // 显式勾选（含全不选）从此固定，不再被自动重选覆盖
             Store.write(K.visible, this.visible);
             this.emit();
         },
@@ -853,8 +966,10 @@
         },
 
         /**
-         * 候选镜像：纯查询，无副作用。
+         * 候选镜像（确定性）：纯查询，无副作用。
          * 先剔除连续失败超限的，再按用户勾选过滤；都没勾选则退回延迟最低的 10 个。
+         * 输出按延迟升序 —— 手动弹窗、「最快节点下载」「复制链接」依赖此顺序，
+         * 顺序必须稳定可预期（自动下载的分流请用 balanced()）。
          */
         candidates() {
             const alive = this.nodes.filter((n) => (this.fails[n.url] || 0) < NODE_FAIL_LIMIT);
@@ -862,8 +977,19 @@
             const picked = pool.filter((n) => this.visible.includes(n.url));
             return picked.length ? picked : pool.slice(0, 10);
         },
+
+        /**
+         * 候选镜像（均衡型）：在确定性排序基础上做「延迟档内随机」。
+         * 自动下载专用——延迟相近的节点质量相当，固定顺序会让全网用户集中
+         * 打同几个最快源（羊群效应：公益源被打爆 → 限速 → 大家一起变慢）。
+         * 手动弹窗必须用 candidates()，否则「最快节点」会名不副实。
+         */
+        balanced() {
+            return Utils.tierShuffle(this.candidates());
+        },
         isFresh(url) { return (this.lastOk[url] || 0) > Date.now() - PRECHECK_TTL; },
-        freshCandidates() { return this.candidates().filter((n) => this.isFresh(n.url)); },
+        /** 新鲜候选同样档内随机：自动路径才有分流意义 */
+        freshCandidates() { return Utils.tierShuffle(this.candidates().filter((n) => this.isFresh(n.url))); },
 
         isStale() {
             return !this.nodes.length || (Date.now() - this.updatedAt > NODE_TTL);
@@ -939,6 +1065,8 @@
     }
 
     const Downloader = {
+        degradedUntil: 0,   // 降级窗口截止时间（内存级，不持久化——重启浏览器即重置）
+
         /** 直链交付：原生 a[download] 点击，发射后即交还浏览器，脚本不再介入 */
         deliver(githubUrl, filename) {
             clickAnchor(githubUrl, filename);
@@ -966,8 +1094,18 @@
                 this.deliver(mirrorUrl(githubUrl, best.url), filename);
                 return { ok: true, nodeUrl: best.url, blind: false, trace };
             }
-            const list = NodeStore.candidates().slice(0, NODE_RETRY_MAX);
+            const list = NodeStore.balanced().slice(0, NODE_RETRY_MAX);
             if (!list.length) return { ok: false, error: '没有可用镜像节点', trace: [] };
+
+            // 降级窗口：上一轮预检全军覆没，期间不再逐个预检（否则每次下载都白等
+            // 4×2.5s 才走到兜底），直接对最快节点 blind 放行；预检一旦成功即清除窗口。
+            if (Date.now() < this.degradedUntil) {
+                const best = list[0];
+                if (hooks.onNode) hooks.onNode(best, 1, 1, true);
+                this.deliver(mirrorUrl(githubUrl, best.url), filename);
+                trace.push('降级窗口 · 直发 ' + Utils.shortDomain(best.url));
+                return { ok: true, nodeUrl: best.url, blind: true, trace };
+            }
 
             for (let i = 0; i < list.length; i++) {
                 const node = list[i];
@@ -975,16 +1113,20 @@
                 const target = mirrorUrl(githubUrl, node.url);
                 const head = await precheck(target, HEAD_TIMEOUT_FAST);
                 if (head.ok) {
+                    this.degradedUntil = 0;
                     NodeStore.markOk(node.url);
                     this.deliver(target, filename);
                     return { ok: true, nodeUrl: node.url, size: head.size, blind: false, trace };
                 }
-                NodeStore.markFail(node.url);
-                trace.push(Utils.shortDomain(node.url) + ' ✗ ' + head.error);
-                Log.warn('镜像预检失败 →', Utils.shortDomain(node.url), head.error);
-            }
+                // 405/501 = 该镜像不支持 HEAD 探测，属「测不出」而非「不可用」：
+                // 计入失败会把好节点逐步踢出候选（失败数持久化，2 次即出局），故豁免。
+                const headUnsupported = /^HTTP (405|501)$/.test(head.error || '');
+                if (!headUnsupported) NodeStore.markFail(node.url);
+                trace.push(Utils.shortDomain(node.url) + ' ✗ ' + head.error + (headUnsupported ? '（无 HEAD）' : ''));
+                Log.warn('镜像预检失败 →', Utils.shortDomain(node.url), head.error, headUnsupported ? '(不支持 HEAD，不计失败)' : '');            }
 
             // 轮转耗尽：预检可能误判（部分镜像不支持 HEAD），对最快节点直接放行
+            this.degradedUntil = Date.now() + DEGRADED_WINDOW;
             const best = list[0];
             if (hooks.onNode) hooks.onNode(best, list.length, list.length, true);
             this.deliver(mirrorUrl(githubUrl, best.url), filename);
@@ -1164,21 +1306,25 @@
             return null;
         },
 
-        /* ---- 处理单个 release 折叠块（幂等：首次登记监听，之后每次按需重排/重注控件） ---- */
+        /** 剪掉已脱离文档的 release 块：SPA 长会话下避免对僵尸 DOM 做无谓重排
+         *  （块内不自建观察者，懒加载资产由全局 Watcher 命中后经 scan() 重排覆盖） */
+        pruneBoxes() {
+            this._boxes = this._boxes.filter((d) => d.isConnected);
+        },
+
+        /* ---- 处理单个 release 折叠块（幂等：首次登记监听，之后每次按需重排/重注控件） ----
+         * 事件驱动（参考 include-fragment 懒加载机制）：资产列表就绪/变化统一由
+         * L7 Watcher 的全局观察命中后驱动 scan() 到达此处，块内不再挂 MutationObserver。 */
         processBox(details, repo, tag) {
             const first = details.dataset.ghBox !== '1';
             details.dataset.ghBox = '1';
 
             if (first) {
+                this.pruneBoxes();
                 this._boxes.push(details);
                 details.addEventListener('toggle', () => {
                     if (details.open && this.active('groupSort')) this.formatAndSort(details);
                 });
-                const mo = new MutationObserver(() => {
-                    if (details.open && this.active('groupSort')) this.formatAndSort(details);
-                    if (details._assets) this.injectCounts(details, details._assets);
-                });
-                mo.observe(details, { childList: true, subtree: true });
             }
 
             this.injectControls(details, repo, tag);
@@ -1201,6 +1347,7 @@
             sel.addEventListener('change', () => {
                 onPick(sel.value);
                 document.querySelectorAll('.' + cls).forEach((s) => { s.value = sel.value; });
+                this.pruneBoxes();   // 剪掉 SPA 跳转后脱离文档的旧块，避免对僵尸 DOM 做无谓重排
                 this._boxes.forEach((d) => { if (this.active('groupSort')) this.formatAndSort(d); });
             });
             return sel;
@@ -1284,7 +1431,17 @@
                 r.querySelector('a[href*="/releases/download/"], a[href*="/archive/"], a[href*="/attestations/"]'));
             if (!rows.length) return;
 
-            const parent = rows[0].parentNode;
+            // 容器记忆：首次排序时记下文件列表容器（ul）。
+            // 若直接用 rows[0].parentNode，当某 release 全是校验/附属文件时，
+            // 首轮排序后行都被挪进 wrapper，二次重排会把 parent 认成 wrapper，
+            // 结果整组被写进 wrapper 内部而非列表里。记忆的容器失效（页面重建）才重新探测。
+            const remembered = details._listParent;
+            const parent = (remembered && details.contains(remembered)
+                && !remembered.classList.contains('gh-group-aux-wrapper')
+                && !remembered.classList.contains('gh-meta-files-wrapper'))
+                ? remembered
+                : rows[0].parentNode;
+            details._listParent = parent;
             const os = this._os || Arch.getCurrentOS();
             const arch = this._arch || Arch.getCurrentArch();
 
@@ -1619,14 +1776,6 @@ html[data-color-mode="light"]{
 }
 .ghb-switch input:checked + i{background:var(--ghb-accent);}
 .ghb-switch input:checked + i::after{transform:translateX(18px);}
-.ghb-select, .ghb-num{
-  padding:5px 8px; border:1px solid var(--ghb-bd); border-radius:6px;
-  background:var(--ghb-bg-2); color:var(--ghb-fg); font-family:inherit; font-size:12px;
-}
-.ghb-num{width:72px; text-align:right;}
-
-.ghb-select:focus, .ghb-num:focus{outline:none; border-color:var(--ghb-accent);}
-.ghb-inline{display:flex; align-items:center; gap:6px; flex:none;}
 
 .ghb-about{padding:14px 16px; font-size:12px; color:var(--ghb-fg-2); border-top:1px solid var(--ghb-bd-2);}
 .ghb-about b{color:var(--ghb-fg); font-weight:600;}
@@ -1870,6 +2019,8 @@ html[data-color-mode="light"]{
             this.Panel.mount(panel);
             this.DlModal.mount(dl);
             this.bindLauncher(launcher, overlay);
+            // 视口变化后把启动器拉回可视区（用户拖拽过才会干预）
+            window.addEventListener('resize', () => this.clampLauncher());
         },
 
         bindLauncher(launcher, overlay) {
@@ -1921,8 +2072,26 @@ html[data-color-mode="light"]{
                 l.style.right = 'auto';
                 l.style.left = pos.left;
                 l.style.top = pos.top;
+                this.clampLauncher();   // 换显示器 / 窗口变小后，旧坐标可能落在视口外
             }
             this.applyLauncherVisible();
+        },
+
+        /**
+         * 把已拖拽过的启动器拉回可视区（仅处理 inline left/top 已存在的情况，
+         * 未拖拽时保持 CSS 的贴右布局）。窗口缩放/旋转后调用，避免按钮漂到
+         * 视口外既看不见也点不到，只能靠重置设置找回。
+         */
+        clampLauncher() {
+            const l = this.el.launcher;
+            if (!l || !l.style.left) return;
+            const r = l.getBoundingClientRect();
+            const left = Math.max(0, Math.min(window.innerWidth - r.width, r.left));
+            const top = Math.max(0, Math.min(window.innerHeight - r.height, r.top));
+            l.style.right = 'auto';
+            l.style.transform = 'none';
+            l.style.left = left + 'px';
+            l.style.top = top + 'px';
         },
 
         /** 启动器显示状态的唯一写入口：设置项、DOM、面板勾选框三者同步 */
@@ -2049,7 +2218,6 @@ html[data-color-mode="light"]{
         /* ---------- 管理面板 ---------- */
         Panel: {
             open: false,
-            tab: 'nodes',
             root: null,
 
             mount(root) {
@@ -2097,7 +2265,6 @@ html[data-color-mode="light"]{
             switch(tab) {
                 // 旧版本可能残留已废弃页签（如 tools），回落到节点页
                 if (!this.root.querySelector('#ghb-page-' + tab)) tab = 'nodes';
-                this.tab = tab;
                 Settings.set({ lastTab: tab });
                 this.root.querySelectorAll('.ghb-tab').forEach((b) => b.classList.toggle('ghb-on', b.dataset.tab === tab));
                 this.root.querySelectorAll('.ghb-page').forEach((p) => p.classList.toggle('ghb-on', p.id === 'ghb-page-' + tab));
@@ -2114,11 +2281,13 @@ html[data-color-mode="light"]{
                 const page = this.root.querySelector('#ghb-page-nodes');
                 const nodes = NodeStore.nodes;
                 const online = nodes.length > 0;
-                const lats = nodes.map((n) => n.latency || 0);
-                const summary = online
-                    ? nodes.length + ' 个节点 · 最快 ' + Math.min.apply(null, lats) +
-                      'ms · 平均 ' + Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) + 'ms'
-                    : '暂无可用节点';
+                // 只统计已测速节点：未测速用 99999 占位，算进来会得出“最快 99999ms”这种假数据
+                const lats = nodes.map((n) => n.latency || 0).filter((ms) => ms > 0 && ms < LATENCY_UNKNOWN);
+                const summary = !online ? '暂无可用节点'
+                    : lats.length
+                        ? nodes.length + ' 个节点 · 最快 ' + Math.min.apply(null, lats) +
+                          'ms · 平均 ' + Math.round(lats.reduce((a, b) => a + b, 0) / lats.length) + 'ms'
+                        : nodes.length + ' 个节点 · 待测速';
 
                 page.innerHTML =
                     '<div class="ghb-status">' +
@@ -2135,6 +2304,8 @@ html[data-color-mode="light"]{
                     '</div>' +
                     '<div class="ghb-field"><input class="ghb-input" id="ghb-n-filter" placeholder="筛选域名…" value="' +
                         Utils.esc(this.filter || '') + '"></div>' +
+                    '<div class="ghb-field"><input class="ghb-input" id="ghb-n-add" placeholder="添加自建节点，如 https://gh.example.com">' +
+                        '<button class="ghb-btn" id="ghb-n-add-btn">添加</button></div>' +
                     '<div class="ghb-list" id="ghb-n-list"></div>';
 
                 page.querySelector('#ghb-n-refresh').addEventListener('click', (e) => this.onRefresh(e.currentTarget));
@@ -2153,6 +2324,19 @@ html[data-color-mode="light"]{
                 });
                 const filter = page.querySelector('#ghb-n-filter');
                 filter.addEventListener('input', () => { this.filter = filter.value; this.renderList(); });
+                const addBtn = page.querySelector('#ghb-n-add-btn');
+                const addInput = page.querySelector('#ghb-n-add');
+                const submitAdd = () => {
+                    const url = (addInput.value || '').trim();
+                    if (!NodeStore.addCustom(url)) {
+                        View.Toast.warn('请输入合法的节点地址（http/https），且不能与现有节点重复');
+                        return;
+                    }
+                    addInput.value = '';
+                    View.Toast.ok('自建节点已加入：' + Utils.shortDomain(url.replace(/\/+$/, '')));
+                };
+                addBtn.addEventListener('click', submitAdd);
+                addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAdd(); });
                 this.renderList();
             },
 
@@ -2174,17 +2358,21 @@ html[data-color-mode="light"]{
                     const ms = n.latency || 0;
                     const lv = Utils.level(unknown ? LATENCY_SCALE : ms);
                     const on = NodeStore.visible.includes(n.url);
+                    const tags =
+                        (n.builtin ? '<span class="ghb-tag" style="margin-left:6px;">内置</span>' : '') +
+                        (n.custom ? '<span class="ghb-tag" style="margin-left:6px;">自建</span>' : '') +
+                        (n.region ? '<span class="ghb-tag" style="margin-left:6px;">' + Utils.esc(n.region) + '</span>' : '');
                     return '<div class="ghb-row">' +
                         '<label class="ghb-cb"><input type="checkbox" class="ghb-n-cb" data-url="' + Utils.esc(n.url) + '"' +
                             (on ? ' checked' : '') + '><span></span></label>' +
                         '<div class="ghb-main">' +
-                        '  <div class="ghb-name" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) +
-                                (n.builtin ? '<span class="ghb-tag" style="margin-left:6px;">内置</span>' : '') + '</div>' +
+                        '  <div class="ghb-name" title="' + Utils.esc(n.url) + '">' + Utils.esc(Utils.shortDomain(n.url)) + tags + '</div>' +
                         '  <div class="ghb-meta ghb-t-' + lv + '"><span class="ghb-bar"><i class="ghb-f-' + lv +
                         '" style="width:' + (unknown ? 2 : Utils.pct(ms)) + '%"></i></span><span>' +
                                 (unknown ? '未测速' : ms + 'ms') + '</span></div>' +
                         '</div>' +
                         '<button class="ghb-btn ghb-n-test" data-url="' + Utils.esc(n.url) + '">测速</button>' +
+                        (n.custom ? '<button class="ghb-btn ghb-n-del" data-url="' + Utils.esc(n.url) + '">删</button>' : '') +
                         '</div>';
                 }).join('');
 
@@ -2197,6 +2385,12 @@ html[data-color-mode="light"]{
                 });
                 list.querySelectorAll('.ghb-n-test').forEach((b) => {
                     b.addEventListener('click', () => this.onTest(b));
+                });
+                list.querySelectorAll('.ghb-n-del').forEach((b) => {
+                    b.addEventListener('click', () => {
+                        NodeStore.removeCustom(b.dataset.url);
+                        View.Toast.info('已移除自建节点');
+                    });
                 });
 
                 const count = this.root.querySelector('#ghb-panel-count');
@@ -2211,11 +2405,7 @@ html[data-color-mode="light"]{
 
             async onProbe(btn) {
                 if (!NodeStore.nodes.length) { View.Toast.warn('暂无节点可测速'); return; }
-                btn.disabled = true;
-                btn.querySelector('svg').classList.add('ghb-spin');
-                const list = await probeMany(NodeStore.nodes.map((n) => n.url));
-                btn.disabled = false;
-                btn.querySelector('svg').classList.remove('ghb-spin');
+                const list = await View.spinLoad(btn, () => probeMany(NodeStore.nodes.map((n) => n.url)));
                 if (!list.length) { View.Toast.err('全部节点均不可达'); return; }
                 NodeStore.markOkMany(list.map((n) => n.url));
                 NodeStore.applyProbe(list);   // 测挂节点保留池中（沉底为未测速），不删除
@@ -2438,13 +2628,16 @@ html[data-color-mode="light"]{
                 if (btn) { btn.disabled = true; btn.textContent = '预检中…'; }
                 const head = await precheck(target, HEAD_TIMEOUT_FAST);
 
-                if (!head.ok) {
+                // 405/501 = 该镜像不支持 HEAD 探测（「测不出」而非「不可用」）：
+                // 与自动路径的兜底一致，直接放行；计入健康度会把好节点逐步踢出候选。
+                const headUnsupported = /^HTTP (405|501)$/.test(head.error || '');
+                if (!head.ok && !headUnsupported) {
                     NodeStore.markFail(nodeUrl);
                     if (btn) { btn.disabled = false; btn.innerHTML = Icons.download + '下载'; }
                     View.Toast.err('该节点预检失败（' + head.error + '），已记入健康度，试试其他节点');
                     return;
                 }
-                NodeStore.markOk(nodeUrl);
+                if (head.ok) NodeStore.markOk(nodeUrl);
                 this.close();
                 Downloader.deliver(target, this.name);
                 View.Toast.ok('已交给浏览器下载 · ' + this.name + '｜Gopeed 等工具会自动接管');
@@ -2478,6 +2671,7 @@ html[data-color-mode="light"]{
      *   ③ 模块间 try/catch 隔离，单个模块异常不拖垮其余。 */
     const HIT_SEL = [
         'a[href*="codeload"]', 'a[href*="/releases/download"]', 'a[href*="/archive/"]',
+        'a[href*="/zipball/"]', 'a[href*="/tarball/"]',
         'a[href*="/expanded_assets"]', 'a[href*="/releases/tag/"]', '#raw-url',
         'a[href*="/raw/"]', 'a[download]', 'a[href$=".patch"]', 'a[href$=".diff"]',
         'a[href*="/info/lfs/"]', 'relative-time', '.markdown-body'
@@ -2511,8 +2705,11 @@ html[data-color-mode="light"]{
                 }
             });
             mo.observe(document.body, { childList: true, subtree: true });
+            // 路由事件三通道全覆盖：Turbo 导航 / 旧版 pjax / React 软导航（soft-nav）
             document.addEventListener('turbo:load', () => this.schedule(300));
             document.addEventListener('pjax:end', () => this.schedule(300));
+            document.addEventListener('soft-nav:end', () => this.schedule(300));
+            document.addEventListener('soft-nav:react-done', () => this.schedule(300));
         }
     };
 
@@ -2565,8 +2762,10 @@ html[data-color-mode="light"]{
     /** 清空全部持久化数据并恢复默认（油猴菜单与设置页共用，避免两处逻辑漂移） */
     function resetAll() {
         Settings.reset();
-        Store.remove(K.nodes); Store.remove(K.visible); Store.remove(K.updatedAt); Store.remove(K.fails); Store.remove(K.lastOk);
-        NodeStore.nodes = []; NodeStore.visible = [];
+        Store.remove(K.nodes); Store.remove(K.visible); Store.remove(K.updatedAt);
+        Store.remove(K.fails); Store.remove(K.lastOk); Store.remove(K.custom);
+        NodeStore.nodes = []; NodeStore.visible = []; NodeStore.customs = [];
+        NodeStore.hasVisible = false;
         NodeStore.updatedAt = 0; NodeStore.fails = {}; NodeStore.lastOk = {};
         NodeStore.emit();
     }
@@ -2594,7 +2793,8 @@ html[data-color-mode="light"]{
             loadNodes('启动');
         }
 
-        setInterval(() => loadNodes('定时'), NODE_TTL);
+        // 定时只做「缓存过期检查」：过期才拉取，避免无条件重复请求（与「无常驻轮询」的设计声明一致）
+        setInterval(() => { if (NodeStore.isStale()) loadNodes('定时'); }, NODE_TTL);
     }
 
     try {
