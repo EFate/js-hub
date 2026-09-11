@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         GitHub 加速 & 增强助手
 // @namespace    https://github.com/EFate
-// @version      1.5.3
+// @version      1.5.4
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底 + 自建节点，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
@@ -150,7 +150,7 @@
             label: 'Release 压缩包',
             desc: 'Release 页面的 Source code (zip / tar.gz)',
             defaultOn: true,
-            selector: 'a[href*="codeload.github.com"], a[href*="/archive/refs/"], a[href*="/zipball/"], a[href*="/tarball/"]',
+            selector: 'a[href*="codeload.github.com"]:not(.markdown-body a), a[href*="/archive/refs/"]:not(.markdown-body a), a[href*="/zipball/"]:not(.markdown-body a), a[href*="/tarball/"]:not(.markdown-body a)',
             container: (a) => a.closest('li, .Box-row, tr') || a.parentElement,
             name: (a) => a.textContent.trim() || 'Source code'
         },
@@ -159,9 +159,19 @@
             label: 'Release 附件',
             desc: 'Release 页面上传的二进制附件',
             defaultOn: true,
-            selector: 'a[href*="/releases/download/"], a[href*="/releases/expanded_assets/"]',
+            selector: 'a[href*="/releases/download/"]:not(.markdown-body a), a[href*="/releases/expanded_assets/"]:not(.markdown-body a)',
             container: (a) => a.closest('.Box-row, li, tr') || a.parentElement,
             name: (a) => a.textContent.trim()
+        },
+        {
+            key: 'release-notes',
+            label: '更新日志正文',
+            desc: 'Release 更新日志里的下载链接，逐链接注入',
+            defaultOn: true,
+            inline: true,   // 正文一行常有多个下载链接，按钮紧跟各自链接而非挂在行尾
+            selector: '.markdown-body a[href*="/releases/download/"], .markdown-body a[href*="codeload.github.com"], .markdown-body a[href*="/zipball/"], .markdown-body a[href*="/tarball/"]',
+            container: (a) => a.closest('li, p, .markdown-body') || a.parentElement,
+            name: (a) => Utils.filenameFromUrl(a.href)
         },
         {
             key: 'raw-file',
@@ -1177,11 +1187,19 @@
 
         attach(container, link, scenario) {
             if (!container || !link || !link.href) return;
-            if (container.querySelector(':scope > .ghb-dl-btn')) return;
+            // 逐链接去重：更新日志正文一行常有多个下载链接，容器级去重会导致只出一个按钮
+            if (link.dataset.ghbLinked === '1') return;
             // selector 已限定 github 域名（含 codeload.github.com），此处不再二次过滤
             const href = link.href;
             const name = scenario.name(link) || Utils.filenameFromUrl(href);
-            container.appendChild(this.build(href, name));
+            if (scenario.inline) {
+                link.dataset.ghbLinked = '1';
+                link.after(this.build(href, name));            // 正文内嵌：按钮紧跟各自链接
+            } else {
+                if (container.querySelector(':scope > .ghb-dl-btn')) return;   // 资产行等容器保持单按钮视觉
+                link.dataset.ghbLinked = '1';
+                container.appendChild(this.build(href, name));
+            }
         },
 
         run() {
