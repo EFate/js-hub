@@ -87,3 +87,6 @@ _snip/
 test01.js
 test02.js
 test03.js
+# 临时验证目录（jsdom 端到端）
+video-interface-redesign/.tmp/
+node_modules/
