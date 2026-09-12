@@ -1,0 +1,99 @@
+<svg viewBox="0 0 680 560" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <defs>
+    <linearGradient id="hdr" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#161b22"/><stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8b949e"/>
+    </marker>
+  </defs>
+
+  <rect width="680" height="560" rx="14" fill="#0d1117"/>
+  <rect x="1" y="1" width="678" height="76" rx="14" fill="url(#hdr)"/>
+  <rect x="16" y="18" width="34" height="34" rx="8" fill="#2da44e"/>
+  <path d="M33 25 l9 3.5 v6 c0 5 -4 8.5 -9 10.5 c-5 -2 -9 -5.5 -9 -10.5 v-6 z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M29.5 33.5 l2.5 2.5 l5 -5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="62" y="34" fill="#e6edf3" font-size="17" font-weight="700">ad-bllocker.js · 全站广告净化器</text>
+  <text x="62" y="52" fill="#8b949e" font-size="11">单文件油猴脚本 · L1-L6 分层单向依赖 · 全站常开 · 无站点识别 · 无界面重组</text>
+  <text x="560" y="40" fill="#8b949e" font-size="11">风格参照</text>
+  <text x="560" y="55" fill="#e6edf3" font-size="12" font-weight="600">github-accelerate</text>
+
+  <!-- L1 -->
+  <g>
+    <rect x="24" y="94" width="632" height="66" rx="10" fill="#161b22" stroke="#30363d"/>
+    <text x="40" y="114" fill="#2da44e" font-size="12" font-weight="700">L1 CONFIG</text>
+    <text x="40" y="130" fill="#8b949e" font-size="10.5">规则库（唯一事实来源）</text>
+    <rect x="188" y="102" width="112" height="22" rx="6" fill="#21262d"/><text x="244" y="117" fill="#e6edf3" font-size="10" text-anchor="middle">URL_RE 广告域名/路径</text>
+    <rect x="308" y="102" width="104" height="22" rx="6" fill="#21262d"/><text x="360" y="117" fill="#e6edf3" font-size="10" text-anchor="middle">NAME_RE 类名黑名单</text>
+    <rect x="420" y="102" width="100" height="22" rx="6" fill="#21262d"/><text x="470" y="117" fill="#e6edf3" font-size="10" text-anchor="middle">SPONSOR_RE 赞助角标</text>
+    <rect x="528" y="102" width="112" height="22" rx="6" fill="#21262d"/><text x="584" y="117" fill="#e6edf3" font-size="10" text-anchor="middle">存储键 bl.* / 统计</text>
+    <text x="188" y="147" fill="#6e7681" font-size="9.5">弹窗SDK · 矿机 · 推送诱导 · 统计 · /abc/ 注入器 · CoinHive · OneSignal · PopAds · ExoClick …</text>
+  </g>
+
+  <!-- L2 -->
+  <g>
+    <rect x="24" y="172" width="632" height="48" rx="10" fill="#161b22" stroke="#30363d"/>
+    <text x="40" y="192" fill="#2da44e" font-size="12" font-weight="700">L2 FOUNDATION</text>
+    <text x="40" y="207" fill="#8b949e" font-size="10.5">Utils · Store</text>
+    <rect x="200" y="182" width="150" height="26" rx="6" fill="#21262d"/><text x="275" y="199" fill="#e6edf3" font-size="10" text-anchor="middle">GM 持久化 + 内存兜底</text>
+    <rect x="362" y="182" width="150" height="26" rx="6" fill="#21262d"/><text x="437" y="199" fill="#e6edf3" font-size="10" text-anchor="middle">白名单 / 强度 / 开关读写口</text>
+  </g>
+
+  <!-- L3 NET -->
+  <g>
+    <rect x="24" y="232" width="306" height="82" rx="10" fill="#1c2431" stroke="#2da44e" stroke-width="1.2"/>
+    <text x="40" y="252" fill="#2da44e" font-size="12" font-weight="700">L3 NET · NetGuard（document-start 常开）</text>
+    <rect x="40" y="262" width="130" height="22" rx="6" fill="#21262d"/><text x="105" y="277" fill="#e6edf3" font-size="10" text-anchor="middle">① window.open 弹窗</text>
+    <rect x="40" y="288" width="130" height="18" rx="6" fill="#21262d"/><text x="105" y="301" fill="#8b949e" font-size="9.5" text-anchor="middle">弹窗 / 弹底 / 点击劫持</text>
+    <rect x="182" y="262" width="134" height="22" rx="6" fill="#21262d"/><text x="249" y="277" fill="#e6edf3" font-size="10" text-anchor="middle">② createElement 守卫</text>
+    <rect x="182" y="288" width="134" height="18" rx="6" fill="#21262d"/><text x="249" y="301" fill="#8b949e" font-size="9.5" text-anchor="middle">广告 SDK / 贴片脚本 / 矿机</text>
+  </g>
+
+  <!-- L4 SWEEP -->
+  <g>
+    <rect x="350" y="232" width="306" height="82" rx="10" fill="#1c2431" stroke="#2da44e" stroke-width="1.2"/>
+    <text x="366" y="252" fill="#2da44e" font-size="12" font-weight="700">L4 SWEEP · AdSweeper + 防回弹 Observer</text>
+    <rect x="366" y="262" width="86" height="22" rx="6" fill="#21262d"/><text x="409" y="277" fill="#e6edf3" font-size="10" text-anchor="middle">③ 悬浮/遮罩</text>
+    <rect x="458" y="262" width="86" height="22" rx="6" fill="#21262d"/><text x="501" y="277" fill="#e6edf3" font-size="10" text-anchor="middle">④ 广告资源</text>
+    <rect x="550" y="262" width="92" height="22" rx="6" fill="#21262d"/><text x="596" y="277" fill="#e6edf3" font-size="10" text-anchor="middle">⑤ 广告位容器</text>
+    <rect x="366" y="288" width="86" height="18" rx="6" fill="#21262d"/><text x="409" y="301" fill="#8b949e" font-size="9.5" text-anchor="middle">全屏/角标/地板条</text>
+    <rect x="458" y="288" width="86" height="18" rx="6" fill="#21262d"/><text x="501" y="301" fill="#8b949e" font-size="9.5" text-anchor="middle">黑名单 class/iframe</text>
+    <rect x="550" y="288" width="92" height="18" rx="6" fill="#21262d"/><text x="596" y="301" fill="#8b949e" font-size="9.5" text-anchor="middle">data-slots 占位</text>
+  </g>
+
+  <!-- 通道行2 -->
+  <g>
+    <rect x="24" y="322" width="632" height="52" rx="10" fill="#1c2431" stroke="#30363d"/>
+    <text x="40" y="340" fill="#8b949e" font-size="11" font-weight="700">AdSweeper 通道（续）· 强力模式追加</text>
+    <rect x="300" y="330" width="110" height="22" rx="6" fill="#21262d"/><text x="355" y="345" fill="#e6edf3" font-size="10" text-anchor="middle">⑥ 跨站图片外链</text>
+    <rect x="418" y="330" width="110" height="22" rx="6" fill="#21262d"/><text x="473" y="345" fill="#e6edf3" font-size="10" text-anchor="middle">⑦ 赞助角标信息流</text>
+    <rect x="536" y="330" width="106" height="22" rx="6" fill="#21262d"/><text x="589" y="345" fill="#e6edf3" font-size="10" text-anchor="middle">⑧ 内嵌推广卡</text>
+    <text x="40" y="362" fill="#6e7681" font-size="9.5">横幅 banner（IAB 尺寸指纹）/ 信息流原生 native / 撕页 peel / 客服浮窗 / 二维码 / APP 下载条 · 护栏：富文本、&lt;video&gt;、static 定位不碰 · 单轮上限 24</text>
+  </g>
+
+  <!-- L5 VIEW -->
+  <g>
+    <rect x="24" y="386" width="632" height="82" rx="10" fill="#161b22" stroke="#8b949e"/>
+    <text x="40" y="406" fill="#e6edf3" font-size="12" font-weight="700">L5 VIEW · 配置面板（github-accelerate 风格）</text>
+    <rect x="40" y="416" width="130" height="40" rx="8" fill="#21262d" stroke="#2da44e"/><text x="105" y="433" fill="#e6edf3" font-size="10" text-anchor="middle">Launcher 右中圆钮</text><text x="105" y="448" fill="#8b949e" font-size="9" text-anchor="middle">可隐藏 · #2da44e</text>
+    <rect x="182" y="416" width="150" height="40" rx="8" fill="#21262d"/><text x="257" y="433" fill="#e6edf3" font-size="10" text-anchor="middle">Tab 状态</text><text x="257" y="448" fill="#8b949e" font-size="9" text-anchor="middle">拦截/清扫统计 · 本站状态</text>
+    <rect x="344" y="416" width="150" height="40" rx="8" fill="#21262d"/><text x="419" y="433" fill="#e6edf3" font-size="10" text-anchor="middle">Tab 设置</text><text x="419" y="448" fill="#8b949e" font-size="9" text-anchor="middle">启用 · 强力模式 · 悬浮球</text>
+    <rect x="506" y="416" width="134" height="40" rx="8" fill="#21262d"/><text x="573" y="433" fill="#e6edf3" font-size="10" text-anchor="middle">Tab 白名单</text><text x="573" y="448" fill="#8b949e" font-size="9" text-anchor="middle">本站一键豁免 · 逐行删除</text>
+  </g>
+
+  <!-- L6 BOOTSTRAP -->
+  <g>
+    <rect x="24" y="480" width="632" height="46" rx="10" fill="#161b22" stroke="#30363d"/>
+    <text x="40" y="500" fill="#2da44e" font-size="12" font-weight="700">L6 BOOTSTRAP</text>
+    <text x="170" y="500" fill="#8b949e" font-size="10.5">装配启动 · Watcher（URL 变化重扫）· 油猴菜单（设置 / 本站白名单 / 重置统计）</text>
+    <text x="40" y="517" fill="#6e7681" font-size="9.5">生命周期：document-start 装 NetGuard → body 就绪挂 View + 首轮 sweep → MutationObserver 防回弹 → 白名单站点静默跳过</text>
+  </g>
+
+  <!-- 数据流箭头 -->
+  <line x1="340" y1="160" x2="340" y2="170" stroke="#8b949e" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="340" y1="220" x2="340" y2="230" stroke="#8b949e" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="177" y1="273" x2="188" y2="273" stroke="#2da44e" stroke-width="1" opacity=".7"/>
+  <line x1="340" y1="314" x2="340" y2="320" stroke="#8b949e" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="340" y1="374" x2="340" y2="384" stroke="#8b949e" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="340" y1="468" x2="340" y2="478" stroke="#8b949e" stroke-width="1.2" marker-end="url(#arr)"/>
+</svg>
