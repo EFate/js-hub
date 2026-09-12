@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频站界面净化重组助手
 // @namespace    https://github.com/EFate
-// @version      1.0.3
+// @version      1.0.4
 // @description  评分制识别小视频站（不依赖固定域名，换域自动跟随），识别到立刻自动进入净化模式：四通道清广告（弹窗拦截 · 注入拦截 · 悬浮清扫 · 防回弹），并重组界面：分类折叠、搜索置顶、卡片栅格规整、杂物清理。全程无 UI 侵入。
 // @author       EFate
 // @license      MIT
@@ -49,7 +49,7 @@
      * L1 CONFIG — 常量、存储键、检测签名、广告规则（唯一事实来源）
      * ====================================================================== */
     var CONFIG = {
-        VERSION: '1.0.3',
+        VERSION: '1.0.4',
         PREFIX: 'vir',
         KEYS: {
             ENABLED: 'vir.enabled',      // 全局开关（默认 true）
@@ -84,6 +84,7 @@
                 '|\\.tanx\\.com|cpro\\.baidu|pos\\.baidu|hm\\.baidu|cnzz\\.|umeng\\.' +
                 '|miaozhen|allyes|admaster|adsame|adview|adcdn|mediav\\.com' +
                 '|\\/ads?\\/[a-z0-9_-]+\\.(js|php)|\\/adjs|\\/gg\\/|\\/gg\\.(js|php)|guanggao' +
+                '|\\/abc\\/[a-z0-9_]+\\.js|\\/000\\/' +
                 '|\\/uv\\.js|\\/tk\\.js|\\/kstk\\.js', 'i'),
             /* 悬浮/内嵌广告的 class·id 黑名单指纹 */
             NAME_RE: /(^|[-_0-9])(ad|ads|adv|advert|advertisement|gg|bnn|banner|float|floating|popup|popover|suspend|kefu|service|downapp|appdown|qrcode|follow|wx|weixin|tip|tips|notice|dialog|layer|mask|ticket|ico)([-_0-9]|$)/i,
@@ -260,10 +261,11 @@
                 if (rankTabs >= D.RANK_MIN) break;
             }
 
-            // 指纹 3：视频卡片——img 所在容器内含日期（逐级上探找卡片盒子，
-            // 兼容 img 被内层 div 包裹而日期在外层 foot 的模板，如 video-item 结构）
+            // 指纹 3：视频卡片——img 所在容器内含日期（逐级上探 ≤5 级找卡片盒子）。
+            // 不要求 img 必须在 <a> 内：WAP 模板 a>div.log>img（日期在外层 foot），
+            // PC 模板 li>p.img>img 且 a 为空覆盖层与 img 平级——'a img' 会数出 0。
             var cards = 0;
-            var imgs = Utils.qsa('a img', doc);
+            var imgs = Utils.qsa('img', doc);
             for (var m = 0; m < imgs.length; m++) {
                 var node = imgs[m].parentNode;
                 var depth = 0;
@@ -472,6 +474,31 @@
                 });
             }
 
+            // D. 广告位容器：服务端渲染的 data-slots 占位（模板广告系统的挂载点）
+            Utils.qsa('div[data-slots]', doc).forEach(function (el) {
+                if (removed >= limit) return;
+                el.parentNode && el.parentNode.removeChild(el);
+                removed++;
+            });
+
+            // E. 静态图片广告：跨站绝对外链 + 内容仅为图片（视频站内容卡均为站内相对链接）
+            var curHost = Utils.host();
+            Utils.qsa('a[href]', doc).forEach(function (el) {
+                if (removed >= limit) return;
+                if (el.getAttribute('data-vir-swept')) return;
+                var href = el.getAttribute('href') || '';
+                if (!/^https?:\/\//i.test(href)) return;        // 相对链接 = 站内内容
+                if (!el.querySelector('img')) return;
+                if ((el.textContent || '').trim().length > 8) return; // 图+文字的导航外链不碰
+                if (el.querySelector('video')) return;          // 播放器保护
+                var dest = '';
+                try { dest = new root.URL(href).hostname; } catch (e) { return; }
+                if (!curHost || dest === curHost) return;
+                el.setAttribute('data-vir-swept', '1');
+                try { el.style.display = 'none'; } catch (e2) { /* 忽略 */ }
+                removed++;
+            });
+
             if (removed > 0) {
                 this.removed += removed;
                 Store.addStats({ swept: removed });
@@ -526,7 +553,9 @@
                 '.vir-grid img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:8px;display:block;}',
                 '.vir-grid .vir-card-title{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px;line-height:1.5;}',
                 /* 杂物隐藏 */
-                '.vir-clutter{display:none!important;}'
+                '.vir-clutter{display:none!important;}',
+                /* 广告位占位容器（模板广告系统挂载点） */
+                'div[data-slots]{display:none!important;}'
             ].join('\n');
             try {
                 if (typeof root.GM_addStyle === 'function') root.GM_addStyle(css);
@@ -539,42 +568,55 @@
             } catch (e) { /* 忽略 */ }
         },
 
-        /** 分类导航折叠（保留前 NAV_KEEP 个，其余可展开；只处理最主要的一组） */
+        /** 分类导航折叠（保留前 NAV_KEEP 个，其余可展开；只处理最主要的一组）。
+         *  采用与 SiteDetector 一致的「短文本叶子链接按 2 级祖先聚桶」，不依赖直链子元素 */
         collapseNav: function () {
             var doc = root.document;
-            var containers = Utils.qsa('div,ul,nav,section', doc);
-            for (var i = 0; i < containers.length; i++) {
-                var c = containers[i];
-                if (c.getAttribute('data-vir-nav') === '1') continue;
-                var links = c.querySelectorAll(':scope > a');
-                if (!links || links.length < CONFIG.DETECT.NAV_MIN_LINKS) continue;
-                var texts = [];
-                for (var j = 0; j < links.length; j++) texts.push(links[j].textContent);
-                if (!shouldCollapseNav(texts)) continue;
-
-                c.setAttribute('data-vir-nav', '1');
-                for (var k = CONFIG.DETECT.NAV_KEEP; k < links.length; k++) {
-                    links[k].classList.add('vir-folded');
+            var D = CONFIG.DETECT;
+            var allAnchors = Utils.qsa('a', doc);
+            var best = null, bestList = null;
+            for (var i = 0; i < allAnchors.length; i++) {
+                var a = allAnchors[i];
+                var t = (a.textContent || '').trim();
+                if (!t || t.length > 6) continue;
+                if (a.querySelector && a.querySelector('img')) continue;
+                var anc = a;
+                for (var lv = 0; lv < 2 && anc.parentNode; lv++) anc = anc.parentNode;
+                if (!anc.__virNavList) anc.__virNavList = [];
+                anc.__virNavList.push(a);
+                if (!bestList || anc.__virNavList.length > bestList.length) {
+                    bestList = anc.__virNavList;
+                    best = anc;
                 }
-                var toggle = doc.createElement('div');
-                toggle.className = 'vir-nav-toggle';
-                toggle.setAttribute('data-vir', 'ui');
-                toggle.textContent = '展开全部分类 ▾';
-                toggle.addEventListener('click', function () {
-                    var folded = c.querySelectorAll('a.vir-folded');
-                    if (folded.length) {
-                        Array.prototype.forEach.call(folded, function (a) { a.classList.remove('vir-folded'); });
-                        toggle.textContent = '收起全部分类 ▴';
-                    } else {
-                        var ls = c.querySelectorAll(':scope > a');
-                        for (var n = CONFIG.DETECT.NAV_KEEP; n < ls.length; n++) ls[n].classList.add('vir-folded');
-                        toggle.textContent = '展开全部分类 ▾';
-                    }
-                });
-                c.appendChild(toggle);
-                Utils.log('已折叠分类导航（' + links.length + ' 项）');
-                return;
             }
+            if (!best || !bestList || bestList.length < D.NAV_MIN_LINKS) return;
+            if (best.getAttribute('data-vir-nav') === '1') return;
+            best.setAttribute('data-vir-nav', '1');
+            best.classList.add('vir-nav');
+
+            var texts = [];
+            for (var j = 0; j < bestList.length; j++) texts.push(bestList[j].textContent);
+            if (!shouldCollapseNav(texts)) return;
+
+            for (var k = D.NAV_KEEP; k < bestList.length; k++) {
+                bestList[k].classList.add('vir-folded');
+            }
+            var toggle = doc.createElement('div');
+            toggle.className = 'vir-nav-toggle';
+            toggle.setAttribute('data-vir', 'ui');
+            toggle.textContent = '展开全部分类 ▾';
+            toggle.addEventListener('click', function () {
+                var folded = best.querySelectorAll('a.vir-folded');
+                if (folded.length) {
+                    Array.prototype.forEach.call(folded, function (el) { el.classList.remove('vir-folded'); });
+                    toggle.textContent = '收起全部分类 ▴';
+                } else {
+                    for (var n = D.NAV_KEEP; n < bestList.length; n++) bestList[n].classList.add('vir-folded');
+                    toggle.textContent = '展开全部分类 ▾';
+                }
+            });
+            best.appendChild(toggle);
+            Utils.log('已折叠分类导航（' + bestList.length + ' 项）');
         },
 
         /** 搜索栏 sticky 置顶 */
@@ -596,42 +638,51 @@
             }
         },
 
-        /** 视频卡片栅格规整（只处理最主要的一组） */
+        /** 视频卡片栅格规整（取 img 卡片最多的容器；img 即算卡，不要求包在 a 内） */
         tidyCards: function () {
             var doc = root.document;
             var containers = Utils.qsa('ul,div,section', doc);
+            var bestC = null, bestItems = null;
             for (var i = 0; i < containers.length; i++) {
                 var c = containers[i];
-                if (c.getAttribute('data-vir-grid') === '1') continue;
+                if (c.getAttribute('data-vir-grid') === '1') return;
                 var items = c.querySelectorAll(':scope > li, :scope > div');
                 if (!items || items.length < CONFIG.LAYOUT.CARD_MIN) continue;
                 var cardN = 0;
                 for (var j = 0; j < items.length; j++) {
-                    if (items[j].querySelector('a img')) cardN++;
+                    if (items[j].querySelector('img')) cardN++;
                 }
                 if (cardN < CONFIG.LAYOUT.CARD_MIN) continue;
+                if (!bestItems || items.length > bestItems.length) {
+                    bestC = c;
+                    bestItems = items;
+                }
+            }
+            if (!bestC || !bestItems) return;
 
-                c.setAttribute('data-vir-grid', '1');
-                c.classList.add('vir-grid');
-                for (var k = 0; k < items.length; k++) {
-                    var a = items[k].querySelector('a');
-                    var titleNode = items[k].querySelector('p, h3, h4');
-                    if (!titleNode) {
-                        // 无 p/h3/h4 时取不含图片的第一个 span 作为标题
-                        var spans = items[k].querySelectorAll('span');
-                        for (var s2 = 0; s2 < spans.length; s2++) {
-                            if (!spans[s2].querySelector('img')) { titleNode = spans[s2]; break; }
-                        }
-                    }
-                    if (titleNode) {
-                        titleNode.classList.add('vir-card-title');
-                    } else if (a && !a.querySelector('img')) {
-                        a.classList.add('vir-card-title');
+            bestC.setAttribute('data-vir-grid', '1');
+            bestC.classList.add('vir-grid');
+            for (var k = 0; k < bestItems.length; k++) {
+                // 标题取第一个不含 img 的 p/h3/h4（PC 模板首个 p 是含图缩略容器）
+                var ps = bestItems[k].querySelectorAll('p, h3, h4');
+                var titleNode = null;
+                for (var s = 0; s < ps.length; s++) {
+                    if (!ps[s].querySelector('img')) { titleNode = ps[s]; break; }
+                }
+                if (!titleNode) {
+                    var spans = bestItems[k].querySelectorAll('span');
+                    for (var s2 = 0; s2 < spans.length; s2++) {
+                        if (!spans[s2].querySelector('img')) { titleNode = spans[s2]; break; }
                     }
                 }
-                Utils.log('已规整卡片栅格（' + items.length + ' 张卡片）');
-                return;
+                var a = bestItems[k].querySelector('a');
+                if (titleNode) {
+                    titleNode.classList.add('vir-card-title');
+                } else if (a && !a.querySelector('img')) {
+                    a.classList.add('vir-card-title');
+                }
             }
+            Utils.log('已规整卡片栅格（' + bestItems.length + ' 张卡片）');
         },
 
         /** 杂物清理：友情链接/公告/统计等 */
