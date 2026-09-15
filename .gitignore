@@ -84,6 +84,7 @@ result*.txt
 
 
 _snip/
+design-system/
 test01.js
 test02.js
 test03.js

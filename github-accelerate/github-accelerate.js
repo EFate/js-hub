@@ -5,8 +5,8 @@
 // @description  GitHub 镜像加速下载 + Release 增强显示：多源节点发现（双聚合接口 + 内置公益镜像池兜底 + 自建节点，统一管理测速）、直链交付（只管发射，兼容 Gopeed）；并对 Release 文件分组排序、显示下载量、精确时间、折叠日志。
 // @author       EFate
 // @license      MIT
-// @updateURL    https://gh-proxy.com/https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
-// @downloadURL  https://gh-proxy.com/https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate.js
+// @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate/github-accelerate.js
+// @downloadURL  https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/github-accelerate/github-accelerate.js
 // @icon         data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232da44e'/%3E%3Crect x='14.7' y='6.2' width='2.6' height='9.6' rx='1.3' fill='%23fff'/%3E%3Cpath d='M9.4 15.2h13.2l-6.6 6.8z' fill='%23fff'/%3E%3Crect x='9.2' y='22.4' width='13.6' height='2.5' rx='1.25' fill='%23fff' opacity='.85'/%3E%3Ccircle cx='24.5' cy='8' r='5.8' fill='%23000' opacity='.22'/%3E%3Cpath d='M25.7 4 22.4 8.9h2.1l-1.6 2.9 3-4.8h-1.9z' fill='%23fff'/%3E%3C/svg%3E
 // @match        *://github.com/*
 // @match        *://gist.github.com/*
