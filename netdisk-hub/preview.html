@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html data-color-mode="dark">
+<head>
+<meta charset="utf-8" />
+<title>下载助手 · 界面预览</title>
+<style>
+/* 入口按钮：默认白色（多数网盘工具栏是浅色），可切换暗色或跟随宿主页面明暗 */
+.nd-entry{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;margin:0 0 0 10px;
+  border:1px solid rgba(0,0,0,.14);border-radius:6px;background:#fff;color:#1f2328;
+  font-family:inherit;font-size:13px;line-height:1;white-space:nowrap;cursor:pointer;flex:none;vertical-align:middle;
+  box-shadow:0 1px 2px rgba(0,0,0,.06);
+  transition:background .15s,border-color .15s,box-shadow .15s,transform .1s;}
+.nd-entry:hover{background:#f5f6f7;border-color:rgba(0,0,0,.24);}
+.nd-entry:active{transform:translateY(1px);}
+.nd-entry:focus-visible{outline:2px solid #4c8bf5;outline-offset:2px;}
+.nd-entry.nd-entry-dark{background:#252b33;border-color:#3a4048;color:#e6edf3;box-shadow:0 1px 2px rgba(0,0,0,.3);}
+.nd-entry.nd-entry-dark:hover{background:#2f363f;border-color:#4a525c;}
+.nd-entry svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none;}
+
+
+html{--nd-accent:#2da44e;--nd-accent-2:#1a7f37;--nd-accent-fg:#fff;--nd-good:#2da44e;--nd-warn:#d29922;--nd-bad:#f85149;}
+html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
+#nd-scope{
+  --nd-bg:#0d1117;--nd-bg-2:#151b23;--nd-bg-3:#1c232b;
+  --nd-bd:#2b323a;--nd-bd-2:#21272e;
+  --nd-fg:#e6edf3;--nd-fg-2:#9aa4af;--nd-fg-3:#6e7681;
+  --nd-shadow:0 18px 48px rgba(0,0,0,.55);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  color:var(--nd-fg);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+#nd-scope.nd-light{
+  --nd-bg:#fff;--nd-bg-2:#f6f8fa;--nd-bg-3:#eef1f4;
+  --nd-bd:#d8dee4;--nd-bd-2:#e8ecf0;
+  --nd-fg:#1f2328;--nd-fg-2:#59636e;--nd-fg-3:#818b98;
+  --nd-shadow:0 18px 48px rgba(31,35,40,.18);
+}
+#nd-scope svg{width:1em;height:1em;fill:currentColor;flex:none;vertical-align:-.125em;}
+#nd-scope .nd-ico{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none;}
+#nd-overlay{position:fixed;inset:0;z-index:2147483001;background:rgba(1,4,9,.62);opacity:0;pointer-events:none;transition:opacity .2s;}
+#nd-overlay.nd-open{opacity:1;pointer-events:auto;}
+#nd-panel{position:fixed;left:50%;top:50%;z-index:2147483002;width:560px;max-width:calc(100vw - 32px);max-height:84vh;
+  background:var(--nd-bg);border:1px solid var(--nd-bd);border-radius:14px;box-shadow:var(--nd-shadow);
+  display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translate(-50%,-46%) scale(.97);pointer-events:none;
+  transition:opacity .22s,transform .22s cubic-bezier(.4,0,.2,1);}
+#nd-panel.nd-open{opacity:1;transform:translate(-50%,-50%) scale(1);pointer-events:auto;}
+.nd-head{display:flex;align-items:center;gap:10px;padding:15px 16px;border-bottom:1px solid var(--nd-bd-2);flex:none;}
+.nd-mark{width:26px;height:26px;border-radius:7px;background:var(--nd-accent);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;}
+.nd-mark .nd-ico{width:15px;height:15px;stroke-width:1.9;}
+.nd-head h2{margin:0;font-size:15px;font-weight:600;color:var(--nd-fg);letter-spacing:.2px;}
+.nd-ver{font-size:11px;color:var(--nd-fg-3);border:1px solid var(--nd-bd);border-radius:6px;padding:1px 7px;}
+.nd-grow{flex:1;}
+.nd-icon-btn{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:none;border-radius:7px;
+  background:transparent;color:var(--nd-fg-2);cursor:pointer;font-size:16px;line-height:1;transition:background .15s,color .15s;}
+.nd-icon-btn:hover{background:var(--nd-bg-3);color:var(--nd-fg);}
+.nd-tabs{display:flex;gap:2px;padding:0 8px;border-bottom:1px solid var(--nd-bd-2);flex:none;background:var(--nd-bg-2);}
+.nd-tab{padding:11px 16px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:13px;
+  color:var(--nd-fg-2);border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s,border-color .15s;}
+.nd-tab:hover{color:var(--nd-fg);}
+.nd-tab.nd-on{color:var(--nd-fg);font-weight:600;border-bottom-color:var(--nd-accent);}
+.nd-body{flex:1;overflow-y:auto;min-height:200px;overscroll-behavior:contain;}
+.nd-body::-webkit-scrollbar{width:10px;}
+.nd-body::-webkit-scrollbar-thumb{background:var(--nd-bd);border-radius:5px;border:3px solid transparent;background-clip:content-box;}
+.nd-body::-webkit-scrollbar-thumb:hover{background:var(--nd-fg-3);background-clip:content-box;}
+.nd-page{display:none;padding:14px 16px 16px;}
+.nd-page.nd-on{display:block;}
+#nd-scope [hidden]{display:none !important;}
+.nd-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:30px;padding:0 12px;
+  border:1px solid var(--nd-bd);border-radius:7px;background:var(--nd-bg-3);color:var(--nd-fg);
+  font-family:inherit;font-size:12px;cursor:pointer;white-space:nowrap;
+  transition:background .15s,border-color .15s,opacity .15s,transform .1s;}
+.nd-btn:hover{background:var(--nd-bd);border-color:var(--nd-fg-3);}
+.nd-btn:active{transform:translateY(1px);}
+.nd-btn[disabled]{opacity:.45;pointer-events:none;}
+.nd-btn.nd-primary{background:var(--nd-accent);border-color:var(--nd-accent);color:var(--nd-accent-fg);font-weight:500;}
+.nd-btn.nd-primary:hover{background:var(--nd-accent-2);border-color:var(--nd-accent-2);}
+.nd-btn.nd-ghost{background:transparent;border-color:transparent;color:var(--nd-fg-2);}
+.nd-btn.nd-ghost:hover{background:var(--nd-bg-3);border-color:var(--nd-bd);color:var(--nd-fg);}
+.nd-btn.nd-danger:hover{background:var(--nd-bad);border-color:var(--nd-bad);color:#fff;}
+.nd-btn.nd-block{width:100%;}
+.nd-actions{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0 10px;}
+.nd-actions:last-child{padding-bottom:0;}
+.nd-bar-acts{display:flex;flex-wrap:wrap;gap:2px;margin:0 0 12px;}
+.nd-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--nd-bd-2);}
+.nd-row:last-child{border-bottom:none;}
+.nd-row-main{flex:1;min-width:0;}
+.nd-row-name{font-size:13px;color:var(--nd-fg);word-break:break-all;line-height:1.45;}
+.nd-row-meta{font-size:11px;color:var(--nd-fg-3);margin-top:1px;}
+.nd-row-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:none;}
+.nd-card{border:1px solid var(--nd-bd);border-radius:12px;background:var(--nd-bg-2);margin:0 0 12px;overflow:hidden;}
+.nd-card:last-child{margin-bottom:0;}
+.nd-card-head{padding:12px 14px 10px;border-bottom:1px solid var(--nd-bd-2);}
+.nd-card-head h3{margin:0;font-size:13px;font-weight:600;color:var(--nd-fg);}
+.nd-card-head p{margin:5px 0 0;font-size:12px;color:var(--nd-fg-3);line-height:1.6;}
+.nd-card-body{padding:10px 14px 12px;}
+.nd-card-head h3 .nd-badge{display:inline-block;min-width:18px;padding:0 6px;margin-left:6px;border-radius:9px;
+  background:var(--nd-bg-3);color:var(--nd-fg-2);font-size:11px;font-weight:400;line-height:17px;text-align:center;vertical-align:1px;}
+.nd-empty{display:flex;flex-direction:column;align-items:center;gap:7px;padding:22px 12px;
+  color:var(--nd-fg-3);font-size:12px;text-align:center;line-height:1.6;}
+.nd-empty .nd-ico{width:22px;height:22px;opacity:.5;}
+.nd-empty span{max-width:420px;}
+.nd-field{display:flex;align-items:center;gap:10px;padding:9px 0;}
+.nd-field + .nd-field{border-top:1px solid var(--nd-bd-2);}
+.nd-field-label{width:76px;flex:none;font-size:12px;color:var(--nd-fg-2);text-align:right;}
+.nd-field-desc{flex:1;min-width:0;font-size:12px;color:var(--nd-fg-3);}
+.nd-field-hint{flex:1;min-width:0;font-size:11px;color:var(--nd-fg-3);}
+.nd-stack{display:flex;flex-direction:column;gap:8px;padding:2px 0 10px;}
+.nd-input{flex:1;min-width:0;height:32px;padding:0 10px;border:1px solid var(--nd-bd);border-radius:7px;background:var(--nd-bg);
+  color:var(--nd-fg);font-family:inherit;font-size:13px;transition:border-color .15s,background .15s;}
+.nd-input::placeholder{color:var(--nd-fg-3);}
+.nd-input:hover{border-color:var(--nd-fg-3);}
+.nd-input:focus{outline:none;border-color:var(--nd-accent);background:var(--nd-bg);}
+.nd-switch{position:relative;width:40px;height:22px;flex:none;cursor:pointer;}
+.nd-seg{display:flex;flex:none;border:1px solid var(--nd-bd);border-radius:7px;overflow:hidden;}
+.nd-seg button{padding:5px 11px;border:none;background:transparent;color:var(--nd-fg-2);cursor:pointer;
+  font-family:inherit;font-size:12px;border-right:1px solid var(--nd-bd);transition:background .15s,color .15s;}
+.nd-seg button:last-child{border-right:none;}
+.nd-seg button:hover{color:var(--nd-fg);}
+.nd-seg button.nd-on{background:var(--nd-accent);color:var(--nd-accent-fg);}
+.nd-switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer;z-index:1;}
+.nd-switch i{display:block;width:40px;height:22px;border-radius:6px;background:var(--nd-bd);transition:background .22s;position:relative;}
+.nd-switch i::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:4px;background:#fff;
+  transition:transform .22s cubic-bezier(.4,0,.2,1);}
+.nd-switch input:checked + i{background:var(--nd-accent);}
+.nd-switch input:checked + i::after{transform:translateX(18px);}
+.nd-about p{margin:0 0 10px;color:var(--nd-fg-2);font-size:13px;}
+.nd-about b{color:var(--nd-fg);font-weight:600;}
+#nd-toasts{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:2147483004;display:flex;
+  flex-direction:column;gap:8px;align-items:center;pointer-events:none;}
+.nd-toast{display:flex;align-items:center;gap:8px;max-width:min(560px,calc(100vw - 32px));padding:9px 14px;
+  border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;color:#fff;
+  box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;transform:translateY(12px);transition:opacity .22s,transform .22s;}
+.nd-toast.nd-show{opacity:1;transform:none;}
+.nd-toast.nd-info{background:#1f6feb;}
+.nd-toast.nd-ok{background:#2da44e;}
+.nd-toast.nd-warn{background:#9e6a03;}
+.nd-toast.nd-err{background:#b62324;}
+
+</style>
+<style>
+  html,body{margin:0;padding:0;}
+  body{background:#161b22;min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}
+  .preview-note{position:fixed;left:16px;top:86px;z-index:2147483006;max-width:300px;
+    color:#0b0f14;font-size:12px;line-height:1.7;background:#fff;padding:6px 10px;border-radius:6px;}
+  /* 模拟网盘工具栏：抬高到遮罩之上，衬托注入按钮的实际位置与配色 */
+  #hostBar{background:#fff;padding:14px 18px;display:flex;justify-content:flex-end;align-items:center;
+    position:relative;z-index:2147483005;}
+  #nativeBtn{padding:7px 16px;background:#2e6be6;color:#fff;border:none;border-radius:6px;font-size:14px;}
+  #frame-main{display:none;}
+</style>
+</head>
+<body>
+<div class="preview-note">上：网盘工具栏，注入的「下载助手」在最右。<br />下：面板本体。数据取自夸克分享页的典型场景。</div>
+
+<div class="share-btns" id="hostBar"><button id="nativeBtn" style="padding:7px 16px;">保存到网盘</button><div class="nd-entry" role="button" tabindex="0" title="夸克 / UC 网盘 · 打开下载助手"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"></path><path d="M7 11l5 5 5-5"></path><path d="M5 20h14"></path></svg><span>下载助手</span></div></div>
+<div class="frame-main"><div class="file-list" id="fileList"></div></div>
+<div id="nd-scope">
+<div id="nd-overlay" class="nd-open"></div>
+<div id="nd-panel" role="dialog" aria-label="网盘直链下载助手" class="nd-open">
+  <div class="nd-head">
+    <div class="nd-mark"><svg class="nd-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.4v7.8"></path><path d="M4.8 7.1 8 10.3l3.2-3.2"></path><path d="M2.8 13.6h10.4"></path></svg></div>
+    <h2>网盘直链下载助手</h2>
+    <span class="nd-ver">v1.0.0</span>
+    <span class="nd-grow"></span>
+    <button class="nd-icon-btn" data-act="close" title="关闭">✕</button>
+  </div>
+  <div class="nd-tabs">
+    <button class="nd-tab nd-on" data-tab="dl">下载</button>
+    <button class="nd-tab" data-tab="cfg">设置</button>
+    <button class="nd-tab" data-tab="about">关于</button>
+  </div>
+  <div class="nd-body">
+    <div class="nd-page nd-on" data-page="dl">
+      <div class="nd-card">
+        <div class="nd-card-head">
+          <h3>可用直链 <span class="nd-badge" data-el="caught-count">3</span></h3>
+        </div>
+        <div class="nd-card-body">
+          <div class="nd-actions" data-el="batch-bar">
+            <button class="nd-btn nd-primary" data-act="push-caught">全部推送 Aria2</button>
+            <button class="nd-btn" data-act="copy-caught">复制全部</button>
+            <button class="nd-btn nd-ghost" data-act="copy-all-cmds">复制命令行</button>
+            <button class="nd-btn nd-ghost" data-act="clear-caught">清空</button>
+          </div>
+          <div data-el="caught-list">
+<div class="nd-row">
+  <div class="nd-row-main">
+    <div class="nd-row-name">电影合集.2026.1080p.BluRay.HEVC.mkv</div>
+    <div class="nd-row-meta">4.20 GiB</div>
+  </div>
+  <div class="nd-row-acts">
+    <button class="nd-btn nd-primary" data-act="caught-aria" data-cid="ndmu2ccebl0eru4">Aria2</button>
+    <button class="nd-btn" data-act="caught-direct" data-cid="ndmu2ccebl0eru4">下载</button>
+    <button class="nd-btn nd-ghost" data-act="caught-copy" data-cid="ndmu2ccebl0eru4">复制</button>
+  </div>
+</div>
+<div class="nd-row">
+  <div class="nd-row-main">
+    <div class="nd-row-name">中文字幕包.zip</div>
+    <div class="nd-row-meta">12.0 MiB</div>
+  </div>
+  <div class="nd-row-acts">
+    <button class="nd-btn nd-primary" data-act="caught-aria" data-cid="ndmu2cceblisijd">Aria2</button>
+    <button class="nd-btn" data-act="caught-direct" data-cid="ndmu2cceblisijd">下载</button>
+    <button class="nd-btn nd-ghost" data-act="caught-copy" data-cid="ndmu2cceblisijd">复制</button>
+  </div>
+</div>
+<div class="nd-row">
+  <div class="nd-row-main">
+    <div class="nd-row-name">播放说明.pdf</div>
+    <div class="nd-row-meta">820 KiB</div>
+  </div>
+  <div class="nd-row-acts">
+    <button class="nd-btn nd-primary" data-act="caught-aria" data-cid="ndmu2ccebl5a6ps">Aria2</button>
+    <button class="nd-btn" data-act="caught-direct" data-cid="ndmu2ccebl5a6ps">下载</button>
+    <button class="nd-btn nd-ghost" data-act="caught-copy" data-cid="ndmu2ccebl5a6ps">复制</button>
+  </div>
+</div></div>
+        </div>
+      </div>
+
+      <div class="nd-bar-acts">
+        <button class="nd-btn nd-ghost" data-act="resolve" data-el="resolve-btn" data-label="重新获取直链">重新获取直链</button>
+      </div>
+    </div>
+
+    <div class="nd-page" data-page="cfg">
+      <div class="nd-card">
+        <div class="nd-card-head">
+          <h3>Aria2 服务器</h3>
+        </div>
+        <div class="nd-card-body">
+          <div class="nd-field"><span class="nd-field-label">服务器地址</span>
+            <input class="nd-input" data-cfg="address" placeholder="http://localhost:6800"></div>
+          <div class="nd-field"><span class="nd-field-label">密钥</span>
+            <input class="nd-input" data-cfg="token" placeholder="留空表示未设置 rpc-secret"></div>
+          <div class="nd-field"><span class="nd-field-label">保存目录</span>
+            <input class="nd-input" data-cfg="dir" placeholder="留空使用 Aria2 默认目录"></div>
+          <div class="nd-field"><span class="nd-field-label">接口路径</span>
+            <input class="nd-input" data-cfg="path" placeholder="/jsonrpc"></div>
+          <div class="nd-field">
+            <button class="nd-btn nd-primary" data-act="test-aria">测试连接</button>
+            <button class="nd-btn" data-act="save-aria">保存</button>
+            <span class="nd-field-hint" data-el="aria-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="nd-card">
+        <div class="nd-card-head">
+          <h3>偏好设置</h3>
+        </div>
+        <div class="nd-card-body">
+          <div class="nd-field">
+            <span class="nd-field-label">入口样式</span>
+            <div class="nd-seg" data-el="entry-seg">
+              <button type="button" data-entry="auto">跟随主题</button>
+              <button type="button" data-entry="light" class="nd-on">白色</button>
+              <button type="button" data-entry="dark">暗色</button>
+            </div>
+            <span class="nd-field-desc">网盘页里「下载助手」按钮的配色</span>
+          </div>
+          <div class="nd-field">
+            <span class="nd-field-label">IDM 出口</span>
+            <div class="nd-switch"><input type="checkbox" data-opt="showIdm"><i></i></div>
+            <span class="nd-field-desc">在每条直链上显示「IDM」按钮</span>
+          </div>
+          <div class="nd-field">
+            <span class="nd-field-label">首次提示</span>
+            <div class="nd-switch"><input type="checkbox" data-opt="firstTip"><i></i></div>
+            <span class="nd-field-desc">装好后提示一次入口位置</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nd-page nd-about" data-page="about">
+      <p><b>网盘直链下载助手 v1.0.0</b></p>
+      <p><b>用法</b>：在网盘里勾选要下载的文件，打开本面板即自动换取直链。文件夹取不到直链，请进入文件夹后再勾选。</p>
+      <p><b>入口</b>：网盘工具栏上的「下载助手」按钮；若未出现，可用脚本管理器菜单中的「打开下载助手」。</p>
+      <p><b>出口</b>：推送 Aria2 · 浏览器下载 · 复制直链。</p>
+    </div>
+  </div>
+</div>
+<div id="nd-toasts"></div></div>
+</body>
+</html>
