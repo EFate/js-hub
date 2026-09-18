@@ -696,6 +696,86 @@ async function main() {
 		assert.ok(/BAIDUID=FFFF111122223333/.test(hit.headers.Cookie || ""), "需页面 Cookie");
 	});
 
+	/* ==================== 场景四：移动云盘分享页 ==================== */
+
+	console.log("\n[移动云盘分享页]");
+	const MC_PAGE = `<!DOCTYPE html><html><body>
+<div class="top-btns" id="mcBar"></div>
+<div class="main_file_list" id="mcList"></div>
+</body></html>`;
+	const dom4 = new JSDOM(MC_PAGE, {
+		url: "https://yun.139.com/shareweb/#/w/i/2xop3UhNZXiaq",
+		runScripts: "outside-only",
+		pretendToBeVisual: true
+	});
+	const w4 = dom4.window;
+	g.window = w4;
+	g.document = w4.document;
+	g.location = w4.location;
+	g.Blob = w4.Blob;
+	g.URL = w4.URL;
+	g.requestAnimationFrame = w4.requestAnimationFrame.bind(w4);
+
+	const storeMap4 = new Map();
+	const requests4 = [];
+	storeMap4.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	g.GM_getValue = (k, d) => (storeMap4.has(k) ? storeMap4.get(k) : d);
+	g.GM_setValue = (k, v) => { storeMap4.set(k, v); };
+	g.GM_deleteValue = (k) => { storeMap4.delete(k); };
+	g.GM_setClipboard = (text) => { g.__clip = text; };
+	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
+	g.GM_xmlhttpRequest = (opt) => {
+		requests4.push(opt);
+		setTimeout(() => {
+			const url = String(opt.url || "");
+			let body;
+			if (/orchestrator\/skyDrive\/download\/content/.test(url)) {
+				body = { code: 0, data: { redrUrl: "https://download-cdn.139.com/file.mkv?sign=mc1" } };
+			} else {
+				body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
+			}
+			if (opt.onload) opt.onload({ status: 200, responseText: JSON.stringify(body), response: body, responseHeaders: "" });
+		}, 0);
+		return { abort() { /* noop */ } };
+	};
+
+	// Vue 分享状态：selectList（勾选项）+ linkID（分享标识），文件项带 path
+	w4.document.getElementById("mcList").__vue__ = {
+		linkID: "2xop3UhNZXiaq",
+		selectList: [
+			{ item: { contentID: "c1", contentName: "家庭教师 Vol.2.mkv", contentSize: 1524626176, path: "家庭教师 Vol.2/家庭教师 Vol.2.mkv" } }
+		]
+	};
+
+	delete require.cache[require.resolve(SCRIPT)];
+	const mod4 = require(SCRIPT);
+
+	await tick(60);
+	t("识别为移动云盘分享页", () => {
+		assert.strictEqual(mod4.providerApi.current().id, "mcloud");
+		assert.strictEqual(mod4.providerApi.pageType(mod4.providers.find((p) => p.id === "mcloud")), "share");
+	});
+
+	requests4.length = 0;
+	mod4.ui.open();
+	await tick(120);
+
+	t("打开面板即自动换链：提交 linkId 与勾选文件的 path", () => {
+		const req = requests4.find((r) => /orchestrator\/skyDrive\/download\/content/.test(String(r.url)));
+		assert.ok(req, "应请求移动分享换链接口");
+		const data = String(req.data || "");
+		assert.ok(data.includes("linkId=2xop3UhNZXiaq"), "应带 linkId：" + data);
+		assert.ok(data.includes(encodeURIComponent("家庭教师 Vol.2/家庭教师 Vol.2.mkv")), "contentIds 应为勾选文件的 path");
+	});
+	t("redrUrl 入库且文件名正确（不再需要点下载截获）", () => {
+		const hit = mod4.catcher.pool.find((f) => f.url.indexOf("download-cdn.139.com") >= 0);
+		assert.ok(hit, "直链应入库");
+		assert.strictEqual(hit.name, "家庭教师 Vol.2.mkv");
+	});
+	t("空态文案不再引导「点一次下载」", () => {
+		assert.ok(!/点一次/.test(document.body.textContent), "页面上不应出现「点一次下载」的引导");
+	});
+
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);
 	console.log("========================================");

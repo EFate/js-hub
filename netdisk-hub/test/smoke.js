@@ -227,11 +227,13 @@ t("每个适配器都实现了 collect（读取勾选文件）", () => {
 		assert.strictEqual(typeof p.collect, "function", p.id + " 缺少 collect");
 	});
 });
-t("夸克与百度分享页提供完整换链实现，其余网盘明确降级（走捕获兜底）", () => {
+t("已接入自动换链的网盘（夸克 / 百度 / 阿里内页 / 移动分享页）", () => {
 	assert.strictEqual(typeof providerApi.byId("quark").resolve, "function", "夸克应支持换直链");
-	assert.strictEqual(typeof providerApi.byId("baidu").resolve, "function", "百度分享页应支持换直链");
-	["alipan", "pan123", "mcloud", "tcloud", "xunlei"].forEach((id) => {
-		assert.strictEqual(providerApi.byId(id).resolve, undefined, id + " 目前应走网络捕获兜底");
+	assert.strictEqual(typeof providerApi.byId("baidu").resolve, "function", "百度应支持换直链");
+	assert.strictEqual(typeof providerApi.byId("alipan").resolve, "function", "阿里内页应支持换直链");
+	assert.strictEqual(typeof providerApi.byId("mcloud").resolve, "function", "移动分享页应支持换直链");
+	["pan123", "tcloud", "xunlei"].forEach((id) => {
+		assert.strictEqual(providerApi.byId(id).resolve, undefined, id + " 换链尚未接入");
 	});
 });
 t("baiduShareInfo 逐项兜底收集分享参数（缺失环境返回完整空结构而不抛错）", () => {

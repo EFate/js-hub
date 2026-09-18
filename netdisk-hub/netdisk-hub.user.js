@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.4
+// @version      1.0.5
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.4";
+	const VERSION = "1.0.5";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -647,7 +647,44 @@
 				share: ['[class^="banner--"]>[class^="right--"]']
 			},
 			header: { "Referer": "https://www.alipan.com/" },
-			hint: "阿里云盘：请在文件列表中勾选目标文件，再点「获取直链」。",
+			hint: "阿里云盘：请在文件列表中勾选目标文件。",
+
+			/** 网盘内页换链：登录令牌就在页面 localStorage 里，与页面自身请求同源同权 */
+			async resolve(files, page) {
+				if (page !== "home") {
+					throw new Error("阿里云盘：自动换链目前支持网盘内页，分享页暂未接入。");
+				}
+				let raw = null;
+				try { raw = JSON.parse(localStorage.getItem("token") || "null"); } catch (e) { raw = null; }
+				if (!raw || !raw.access_token) {
+					throw new Error("未能从页面读取登录令牌，请刷新阿里云盘页面后重试。");
+				}
+				const auth = (raw.token_type || "Bearer") + " " + raw.access_token;
+				const out = [];
+				for (const f of files) {
+					if (f.dir) continue;
+					const res = await net.postJson(
+						"https://api.aliyundrive.com/v2/file/get_download_url",
+						{ drive_id: f.driveId, file_id: f.fid },
+						{
+							"Authorization": auth,
+							"X-Canary": "client=windows,app=adrive,version=v6.0.0",
+							"Referer": "https://www.alipan.com/"
+						}
+					);
+					if (res && res.code === "AccessTokenInvalid") {
+						throw new Error("访问令牌已过期，请刷新阿里云盘页面后重试。");
+					}
+					if (!res || !res.url) throw new Error("接口未返回直链，请刷新页面重试。");
+					out.push({
+						url: res.url,
+						name: f.name,
+						size: f.size || 0,
+						headers: providerApi.downloadHeaders(providerApi.byId("alipan"))
+					});
+				}
+				return out;
+			},
 
 			/** 读取勾选文件：取数自 React 组件的 props */
 			collect() {
@@ -659,7 +696,7 @@
 				const keys = String(props.selectedKeys || "").split(",").filter(Boolean);
 				files.forEach((f) => {
 					if (keys.indexOf(f.fileId) < 0) return;
-					out.push({ fid: f.fileId, name: f.name, size: f.size, dir: providerApi.isFolder(f) });
+					out.push({ fid: f.fileId, name: f.name, size: f.size, dir: providerApi.isFolder(f), driveId: f.driveId });
 				});
 				return out;
 			}
@@ -796,7 +833,30 @@
 			pages: { home: /^\/w/, share: /^\/(link|shareweb)/ },
 			mount: { home: [".top_button"], share: [".top-btns"] },
 			header: {},
-			hint: "移动云盘：勾选文件后在网盘里点一次「下载」，直链会被自动截获。",
+			hint: "移动云盘：请在文件列表中勾选要下载的文件。",
+			/** 分享页换链：orchestrator 接口，POST 表单即可（无需签名） */
+			async resolve(files, page) {
+				if (page !== "share") {
+					throw new Error("移动云盘：自动换链目前仅支持分享页（网盘内页需客户端签名，暂未接入）。");
+				}
+				const wrap = pageState.findVue(document.querySelector(".main_file_list"));
+				const linkId = wrap && wrap.linkID;
+				if (!linkId) throw new Error("未能读取分享 linkId，请刷新页面后重试。");
+				const out = [];
+				for (const f of files) {
+					if (f.dir) continue;
+					const res = await net.postForm(
+						"https://yun.139.com/orchestrator/skyDrive/download/content",
+						"linkId=" + encodeURIComponent(linkId) + "&contentIds=" + encodeURIComponent(f.path || "") + "&catalogIds=",
+						{}
+					);
+					if (!res || res.code !== 0 || !res.data || !res.data.redrUrl) {
+						throw new Error("移动云盘分享换链失败（code=" + ((res && res.code) || "未知") + "），请刷新页面后重试。");
+					}
+					out.push({ url: res.data.redrUrl, name: f.name, size: f.size || 0, headers: {} });
+				}
+				return out;
+			},
 			/** 读取勾选：取自 Vue 实例（列表页与首页两条通道，字段以 content* 为主） */
 			collect() {
 				const out = [];
@@ -817,7 +877,8 @@
 						fid: f.contentID || f.coID,
 						name: f.contentName || f.coName,
 						size: Number(f.contentSize || f.coSize) || 0,
-						dir: !!(f.dirEtag || f.caName)
+						dir: !!(f.dirEtag || f.caName),
+						path: f.path || ""          // 分享页换链要按 path 提交
 					});
 				});
 				return out;
@@ -830,7 +891,7 @@
 			pages: { home: /^\/web\/main/, share: /^\/web\/share/ },
 			mount: { home: ['[class*="FileHead_file-head-left"]'], share: [".nav-opea"] },
 			header: {},
-			hint: "天翼云盘：勾选文件后在网盘里点一次「下载」，直链会被自动截获。",
+			hint: "天翼云盘：请在文件列表中勾选要下载的文件。",
 			/** 读取勾选：取自 Vue 实例（列表页与文件详情页两条通道） */
 			collect() {
 				const out = [];
@@ -859,7 +920,7 @@
 			pages: { home: /^\/$/, share: /^\/(s|share)\// },
 			mount: { home: ['[class^="FileMenu__menu--"]'], share: ['[class^="Share__batchActionBox--"]'] },
 			header: {},
-			hint: "迅雷云盘：勾选文件后在网盘里点一次「下载」，直链会被自动截获。",
+			hint: "迅雷云盘：请在文件列表中勾选要下载的文件。",
 			/** 读取勾选：每个列表项的 Vue 实例自带 selected 数组与 info 对象 */
 			collect() {
 				const out = [];
@@ -1257,7 +1318,7 @@
 			if (!real.length) throw new Error("勾选的都是文件夹 —— 文件夹无法取直链，请进入文件夹后勾选其中的文件。");
 
 			if (!util.isFn(p.resolve)) {
-				throw new Error(p.name + " 暂不支持自动换取直链。请在网盘里点一次「下载」，由脚本自动截获。");
+				throw new Error(p.name + " 的自动换链尚未接入（勾选识别已就绪）。");
 			}
 			const links = await p.resolve(files, providerApi.pageType(p));
 			let added = 0;
@@ -2194,11 +2255,11 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			if (ui.state.error) return ui.state.error;
 			const provider = ui.state.provider;
 			const files = ui.state.files || [];
-			if (!provider) return "这里会列出可下载的直链。可在网盘里点一次「下载」，由脚本自动截获。";
+			if (!provider) return "这里会列出可下载的直链。打开网盘文件页并勾选文件，直链会自动出现在这里。";
 			if (!files.length) return `请在${provider.name}里勾选要下载的文件，直链会自动出现在这里。`;
 			if (!files.filter((f) => !f.dir).length) return "勾选的都是文件夹 —— 文件夹取不到直链，请进入文件夹后再勾选其中的文件。";
 			if (ui.state.phase === "resolving") return "正在获取直链…";
-			return "接口没有返回可用的直链。可在网盘里点一次「下载」，由脚本截获。";
+			return util.isFn(provider.resolve) ? "接口没有返回可用的直链，请重新勾选后再试一次。" : provider.name + " 的自动换链尚未接入（勾选识别已就绪）。";
 		},
 
 		renderCaught() {
