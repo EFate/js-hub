@@ -25,10 +25,13 @@ const PAGE = `<!DOCTYPE html><html><body>
 
 let pass = 0;
 let fail = 0;
-function t(name, fn) {
-	try { fn(); pass++; console.log("  ok   " + name); }
-	catch (e) { fail++; console.log("  FAIL " + name + "  ->  " + e.message); }
-}
+const pending = [];
+const t = (name, fn) => {
+	pending.push((async () => {
+		try { await fn(); pass++; console.log("  ok   " + name); }
+		catch (e) { fail++; console.log("  FAIL " + name + "  ->  " + e.message); }
+	})());
+};
 const tick = (ms) => new Promise((r) => setTimeout(r, ms || 30));
 
 async function main() {
@@ -726,19 +729,23 @@ async function main() {
 	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
 	g.GM_xmlhttpRequest = (opt) => {
 		requests4.push(opt);
-		setTimeout(() => {
+		setTimeout(async () => {
 			const url = String(opt.url || "");
 			let body;
-			if (/orchestrator\/skyDrive\/download\/content/.test(url)) {
-				body = { code: 0, data: { redrUrl: "https://download-cdn.139.com/file.mkv?sign=mc1" } };
-			} else {
-				body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
+			if (/dlFromOutLinkV3/.test(url)) {
+				// 移动分享接口是加密协议：响应用同款 AES 协议加密
+				const enc = await mod4Helper.encrypt({ data: { extInfo: { cdnDownloadURL: "https://download-cdn.139.com/file.mkv?sign=mc1" } } });
+				if (opt.onload) opt.onload({ status: 200, finalUrl: url, responseText: enc, responseHeaders: "" });
+				return;
 			}
+			body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
 			if (opt.onload) opt.onload({ status: 200, responseText: JSON.stringify(body), response: body, responseHeaders: "" });
 		}, 0);
 		return { abort() { /* noop */ } };
 	};
 
+	// 登录态：mcloudAccount 从页面存储提取 11 位手机号
+	w4.document.cookie = "MQuser=13812345678";
 	// Vue 分享状态：selectList（勾选项）+ linkID（分享标识），文件项带 path
 	w4.document.getElementById("mcList").__vue__ = {
 		linkID: "2xop3UhNZXiaq",
@@ -749,6 +756,8 @@ async function main() {
 
 	delete require.cache[require.resolve(SCRIPT)];
 	const mod4 = require(SCRIPT);
+	// mock 侧的加密助手（与脚本同一协议实现，用于构造加密响应）
+	const mod4Helper = { encrypt: mod4.providerApi.mcloudEncrypt };
 
 	await tick(60);
 	t("识别为移动云盘分享页", () => {
@@ -758,16 +767,23 @@ async function main() {
 
 	requests4.length = 0;
 	mod4.ui.open();
-	await tick(120);
+	await tick(600);   // 静默加密（crypto.subtle 异步）+ 网络跳，给足时间
 
-	t("打开面板即自动换链：提交 linkId 与勾选文件的 path", () => {
-		const req = requests4.find((r) => /orchestrator\/skyDrive\/download\/content/.test(String(r.url)));
-		assert.ok(req, "应请求移动分享换链接口");
-		const data = String(req.data || "");
-		assert.ok(data.includes("linkId=2xop3UhNZXiaq"), "应带 linkId：" + data);
-		assert.ok(data.includes(encodeURIComponent("家庭教师 Vol.2/家庭教师 Vol.2.mkv")), "contentIds 应为勾选文件的 path");
+	t("打开面板即自动换链：请求加密分享接口", () => {
+		const req = requests4.find((r) => /dlFromOutLinkV3/.test(String(r.url)));
+		assert.ok(req, "应请求移动分享加密接口");
+		assert.ok(/share-kd-njs\.yun\.139\.com/.test(String(req.url)), "应指向 share-kd-njs 网关");
 	});
-	t("redrUrl 入库且文件名正确（不再需要点下载截获）", () => {
+	t("请求体按协议加密，解密后含 linkID 与勾选文件", async () => {
+		const req = requests4.find((r) => /dlFromOutLinkV3/.test(String(r.url)));
+		const decrypted = await mod4.providerApi.mcloudDecryptResponse({ responseText: req.data });
+		const inner = decrypted && decrypted.dlFromOutLinkReqV3;
+		assert.ok(inner, "应能解出 dlFromOutLinkReqV3 结构");
+		assert.strictEqual(inner.linkID, "2xop3UhNZXiaq", "linkID 应为分享 ID");
+		assert.ok(inner.account && /^1[3-9]\d{9}$/.test(inner.account), "应自动提取 139 账号");
+		assert.deepStrictEqual(inner.coIDLst.item, ["c1"], "coIDLst 应只含勾选文件");
+	});
+	t("解密后的直链入库且文件名正确", () => {
 		const hit = mod4.catcher.pool.find((f) => f.url.indexOf("download-cdn.139.com") >= 0);
 		assert.ok(hit, "直链应入库");
 		assert.strictEqual(hit.name, "家庭教师 Vol.2.mkv");
@@ -776,6 +792,7 @@ async function main() {
 		assert.ok(!/点一次/.test(document.body.textContent), "页面上不应出现「点一次下载」的引导");
 	});
 
+	await Promise.all(pending);   // 等齐所有异步断言，避免假绿
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);
 	console.log("========================================");

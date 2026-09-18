@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.5
+// @version      1.0.6
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.5";
+	const VERSION = "1.0.6";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -87,6 +87,16 @@
 				.replace(/[\r\n\t]/g, " ")
 				.trim();
 			return safe || fallback;
+		},
+
+		/** 键排序的 JSON 序列化（移动分享接口的加密原文要求键有序） */
+		sortedJson(obj) {
+			if (Array.isArray(obj)) return "[" + obj.map((v) => util.sortedJson(v)).join(",") + "]";
+			if (obj && typeof obj === "object") {
+				return "{" + Object.keys(obj).sort()
+					.map((k) => JSON.stringify(k) + ":" + util.sortedJson(obj[k])).join(",") + "}";
+			}
+			return JSON.stringify(obj);
 		},
 
 		/** UTF-8 安全的 base64（百度接口的 logid 参数用） */
@@ -357,6 +367,22 @@
 						if (data === null) return reject(new Error("接口未返回合法 JSON（HTTP " + res.status + "）"));
 						resolve(data);
 					},
+					onerror: () => reject(new Error("请求失败：" + url)),
+					ontimeout: () => reject(new Error("请求超时：" + url))
+				});
+			});
+		},
+
+		/** POST 文本：返回原始响应（响应体可能是加密串，交由调用方处理） */
+		postText(url, bodyText, headers) {
+			return new Promise((resolve, reject) => {
+				net.raw({
+					method: "POST",
+					url,
+					headers: util.standHeaders(headers),
+					data: String(bodyText || ""),
+					responseType: "text",
+					onload: (res) => resolve(res),
 					onerror: () => reject(new Error("请求失败：" + url)),
 					ontimeout: () => reject(new Error("请求超时：" + url))
 				});
@@ -834,26 +860,42 @@
 			mount: { home: [".top_button"], share: [".top-btns"] },
 			header: {},
 			hint: "移动云盘：请在文件列表中勾选要下载的文件。",
-			/** 分享页换链：orchestrator 接口，POST 表单即可（无需签名） */
+			/**
+			 * 分享页换链：移动分享接口为加密协议 ——
+			 * POST https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/dlFromOutLinkV3
+			 * 请求体 = Base64(随机IV + AES-128-CBC(键排序JSON))，密钥固定 16 字节；
+			 * 响应同样加密，解密后按 CDNDownloadURL → RedrURL → DownloadURL 取链接。
+			 * 需要 139 账号（登录态），从页面存储自动提取。
+			 */
 			async resolve(files, page) {
 				if (page !== "share") {
 					throw new Error("移动云盘：自动换链目前仅支持分享页（网盘内页需客户端签名，暂未接入）。");
 				}
 				const wrap = pageState.findVue(document.querySelector(".main_file_list"));
 				const linkId = wrap && wrap.linkID;
-				if (!linkId) throw new Error("未能读取分享 linkId，请刷新页面后重试。");
+				if (!linkId) throw new Error("未能读取分享 linkID，请刷新页面后重试。");
+				const account = providerApi.mcloudAccount();
+				if (!account) throw new Error("未能从页面获取 139 账号 —— 请确认已在浏览器登录移动云盘后重试。");
+				const passwd = (wrap && (wrap.password || wrap.passwd)) || "";
 				const out = [];
 				for (const f of files) {
 					if (f.dir) continue;
-					const res = await net.postForm(
-						"https://yun.139.com/orchestrator/skyDrive/download/content",
-						"linkId=" + encodeURIComponent(linkId) + "&contentIds=" + encodeURIComponent(f.path || "") + "&catalogIds=",
-						{}
+					const coId = f.contentID || f.fid;
+					if (!coId) continue;
+					const body = await providerApi.mcloudEncrypt({
+						dlFromOutLinkReqV3: { account, linkID: linkId, passwd, coIDLst: { item: [String(coId)] } }
+					});
+					const raw = await net.postText(
+						"https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/dlFromOutLinkV3",
+						body,
+						providerApi.mcloudHeaders()
 					);
-					if (!res || res.code !== 0 || !res.data || !res.data.redrUrl) {
-						throw new Error("移动云盘分享换链失败（code=" + ((res && res.code) || "未知") + "），请刷新页面后重试。");
-					}
-					out.push({ url: res.data.redrUrl, name: f.name, size: f.size || 0, headers: {} });
+					const data = await providerApi.mcloudDecryptResponse(raw);
+					const d = (data && data.data) || {};
+					const url = (d.extInfo && (d.extInfo.cdnDownloadURL || d.extInfo.CDNDownloadURL))
+						|| d.redrURL || d.RedrURL || d.downloadURL || d.DownloadURL || "";
+					if (!url) throw new Error("移动云盘未返回直链（" + ((data && data.result && (data.result.resultDesc || data.result.resultCode)) || "响应为空") + "），请刷新页面重试。");
+					out.push({ url, name: f.name, size: f.size || 0, headers: {} });
 				}
 				return out;
 			},
@@ -1190,6 +1232,83 @@
 				if (i + BATCH < fsids.length) await util.sleep(500);
 			}
 			return out;
+		},
+
+		/**
+		 * 移动分享协议辅助：AES-128-CBC（固定密钥 + 随机 IV 前置）+ 键排序 JSON。
+		 * 依赖浏览器原生 crypto.subtle（https 页面可用）。
+		 */
+		mcloudEncrypt(obj) {
+			const enc = new TextEncoder();
+			const iv = new Uint8Array(16);
+			try { crypto.getRandomValues(iv); } catch (e) { for (let i = 0; i < 16; i++) iv[i] = Math.floor(Math.random() * 256); }
+			return crypto.subtle.importKey("raw", enc.encode("PVGDwmcvfs1uV3d1"), { name: "AES-CBC" }, false, ["encrypt"])
+				.then((key) => crypto.subtle.encrypt({ name: "AES-CBC", iv }, key, enc.encode(util.sortedJson(obj))))
+				.then((cipher) => {
+					const merged = new Uint8Array(iv.length + cipher.byteLength);
+					merged.set(iv, 0);
+					merged.set(new Uint8Array(cipher), iv.length);
+					let bin = "";
+					merged.forEach((b) => { bin += String.fromCharCode(b); });
+					return btoa(bin);
+				});
+		},
+
+		/** 响应解密：先按同协议解密，失败则回退按明文 JSON 解析 */
+		async mcloudDecryptResponse(raw) {
+			const text = String((raw && raw.responseText) || "");
+			if (!text) return null;
+			try {
+				const merged = Uint8Array.from(atob(text.trim()), (ch) => ch.charCodeAt(0));
+				const iv = merged.slice(0, 16);
+				const cipher = merged.slice(16);
+				const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("PVGDwmcvfs1uV3d1"), { name: "AES-CBC" }, false, ["decrypt"]);
+				const plain = await crypto.subtle.decrypt({ name: "AES-CBC", iv }, key, cipher);
+				return JSON.parse(new TextDecoder().decode(plain));
+			} catch (e) {
+				try { return JSON.parse(text); } catch (e2) { return null; }
+			}
+		},
+
+		/** 移动分享请求头（与页面同源，浏览器自动带 Cookie） */
+		mcloudHeaders() {
+			return {
+				"Accept": "application/json, text/plain, */*",
+				"Content-Type": "application/json;charset=UTF-8",
+				"X-Deviceinfo": "||9|12.27.0|chrome|120.0|||windows 10||zh-CN|||",
+				"hcy-cool-flag": "1",
+				"CMS-DEVICE": "default",
+				"x-m4c-caller": "PC",
+				"X-Yun-Api-Version": "v1",
+				"Referer": "https://yun.139.com/"
+			};
+		},
+
+		/**
+		 * 从页面存储提取 139 账号（11 位手机号）。
+		 * 渠道：localStorage 与 cookie 里逐项正则匹配，避免依赖单一私有字段名。
+		 */
+		mcloudAccount() {
+		 const seen = {};
+		 const hit = (text) => {
+			 if (!text) return "";
+			 const m = String(text).match(/1[3-9]\d{9}/g);
+			 return m ? m[0] : "";
+		 };
+		 try {
+			 for (let i = 0; i < localStorage.length; i++) {
+				 const k = localStorage.key(i);
+				 if (seen[k]) continue;
+				 seen[k] = 1;
+				 const v = hit(localStorage.getItem(k));
+				 if (v) return v;
+			 }
+		 } catch (e) { /* 忽略 */ }
+		 try {
+			 const v = hit(document.cookie);
+			 if (v) return v;
+		 } catch (e) { /* 忽略 */ }
+		 return "";
 		},
 
 		/** 按 pathname 判定当前页面类型：home | share | ""（无法判定） */
