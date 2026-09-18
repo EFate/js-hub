@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.6
+// @version      1.0.7
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.6";
+	const VERSION = "1.0.7";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -880,21 +880,23 @@
 				const out = [];
 				for (const f of files) {
 					if (f.dir) continue;
-					const coId = f.contentID || f.fid;
+					const coId = String(f.contentID || f.fid || "");
 					if (!coId) continue;
-					const body = await providerApi.mcloudEncrypt({
-						dlFromOutLinkReqV3: { account, linkID: linkId, passwd, coIDLst: { item: [String(coId)] } }
+					// 正式下载接口
+					const r1 = await providerApi.mcloudShareCall("dlFromOutLinkV3", {
+						dlFromOutLinkReqV3: { account, linkID: linkId, passwd, coIDLst: { item: [coId] } }
 					});
-					const raw = await net.postText(
-						"https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/dlFromOutLinkV3",
-						body,
-						providerApi.mcloudHeaders()
-					);
-					const data = await providerApi.mcloudDecryptResponse(raw);
-					const d = (data && data.data) || {};
-					const url = (d.extInfo && (d.extInfo.cdnDownloadURL || d.extInfo.CDNDownloadURL))
-						|| d.redrURL || d.RedrURL || d.downloadURL || d.DownloadURL || "";
-					if (!url) throw new Error("移动云盘未返回直链（" + ((data && data.result && (data.result.resultDesc || data.result.resultCode)) || "响应为空") + "），请刷新页面重试。");
+					let url = providerApi.mcloudPickUrl(r1.data);
+					let diag = r1.diag;
+					if (!url) {
+						// 备用：内容信息接口（部分分享只在它这里给出可下载地址）
+						const r2 = await providerApi.mcloudShareCall("getContentInfoFromOutLink", {
+							getContentInfoFromOutLinkReq: { contentId: coId, linkID: linkId, passwd, account }
+						});
+						url = providerApi.mcloudPickUrl(r2.data);
+						if (!url) diag = "下载接口：" + r1.diag + "；信息接口：" + r2.diag;
+					}
+					if (!url) throw new Error("移动云盘未返回直链（" + diag + "），请刷新页面重试。");
 					out.push({ url, name: f.name, size: f.size || 0, headers: {} });
 				}
 				return out;
@@ -1268,6 +1270,52 @@
 			} catch (e) {
 				try { return JSON.parse(text); } catch (e2) { return null; }
 			}
+		},
+
+		/**
+		 * 移动分享接口调用（统一加密 + 解密 + 诊断）。
+		 * 返回 { data, diag } —— diag 是给用户看的响应特征，
+		 * 装不出直链时能把「服务端到底回了什么」带进错误提示，避免只能猜。
+		 */
+		async mcloudShareCall(apiName, payload) {
+			const body = await providerApi.mcloudEncrypt(payload);
+			const raw = await net.postText(
+				"https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/" + apiName,
+				body,
+				providerApi.mcloudHeaders()
+			);
+			const text = String((raw && raw.responseText) || "");
+			const parsed = await providerApi.mcloudDecryptResponse(raw);
+			let diag;
+			if (!text) {
+				diag = "响应为空";
+			} else if (parsed) {
+				const keys = Object.keys(parsed).slice(0, 6).join("/");
+				const code = parsed.result ? JSON.stringify(parsed.result).slice(0, 90) : "";
+				diag = "已解出字段 " + keys + (code ? "；result=" + code : "");
+			} else {
+				diag = "响应无法解析（前 60 字符：" + text.slice(0, 60).replace(/\s+/g, " ") + "）";
+			}
+			return { data: parsed, diag };
+		},
+
+		/** 从任意深度的响应里取可下载地址（优先键名像下载地址的 http 值） */
+		mcloudPickUrl(obj) {
+			const hits = [];
+			const walk = (node, depth) => {
+				if (!node || typeof node !== "object" || depth > 6) return;
+				for (const k in node) {
+					if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+					const v = node[k];
+					if (typeof v === "string") {
+						if (/^https?:\/\//i.test(v) && /download|redr|cdn|url|link/i.test(k)) hits.push(v);
+					} else if (v && typeof v === "object") {
+						walk(v, depth + 1);
+					}
+				}
+			};
+			walk(obj, 0);
+			return hits[0] || "";
 		},
 
 		/** 移动分享请求头（与页面同源，浏览器自动带 Cookie） */

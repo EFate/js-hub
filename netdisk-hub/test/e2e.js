@@ -727,22 +727,28 @@ async function main() {
 	g.GM_deleteValue = (k) => { storeMap4.delete(k); };
 	g.GM_setClipboard = (text) => { g.__clip = text; };
 	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
+	let v3Empty = false;   // 置 true 时模拟「下载接口返回空」，验证备用接口兜底
 	g.GM_xmlhttpRequest = (opt) => {
 		requests4.push(opt);
 		setTimeout(async () => {
 			const url = String(opt.url || "");
-			let body;
-			if (/dlFromOutLinkV3/.test(url)) {
-				// 移动分享接口是加密协议：响应用同款 AES 协议加密
-				const enc = await mod4Helper.encrypt({ data: { extInfo: { cdnDownloadURL: "https://download-cdn.139.com/file.mkv?sign=mc1" } } });
+			if (/IOutLink\/(dlFromOutLinkV3|getContentInfoFromOutLink)/.test(url)) {
+				const isV3 = /dlFromOutLinkV3/.test(url);
+				const payload = isV3
+					? (v3Empty
+						? { result: { resultCode: "1000", resultDesc: "no link" }, data: {} }
+						: { data: { extInfo: { cdnDownloadURL: "https://download-cdn.139.com/file.mkv?sign=mc1" } } })
+					: { data: { presentURL: "https://download-cdn.139.com/fallback.mkv?sign=mc2" } };
+				const enc = await mod4Helper.encrypt(payload);   // 响应用同款 AES 协议加密
 				if (opt.onload) opt.onload({ status: 200, finalUrl: url, responseText: enc, responseHeaders: "" });
 				return;
 			}
-			body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
+			const body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
 			if (opt.onload) opt.onload({ status: 200, responseText: JSON.stringify(body), response: body, responseHeaders: "" });
 		}, 0);
 		return { abort() { /* noop */ } };
 	};
+	g.__mcSetV3Empty = (v) => { v3Empty = v; };
 
 	// 登录态：mcloudAccount 从页面存储提取 11 位手机号
 	w4.document.cookie = "MQuser=13812345678";
@@ -790,6 +796,32 @@ async function main() {
 	});
 	t("空态文案不再引导「点一次下载」", () => {
 		assert.ok(!/点一次/.test(document.body.textContent), "页面上不应出现「点一次下载」的引导");
+	});
+
+	// 下载接口返回空时：应自动走备用接口取链
+	g.__mcSetV3Empty(true);
+	mod4.catcher.clear();
+	mod4.ui._resolvedSig = "";
+	requests4.length = 0;
+	await mod4.engine.resolveSelected(mod4.providers.find((p) => p.id === "mcloud"));
+	await tick(300);
+
+	t("下载接口为空时自动走备用接口取链", () => {
+		assert.ok(requests4.some((r) => /getContentInfoFromOutLink/.test(String(r.url))), "应请求备用接口");
+		assert.ok(mod4.catcher.pool.some((f) => f.url.indexOf("fallback.mkv") >= 0), "备用接口的地址应入库");
+	});
+	t("两个接口都给不出链接时，提示带服务端响应特征（便于定位）", async () => {
+		const backup = mod4.providerApi.mcloudShareCall;
+		mod4.providerApi.mcloudShareCall = async () => ({
+			data: { result: { resultCode: "1000" } },
+			diag: '已解出字段 result/data；result={"resultCode":"1000"}'
+		});
+		let err = "";
+		try { await mod4.engine.resolveSelected(mod4.providers.find((p) => p.id === "mcloud")); }
+		catch (e) { err = e.message; }
+		mod4.providerApi.mcloudShareCall = backup;
+		assert.ok(/1000/.test(err), "错误里应含服务端返回码：" + err);
+		assert.ok(/字段/.test(err), "错误里应含响应字段诊断：" + err);
 	});
 
 	await Promise.all(pending);   // 等齐所有异步断言，避免假绿

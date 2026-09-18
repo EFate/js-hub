@@ -329,6 +329,22 @@ t("按当前域名区分夸克 / UC 的接口与客户端 UA", () => {
 	assert.ok(/quark-cloud-drive/.test(q["User-Agent"] || ""), "默认取夸克 UA");
 });
 
+/* ---------------- 移动分享取链辅助 ---------------- */
+group("移动分享取链");
+
+t("mcloudPickUrl 从任意深度取下载地址（优先键名像链接的）", () => {
+	assert.strictEqual(providerApi.mcloudPickUrl({ data: { extInfo: { cdnDownloadURL: "https://a/1" } } }), "https://a/1");
+	assert.strictEqual(providerApi.mcloudPickUrl({ data: { downloadURL: "https://b/2" } }), "https://b/2");
+	assert.strictEqual(providerApi.mcloudPickUrl({ result: { resultCode: "0" }, data: {} }), "");
+	assert.strictEqual(providerApi.mcloudPickUrl(null), "");
+});
+t("mcloudAccount 在无手机号的环境返回空串（不误报）", () => {
+	assert.strictEqual(providerApi.mcloudAccount(), "");
+});
+t("util.sortedJson 键有序（移动加密协议要求）", () => {
+	assert.strictEqual(util.sortedJson({ b: 1, a: { d: 2, c: 3 } }), JSON.stringify({ a: { c: 3, d: 2 }, b: 1 }));
+});
+
 /* ---------------- 注入层 ---------------- */
 group("inject");
 
