@@ -593,6 +593,107 @@ async function main() {
 		assert.ok(mod2.ui.isOpen(), "捕获阶段委托应接住点击并打开面板");
 	});
 
+	/* ==================== 场景三：百度网盘内页 ==================== */
+
+	console.log("\n[百度网盘内页]");
+	const BH_PAGE = `<!DOCTYPE html><html><body>
+<div class="wp-s-agile-tool-bar__header" id="bhBar"></div>
+<div class="file-list" id="bhList"></div>
+</body></html>`;
+	const dom3 = new JSDOM(BH_PAGE, {
+		url: "https://pan.baidu.com/disk/main?idx=2",
+		runScripts: "outside-only",
+		pretendToBeVisual: true
+	});
+	const w3 = dom3.window;
+	g.window = w3;
+	g.document = w3.document;
+	g.location = w3.location;
+	g.Blob = w3.Blob;
+	g.URL = w3.URL;
+	g.requestAnimationFrame = w3.requestAnimationFrame.bind(w3);
+
+	const storeMap3 = new Map();
+	const requests3 = [];
+	storeMap3.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	g.GM_getValue = (k, d) => (storeMap3.has(k) ? storeMap3.get(k) : d);
+	g.GM_setValue = (k, v) => { storeMap3.set(k, v); };
+	g.GM_deleteValue = (k) => { storeMap3.delete(k); };
+	g.GM_setClipboard = (text) => { g.__clip = text; };
+	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
+	g.GM_xmlhttpRequest = (opt) => {
+		requests3.push(opt);
+		setTimeout(() => {
+			const url = String(opt.url || "");
+			let res;
+			if (/oauth\/2\.0\/authorize/.test(url)) {
+				// 模拟已授权过的账号：授权页直接重定向到 oob 并带出令牌
+				res = { status: 200, finalUrl: "https://openapi.baidu.com/oauth/2.0/oob?access_token=TOK123abc", responseText: "", responseHeaders: "" };
+			} else if (/filemetas/.test(url)) {
+				res = { status: 200, finalUrl: url, responseText: JSON.stringify({ errno: 0, list: [{ fs_id: 333, server_filename: "模型.onnx", size: 97607680, dlink: "https://d.pcs.baidu.com/file/inner?fid=333&dst=1" }] }), responseHeaders: "" };
+			} else {
+				res = { status: 200, finalUrl: url, responseText: JSON.stringify({ id: 1, jsonrpc: "2.0", result: "task-ok" }), responseHeaders: "" };
+			}
+			if (opt.onload) opt.onload(res);
+		}, 0);
+		return { abort() { /* noop */ } };
+	};
+
+	w3.document.cookie = "BAIDUID=FFFF111122223333:FG=1";
+	w3.document.getElementById("bhList").__vue__ = {
+		allFileList: [
+			{ fs_id: 333, server_filename: "模型.onnx", size: 97607680, isdir: 0, selected: true },
+			{ fs_id: 444, server_filename: "没勾.pt", size: 10, isdir: 0, selected: false }
+		]
+	};
+
+	delete require.cache[require.resolve(SCRIPT)];
+	const mod3 = require(SCRIPT);
+
+	await tick(60);
+	t("识别为百度网盘内页（home）", () => {
+		assert.strictEqual(mod3.providerApi.current().id, "baidu");
+		assert.strictEqual(mod3.providerApi.pageType(mod3.providers[0]), "home");
+	});
+	t("百度页面跳过了网络 hook（原生 API 未被包装）", () => {
+		const raw = w3.XMLHttpRequest.prototype.open;
+		assert.ok(!/apply|__ndUrl/.test(String(raw)) && String(raw).indexOf("[native code]") >= 0 || String(raw).indexOf("__ndUrl") < 0,
+			"XHR.open 不应带包装痕迹");
+		try {
+			const probe = new w3.XMLHttpRequest();
+			probe.open("GET", "https://d.pcs.baidu.com/file/probe?dlink=1");
+			probe.send();
+		} catch (e) { /* 忽略 */ }
+		assert.ok(!mod3.catcher.pool.some((f) => f.url.indexOf("probe") >= 0), "hook 跳过后不应截获任何请求");
+	});
+
+	requests3.length = 0;
+	mod3.ui.open();
+	await tick(160);   // 静默授权 + filemetas 两跳
+
+	t("内页自动换链：先静默授权拿令牌", () => {
+		const req = requests3.find((r) => /oauth\/2\.0\/authorize/.test(String(r.url)));
+		assert.ok(req, "应请求百度授权页");
+		assert.ok(String(req.url).includes("response_type=token"), "应为令牌式授权");
+	});
+	t("filemetas 只提交勾选文件的 fs_id，并携带授权令牌", () => {
+		const req = requests3.find((r) => /filemetas/.test(String(r.url)));
+		assert.ok(req, "应请求 filemetas");
+		assert.ok(req.url.includes(encodeURIComponent(JSON.stringify([333]))), "fsids 应只含勾选的 333");
+		assert.ok(req.url.includes("access_token=TOK123abc"), "应携带授权令牌");
+		assert.ok(req.url.includes("dlink=1"), "应声明需要 dlink");
+	});
+	t("令牌已缓存（下次换链不再重复授权）", () => {
+		assert.strictEqual(storeMap3.get("nd.baidu").token, "TOK123abc");
+	});
+	t("内页 dlink 入库且随行 UA + Cookie", () => {
+		const hit = mod3.catcher.pool.find((f) => f.url.indexOf("inner?fid=333") >= 0);
+		assert.ok(hit, "直链应入库");
+		assert.strictEqual(hit.name, "模型.onnx");
+		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com");
+		assert.ok(/BAIDUID=FFFF111122223333/.test(hit.headers.Cookie || ""), "需页面 Cookie");
+	});
+
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);
 	console.log("========================================");

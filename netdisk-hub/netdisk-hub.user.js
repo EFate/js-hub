@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.2
+// @version      1.0.3
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,10 +59,11 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.2";
+	const VERSION = "1.0.3";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
+		baidu: "nd.baidu",
 		flag: "nd.installed"
 	};
 
@@ -220,6 +221,9 @@
 			path: "/jsonrpc",
 			token: "",
 			dir: ""
+		},
+		[KEY.baidu]: {
+			token: ""             // 百度开放平台 access_token（网盘内页换链用，静默授权后缓存）
 		},
 		[KEY.opt]: {
 			showIdm: false,       // 是否在直链行上显示「IDM」出口（默认关闭）
@@ -620,12 +624,17 @@
 				return out;
 			},
 
-			/** 分享页换直链：tplconfig 签名 + sharedownload（网盘内页需另走 OAuth，暂不支持） */
+			/** 分享页走签名换链；网盘内页走静默授权 + filemetas（均全自动） */
 			async resolve(files, page) {
-				if (page !== "share") {
-					throw new Error("百度网盘：自动换链目前仅支持分享页。网盘内文件可先点一次「下载」由脚本截获。");
+				if (page === "share") {
+					return providerApi.baiduResolve(files, providerApi.baiduShareInfo());
 				}
-				return providerApi.baiduResolve(files, providerApi.baiduShareInfo());
+				let token = store.get(KEY.baidu).token;
+				if (!token) token = await providerApi.baiduGetToken();
+				if (!token) {
+					throw new Error("百度自动授权未成功：请确认浏览器已登录百度账号，然后重新打开面板。");
+				}
+				return providerApi.baiduHomeResolve(files, token);
 			}
 		},
 		{
@@ -1050,6 +1059,73 @@
 			return out;
 		},
 
+		/**
+		 * 百度静默授权：访问开放平台授权页拿 access_token。
+		 * 已授权过 → 授权页直接重定向到 oob 页，从 finalUrl 提取令牌；
+		 * 未授权 → 抓授权页表单参数自动提交确认，再提取。令牌缓存复用。
+		 */
+		async baiduGetToken() {
+			const saved = store.get(KEY.baidu).token;
+			if (saved) return saved;
+			const AUTH = "https://openapi.baidu.com/oauth/2.0/authorize?response_type=token&scope=basic,netdisk&client_id=omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO&redirect_uri=oob&confirm_login=0";
+			const pick = (res) => ((res && res.finalUrl || "").match(/access_token=([^&]+)/) || [])[1] || "";
+			const first = await net.text(AUTH, { Origin: "", Referer: "" });
+			let token = pick(first);
+			if (!token && /\/authorize/.test(first.finalUrl || "")) {
+				// 未授权：解析授权页表单并自动提交确认
+				const bdstoken = ((first.responseText || "").match(/name="bdstoken"\s+value="([^"]+)"/) || [])[1] || "";
+				const clientId = ((first.responseText || "").match(/name="client_id"\s+value="([^"]+)"/) || [])[1] || "";
+				const body = "grant_permissions_arr=netdisk&bdstoken=" + encodeURIComponent(bdstoken)
+					+ "&client_id=" + encodeURIComponent(clientId)
+					+ "&response_type=token&display=page&grant_permissions=" + encodeURIComponent("basic,netdisk");
+				await net.postForm(AUTH, body, { Origin: "", Referer: "" });
+				token = pick(await net.text(AUTH, { Origin: "", Referer: "" }));
+			}
+			if (token) store.patch(KEY.baidu, { token });
+			return token;
+		},
+
+		/**
+		 * 百度网盘内页换链：xpan/filemetas 按勾选的 fs_id 批量取 dlink（分批 50）。
+		 * 9019 = 令牌过期，自动清缓存（下次换链会重新静默授权）；112 = 页面过期。
+		 */
+		async baiduHomeResolve(files, token) {
+			const fsids = files.filter((f) => !f.dir).map((f) => f.fid);
+			if (!fsids.length) throw new Error("没有可换链的文件。");
+			const BATCH = 50;
+			const out = [];
+			for (let i = 0; i < fsids.length; i += BATCH) {
+				const batch = fsids.slice(i, i + BATCH);
+				const res = await net.text(
+					"https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas&dlink=1"
+					+ "&fsids=" + encodeURIComponent(JSON.stringify(batch))
+					+ "&access_token=" + encodeURIComponent(token)
+				);
+				let data = null;
+				try { data = JSON.parse(res.responseText); } catch (e) { data = null; }
+				if (data && data.errno === 9019) {
+					store.patch(KEY.baidu, { token: "" });
+					throw new Error("百度访问令牌已过期，已自动清除授权 —— 请重新打开面板再取一次。");
+				}
+				if (data && data.errno === 112) throw new Error("页面已过期，刷新后重试。（errno 112）");
+				if (!data || data.errno !== 0 || !Array.isArray(data.list)) {
+					throw new Error("换取直链失败（errno=" + ((data && data.errno) || "未知") + "）。");
+				}
+				data.list.forEach((it) => {
+					if (it.dlink) {
+						out.push({
+							url: it.dlink,
+							name: it.server_filename || util.nameFromUrl(it.dlink),
+							size: it.size || 0,
+							headers: providerApi.downloadHeaders(providers[0])
+						});
+					}
+				});
+				if (i + BATCH < fsids.length) await util.sleep(500);
+			}
+			return out;
+		},
+
 		/** 按 pathname 判定当前页面类型：home | share | ""（无法判定） */
 		pageType(provider) {
 			const p = provider || providerApi.current();
@@ -1349,6 +1425,13 @@
 		/** 安装 hook。必须在文档解析前调用，否则会漏掉早发的请求 */
 		install() {
 			if (catcher.hooked) return;
+			// 百度页面跳过 hook：分享页与网盘内页都有自动换链，「点下载截获」对百度
+			// 本来就是多余兜底；而不包装原生 API 可以避免原生「下载」被页面风控盯上
+			// （表现为一直停在「正在获取下载链接」）。
+			try {
+				const cur = providerApi.current();
+				if (cur && cur.id === "baidu") return;
+			} catch (e) { /* 忽略 */ }
 			catcher.hooked = true;
 			const win = (typeof unsafeWindow !== "undefined" && unsafeWindow) ? unsafeWindow : window;
 			if (!win) return;
@@ -1922,6 +2005,19 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 
       <div class="nd-card">
         <div class="nd-card-head">
+          <h3>百度网盘授权</h3>
+        </div>
+        <div class="nd-card-body">
+          <div class="nd-field">
+            <button class="nd-btn nd-primary" data-act="baidu-auth">重新授权</button>
+            <span class="nd-field-hint" data-el="baidu-auth-status"></span>
+          </div>
+          <div class="nd-field-hint">网盘内页换直链需要一次百度开放平台授权：首次换链时自动完成，无需手动操作；此处仅用于授权异常时手动重试。</div>
+        </div>
+      </div>
+
+      <div class="nd-card">
+        <div class="nd-card-head">
           <h3>偏好设置</h3>
         </div>
         <div class="nd-card-body">
@@ -1995,6 +2091,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 				case "caught-idm": return ui.caughtIdm(id, act);
 				case "test-aria": return ui.testAria(act);
 				case "save-aria": return ui.saveAria(act);
+				case "baidu-auth": return ui.baiduAuth(act);
 				default: return undefined;
 			}
 		},
@@ -2314,6 +2411,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			ui.root.querySelectorAll("[data-opt]").forEach((el) => {
 				el.checked = !!opt[el.getAttribute("data-opt")];
 			});
+			ui.syncBaiduAuthStatus(store.get(KEY.baidu).token ? "已授权（令牌已缓存）" : "未授权（首次换链时自动完成）");
 			ui.syncEntrySeg();
 		},
 
@@ -2357,6 +2455,25 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			store.patch(KEY.aria, ui.readConfigForm());
 			ui.busy(btn, true, "已保存");   // 按钮文字本身就是反馈，不再弹窗
 			setTimeout(() => ui.busy(btn, false), 1200);
+		},
+
+		/** 百度手动重授权（正常情况下首次换链会自动完成，无需动这里） */
+		async baiduAuth(btn) {
+			store.patch(KEY.baidu, { token: "" });
+			ui.syncBaiduAuthStatus("授权中…");
+			ui.busy(btn, true, "授权中…");
+			try {
+				const token = await providerApi.baiduGetToken();
+				ui.syncBaiduAuthStatus(token ? "已授权（令牌已缓存）" : "授权未成功：请确认浏览器已登录百度账号");
+			} catch (e) {
+				ui.syncBaiduAuthStatus("授权失败：" + e.message);
+			}
+			ui.busy(btn, false);
+		},
+
+		syncBaiduAuthStatus(text) {
+			const el = ui.root && ui.root.querySelector('[data-el="baidu-auth-status"]');
+			if (el) el.textContent = text;
 		},
 
 		async testAria(btn) {
