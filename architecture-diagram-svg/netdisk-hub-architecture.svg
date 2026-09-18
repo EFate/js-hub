@@ -1,0 +1,112 @@
+﻿<svg viewBox="0 0 680 620" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .bg { fill: #f8fafc; }
+      .layer-title { font-family: sans-serif; font-size: 14px; font-weight: 600; fill: #64748b; }
+      .node { fill: white; stroke: #e2e8f0; stroke-width: 1.5; rx: 10; ry: 10; }
+      .node-title { font-family: sans-serif; font-size: 13px; font-weight: 600; fill: #1e293b; }
+      .node-desc { font-family: sans-serif; font-size: 11px; fill: #64748b; }
+      .arrow { stroke: #94a3b8; stroke-width: 1.5; fill: none; }
+      .arrow-head { fill: #94a3b8; }
+      .baidu { fill: #3b82f6; }
+      .quark { fill: #8b5cf6; }
+      .out { fill: #10b981; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" class="arrow-head"/>
+    </marker>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="680" height="620" class="bg"/>
+
+  <!-- 标题 -->
+  <text x="340" y="32" text-anchor="middle" font-family="sans-serif" font-size="18" font-weight="700" fill="#1e293b">网盘直链下载助手 · 架构图</text>
+  <text x="340" y="52" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#94a3b8">netdisk-hub · 零第三方依赖</text>
+
+  <!-- ========== 入口层 ========== -->
+  <rect x="30" y="70" width="620" height="90" rx="12" fill="none" stroke="#e2e8f0" stroke-dasharray="4 2"/>
+  <text x="44" y="90" class="layer-title">入口层</text>
+  
+  <rect x="70" y="100" width="200" height="45" class="node"/>
+  <text x="170" y="120" text-anchor="middle" class="node-title">工具栏按钮注入</text>
+  <text x="170" y="136" text-anchor="middle" class="node-desc">MutationObserver 等待渲染</text>
+  
+  <rect x="410" y="100" width="200" height="45" class="node"/>
+  <text x="510" y="120" text-anchor="middle" class="node-title">脚本菜单兜底</text>
+  <text x="510" y="136" text-anchor="middle" class="node-desc">GM_registerMenuCommand</text>
+
+  <!-- 箭头：入口→核心 -->
+  <path d="M 170 145 L 170 165 L 200 165 L 200 180" class="arrow" marker-end="url(#arrow)"/>
+  <path d="M 510 145 L 510 165 L 480 165 L 480 180" class="arrow" marker-end="url(#arrow)"/>
+
+  <!-- ========== 核心层 ========== -->
+  <rect x="30" y="185" width="620" height="110" rx="12" fill="none" stroke="#e2e8f0" stroke-dasharray="4 2"/>
+  <text x="44" y="205" class="layer-title">核心层</text>
+
+  <rect x="60" y="220" width="180" height="55" class="node"/>
+  <text x="150" y="242" text-anchor="middle" class="node-title">文件识别</text>
+  <text x="150" y="258" text-anchor="middle" class="node-desc">React/Vue props → DOM 兜底</text>
+
+  <rect x="250" y="220" width="180" height="55" class="node"/>
+  <text x="340" y="242" text-anchor="middle" class="node-title">自动换链</text>
+  <text x="340" y="258" text-anchor="middle" class="node-desc">providers[].resolve()</text>
+
+  <rect x="440" y="220" width="180" height="55" class="node"/>
+  <text x="530" y="242" text-anchor="middle" class="node-title">网络层捕获</text>
+  <text x="530" y="258" text-anchor="middle" class="node-desc">hook XHR / fetch 兜底</text>
+
+  <!-- 箭头：核心→适配 -->
+  <path d="M 340 275 L 340 290 L 170 290 L 170 310" class="arrow" marker-end="url(#arrow)"/>
+  <path d="M 340 275 L 340 290 L 510 290 L 510 310" class="arrow" marker-end="url(#arrow)"/>
+  <path d="M 530 275 L 530 295 L 590 295 L 590 310" class="arrow" marker-end="url(#arrow)"/>
+
+  <!-- ========== 适配层 ========== -->
+  <rect x="30" y="315" width="620" height="110" rx="12" fill="none" stroke="#e2e8f0" stroke-dasharray="4 2"/>
+  <text x="44" y="335" class="layer-title">适配层（providers 可插拔）</text>
+
+  <rect x="60" y="350" width="220" height="60" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="170" y="372" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#1d4ed8">百度网盘</text>
+  <text x="170" y="390" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#3b82f6">分享页: tplconfig → sharedownload</text>
+  <text x="170" y="404" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#3b82f6">内页: OAuth → xpan/filemetas</text>
+
+  <rect x="400" y="350" width="220" height="60" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="510" y="372" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#6d28d9">夸克 / UC 网盘</text>
+  <text x="510" y="390" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8b5cf6">file/download 接口</text>
+  <text x="510" y="404" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#8b5cf6">按域名自动区分 UA</text>
+
+  <!-- 箭头：适配→输出 -->
+  <path d="M 170 410 L 170 430 L 170 445" class="arrow" marker-end="url(#arrow)"/>
+  <path d="M 510 410 L 510 430 L 510 445" class="arrow" marker-end="url(#arrow)"/>
+
+  <!-- ========== 输出层 ========== -->
+  <rect x="30" y="450" width="620" height="100" rx="12" fill="none" stroke="#e2e8f0" stroke-dasharray="4 2"/>
+  <text x="44" y="470" class="layer-title">输出层</text>
+
+  <rect x="50" y="485" width="140" height="45" class="node"/>
+  <circle cx="70" cy="507" r="8" class="out"/>
+  <text x="86" y="511" font-family="sans-serif" font-size="12" font-weight="600" fill="#1e293b">Aria2 推送</text>
+  
+  <rect x="200" y="485" width="140" height="45" class="node"/>
+  <circle cx="220" cy="507" r="8" class="out"/>
+  <text x="236" y="511" font-family="sans-serif" font-size="12" font-weight="600" fill="#1e293b">浏览器下载</text>
+  
+  <rect x="350" y="485" width="140" height="45" class="node"/>
+  <circle cx="370" cy="507" r="8" class="out"/>
+  <text x="386" y="511" font-family="sans-serif" font-size="12" font-weight="600" fill="#1e293b">复制直链</text>
+  
+  <rect x="500" y="485" width="140" height="45" class="node"/>
+  <circle cx="520" cy="507" r="8" fill="#e2e8f0"/>
+  <text x="536" y="511" font-family="sans-serif" font-size="12" font-weight="600" fill="#64748b">IDM（可选）</text>
+
+  <!-- ========== 图例 ========== -->
+  <rect x="30" y="565" width="620" height="40" rx="8" fill="#f1f5f9"/>
+  <circle cx="50" cy="585" r="6" class="baidu"/>
+  <text x="62" y="589" font-family="sans-serif" font-size="11" fill="#475569">百度网盘（需登录，内页需 OAuth）</text>
+  <circle cx="200" cy="585" r="6" class="quark"/>
+  <text x="212" y="589" font-family="sans-serif" font-size="11" fill="#475569">夸克 / UC（未登录可换但有大小上限）</text>
+  <circle cx="370" cy="585" r="6" class="out"/>
+  <text x="382" y="589" font-family="sans-serif" font-size="11" fill="#475569">固定输出通道</text>
+  <circle cx="500" cy="585" r="6" fill="#e2e8f0"/>
+  <text x="512" y="589" font-family="sans-serif" font-size="11" fill="#475569">可选输出</text>
+</svg>

@@ -140,11 +140,8 @@ t("域名匹配规则", () => {
 	};
 	assert.strictEqual(hit("pan.baidu.com"), "baidu");
 	assert.strictEqual(hit("yun.baidu.com"), "baidu");
-	assert.strictEqual(hit("www.alipan.com"), "alipan");
-	assert.strictEqual(hit("www.aliyundrive.com"), "alipan");
 	assert.strictEqual(hit("pan.quark.cn"), "quark");
 	assert.strictEqual(hit("drive.uc.cn"), "quark");
-	assert.strictEqual(hit("www.123pan.com"), "pan123");
 	assert.strictEqual(hit("example.com"), null);
 });
 t("每个适配器都提供请求头来源与提示语", () => {
@@ -192,10 +189,7 @@ t("页面判据能区分 home / share", () => {
 	assert.strictEqual(hit("baidu", "/disk/home"), "home");
 	assert.strictEqual(hit("baidu", "/s/1abc"), "share");
 	assert.strictEqual(hit("baidu", "/login"), "");
-	assert.strictEqual(hit("alipan", "/drive"), "home");
 	assert.strictEqual(hit("quark", "/list"), "home");
-	assert.strictEqual(hit("pan123", "/"), "home");
-	assert.strictEqual(hit("pan123", "/s/xyz"), "share");
 });
 t("selectorsFor 在页面类型未知时合并全部候选", () => {
 	const sel = inject.selectorsFor(providerApi.byId("baidu"));
@@ -227,14 +221,9 @@ t("每个适配器都实现了 collect（读取勾选文件）", () => {
 		assert.strictEqual(typeof p.collect, "function", p.id + " 缺少 collect");
 	});
 });
-t("已接入自动换链的网盘（夸克 / 百度 / 阿里内页 / 移动分享页）", () => {
+t("百度与夸克均已接入自动换链", () => {
 	assert.strictEqual(typeof providerApi.byId("quark").resolve, "function", "夸克应支持换直链");
 	assert.strictEqual(typeof providerApi.byId("baidu").resolve, "function", "百度应支持换直链");
-	assert.strictEqual(typeof providerApi.byId("alipan").resolve, "function", "阿里内页应支持换直链");
-	assert.strictEqual(typeof providerApi.byId("mcloud").resolve, "function", "移动分享页应支持换直链");
-	["pan123", "tcloud", "xunlei"].forEach((id) => {
-		assert.strictEqual(providerApi.byId(id).resolve, undefined, id + " 换链尚未接入");
-	});
 });
 t("baiduShareInfo 逐项兜底收集分享参数（缺失环境返回完整空结构而不抛错）", () => {
 	const info = providerApi.baiduShareInfo();
@@ -248,9 +237,9 @@ t("util.b64 结果与 Node Buffer 一致（百度 logid 参数依赖）", () => 
 	assert.strictEqual(util.b64("中文"), Buffer.from("中文", "utf8").toString("base64"));
 	assert.strictEqual(util.b64(""), "");
 });
-t("覆盖全部八家主流网盘", () => {
+t("覆盖百度与夸克两家网盘", () => {
 	const ids = providers.map((p) => p.id);
-	["baidu", "alipan", "quark", "pan123", "mcloud", "tcloud", "xunlei"].forEach((id) => {
+	["baidu", "quark"].forEach((id) => {
 		assert.ok(ids.indexOf(id) >= 0, "缺少网盘适配：" + id);
 	});
 	assert.ok(providers.some((p) => p.match.test("drive.uc.cn")), "UC 应由夸克/UC 适配器覆盖");
@@ -270,8 +259,6 @@ t("isFolder 按各网盘的真实字段识别文件夹", () => {
 	assert.strictEqual(providerApi.isFolder({ file: false }), true, "夸克：file=false 是文件夹");
 	assert.strictEqual(providerApi.isFolder({ file: true }), false, "夸克：file=true 是文件");
 	assert.strictEqual(providerApi.isFolder({ isdir: true }), true, "百度");
-	assert.strictEqual(providerApi.isFolder({ isDir: true }), true, "阿里云盘");
-	assert.strictEqual(providerApi.isFolder({ IsFolder: true }), true, "123 云盘");
 	assert.strictEqual(providerApi.isFolder({ dir: true }), true, "兜底字段");
 	assert.strictEqual(providerApi.isFolder({}), false, "字段缺失时按文件处理");
 	assert.strictEqual(providerApi.isFolder(null), false, "空值不应抛错");
@@ -279,9 +266,6 @@ t("isFolder 按各网盘的真实字段识别文件夹", () => {
 t("downloadHeaders 保留网盘声明的头，未标记 credential 的不补页面头", () => {
 	const q = providerApi.downloadHeaders(providerApi.byId("quark"));
 	assert.ok(/quark-cloud-drive/.test(q["User-Agent"] || ""), "应含夸克客户端 UA");
-	const p123 = providerApi.downloadHeaders(providerApi.byId("pan123"));
-	assert.strictEqual(p123.Referer, undefined, "123 未标记 credential，不应补 Referer");
-	assert.strictEqual(p123.Cookie, undefined);
 });
 t("夸克声明了 credential（其直链校验 Referer 与 Cookie）", () => {
 	assert.strictEqual(providerApi.byId("quark").credential, true);
@@ -327,22 +311,6 @@ t("按当前域名区分夸克 / UC 的接口与客户端 UA", () => {
 	assert.ok(/uc-cloud-drive/.test(p.api.uc.ua), "UC 客户端 UA");
 	const q = providerApi.downloadHeaders(p);
 	assert.ok(/quark-cloud-drive/.test(q["User-Agent"] || ""), "默认取夸克 UA");
-});
-
-/* ---------------- 移动分享取链辅助 ---------------- */
-group("移动分享取链");
-
-t("mcloudPickUrl 从任意深度取下载地址（优先键名像链接的）", () => {
-	assert.strictEqual(providerApi.mcloudPickUrl({ data: { extInfo: { cdnDownloadURL: "https://a/1" } } }), "https://a/1");
-	assert.strictEqual(providerApi.mcloudPickUrl({ data: { downloadURL: "https://b/2" } }), "https://b/2");
-	assert.strictEqual(providerApi.mcloudPickUrl({ result: { resultCode: "0" }, data: {} }), "");
-	assert.strictEqual(providerApi.mcloudPickUrl(null), "");
-});
-t("mcloudAccount 在无手机号的环境返回空串（不误报）", () => {
-	assert.strictEqual(providerApi.mcloudAccount(), "");
-});
-t("util.sortedJson 键有序（移动加密协议要求）", () => {
-	assert.strictEqual(util.sortedJson({ b: 1, a: { d: 2, c: 3 } }), JSON.stringify({ a: { c: 3, d: 2 }, b: 1 }));
 });
 
 /* ---------------- 注入层 ---------------- */
