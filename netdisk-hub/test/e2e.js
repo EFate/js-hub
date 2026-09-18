@@ -630,7 +630,9 @@ async function main() {
 				// 模拟已授权过的账号：授权页直接重定向到 oob 并带出令牌
 				res = { status: 200, finalUrl: "https://openapi.baidu.com/oauth/2.0/oob?access_token=TOK123abc", responseText: "", responseHeaders: "" };
 			} else if (/filemetas/.test(url)) {
-				res = { status: 200, finalUrl: url, responseText: JSON.stringify({ errno: 0, list: [{ fs_id: 333, server_filename: "模型.onnx", size: 97607680, dlink: "https://d.pcs.baidu.com/file/inner?fid=333&dst=1" }] }), responseHeaders: "" };
+				// 真实 filemetas 的字段名是 filename（server_filename 是 sharedownload 的），
+				// 且 dlink 末段无文件名 —— 名字必须从勾选文件对回
+				res = { status: 200, finalUrl: url, responseText: JSON.stringify({ errno: 0, list: [{ fs_id: 333, filename: "接口返回的名字.onnx", size: 97607680, dlink: "https://d.pcs.baidu.com/file/inner?fid=333&dst=1" }] }), responseHeaders: "" };
 			} else {
 				res = { status: 200, finalUrl: url, responseText: JSON.stringify({ id: 1, jsonrpc: "2.0", result: "task-ok" }), responseHeaders: "" };
 			}
@@ -689,7 +691,7 @@ async function main() {
 	t("内页 dlink 入库且随行 UA + Cookie", () => {
 		const hit = mod3.catcher.pool.find((f) => f.url.indexOf("inner?fid=333") >= 0);
 		assert.ok(hit, "直链应入库");
-		assert.strictEqual(hit.name, "模型.onnx");
+		assert.strictEqual(hit.name, "模型.onnx", "名字应来自勾选文件（勾选名优先于接口字段）");
 		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com");
 		assert.ok(/BAIDUID=FFFF111122223333/.test(hit.headers.Cookie || ""), "需页面 Cookie");
 	});

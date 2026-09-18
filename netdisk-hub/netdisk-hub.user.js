@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.3
+// @version      1.0.4
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.3";
+	const VERSION = "1.0.4";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -1092,6 +1092,11 @@
 		async baiduHomeResolve(files, token) {
 			const fsids = files.filter((f) => !f.dir).map((f) => f.fid);
 			if (!fsids.length) throw new Error("没有可换链的文件。");
+			// filemetas 按 fs_id 返回，对回勾选文件拿名字 ——
+			// 它的字段名是 filename（server_filename 是 sharedownload 的字段），
+			// 且 dlink 末段没有文件名，漏了这步会全是「未命名文件」
+			const byFs = {};
+			files.forEach((f) => { byFs[String(f.fid)] = f; });
 			const BATCH = 50;
 			const out = [];
 			for (let i = 0; i < fsids.length; i += BATCH) {
@@ -1112,14 +1117,14 @@
 					throw new Error("换取直链失败（errno=" + ((data && data.errno) || "未知") + "）。");
 				}
 				data.list.forEach((it) => {
-					if (it.dlink) {
-						out.push({
-							url: it.dlink,
-							name: it.server_filename || util.nameFromUrl(it.dlink),
-							size: it.size || 0,
-							headers: providerApi.downloadHeaders(providers[0])
-						});
-					}
+					if (!it.dlink) return;
+					const f = byFs[String(it.fs_id)] || {};
+					out.push({
+						url: it.dlink,
+						name: f.name || it.server_filename || it.filename || util.nameFromUrl(it.dlink),
+						size: f.size || it.size || 0,
+						headers: providerApi.downloadHeaders(providers[0])
+					});
 				});
 				if (i + BATCH < fsids.length) await util.sleep(500);
 			}
