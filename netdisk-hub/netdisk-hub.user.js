@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.7
+// @version      1.0.8
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.7";
+	const VERSION = "1.0.8";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -886,14 +886,14 @@
 					const r1 = await providerApi.mcloudShareCall("dlFromOutLinkV3", {
 						dlFromOutLinkReqV3: { account, linkID: linkId, passwd, coIDLst: { item: [coId] } }
 					});
-					let url = providerApi.mcloudPickUrl(r1.data);
+					let url = r1.url;
 					let diag = r1.diag;
 					if (!url) {
 						// 备用：内容信息接口（部分分享只在它这里给出可下载地址）
 						const r2 = await providerApi.mcloudShareCall("getContentInfoFromOutLink", {
 							getContentInfoFromOutLinkReq: { contentId: coId, linkID: linkId, passwd, account }
 						});
-						url = providerApi.mcloudPickUrl(r2.data);
+						url = r2.url;
 						if (!url) diag = "下载接口：" + r1.diag + "；信息接口：" + r2.diag;
 					}
 					if (!url) throw new Error("移动云盘未返回直链（" + diag + "），请刷新页面重试。");
@@ -1273,30 +1273,41 @@
 		},
 
 		/**
-		 * 移动分享接口调用（统一加密 + 解密 + 诊断）。
-		 * 返回 { data, diag } —— diag 是给用户看的响应特征，
-		 * 装不出直链时能把「服务端到底回了什么」带进错误提示，避免只能猜。
+		 * 移动分享接口调用：双协议自适应 + 诊断。
+		 * 先按加密协议（AES-CBC）发；若拿不到链接，再按明文 JSON 重发一次 ——
+		 * 新版接口的响应已是明文（resultCode/desc/data/success/code），
+		 * 说明请求侧也可能不再加密，两条都试可避免协议版本差异导致的失败。
+		 * 返回 { data, diag, url }。
 		 */
 		async mcloudShareCall(apiName, payload) {
-			const body = await providerApi.mcloudEncrypt(payload);
-			const raw = await net.postText(
-				"https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/" + apiName,
-				body,
-				providerApi.mcloudHeaders()
-			);
-			const text = String((raw && raw.responseText) || "");
-			const parsed = await providerApi.mcloudDecryptResponse(raw);
-			let diag;
-			if (!text) {
-				diag = "响应为空";
-			} else if (parsed) {
-				const keys = Object.keys(parsed).slice(0, 6).join("/");
-				const code = parsed.result ? JSON.stringify(parsed.result).slice(0, 90) : "";
-				diag = "已解出字段 " + keys + (code ? "；result=" + code : "");
-			} else {
-				diag = "响应无法解析（前 60 字符：" + text.slice(0, 60).replace(/\s+/g, " ") + "）";
+			const endpoint = "https://share-kd-njs.yun.139.com/yun-share/richlifeApp/devapp/IOutLink/" + apiName;
+			const attempts = [
+				{ mode: "加密", body: await providerApi.mcloudEncrypt(payload) },
+				{ mode: "明文", body: JSON.stringify(payload) }
+			];
+			let last = { data: null, diag: "响应为空", url: "" };
+			for (let i = 0; i < attempts.length; i++) {
+				const raw = await net.postText(endpoint, attempts[i].body, providerApi.mcloudHeaders());
+				const text = String((raw && raw.responseText) || "");
+				const parsed = await providerApi.mcloudDecryptResponse(raw);
+				const url = providerApi.mcloudPickUrl(parsed);
+				const diag = providerApi.mcloudDescribe(parsed, text);
+				last = { data: parsed, diag: (i > 0 ? attempts[i].mode + "重试：" : "") + diag, url };
+				if (url) return last;
 			}
-			return { data: parsed, diag };
+			return last;
+		},
+
+		/** 把响应特征写成一句可读诊断（含关键字段的实际值，便于一次定位） */
+		mcloudDescribe(parsed, text) {
+			if (!text) return "响应为空";
+			if (!parsed) return "响应无法解析（前 60 字符：" + String(text).slice(0, 60).replace(/\s+/g, " ") + "）";
+			const keys = Object.keys(parsed).slice(0, 6).join("/");
+			const bits = ["resultCode", "code", "success", "desc", "message", "resultDesc"]
+				.filter((k) => parsed[k] !== undefined)
+				.map((k) => k + "=" + JSON.stringify(parsed[k]).slice(0, 48))
+				.join(" ");
+			return "字段 " + keys + (bits ? "（" + bits + "）" : "");
 		},
 
 		/** 从任意深度的响应里取可下载地址（优先键名像下载地址的 http 值） */
@@ -1318,9 +1329,9 @@
 			return hits[0] || "";
 		},
 
-		/** 移动分享请求头（与页面同源，浏览器自动带 Cookie） */
+		/** 移动分享请求头（与页面同源，浏览器自动带 Cookie；有登录令牌则一并带上） */
 		mcloudHeaders() {
-			return {
+			const out = {
 				"Accept": "application/json, text/plain, */*",
 				"Content-Type": "application/json;charset=UTF-8",
 				"X-Deviceinfo": "||9|12.27.0|chrome|120.0|||windows 10||zh-CN|||",
@@ -1330,6 +1341,24 @@
 				"X-Yun-Api-Version": "v1",
 				"Referer": "https://yun.139.com/"
 			};
+			const auth = providerApi.mcloudAuthorization();
+			if (auth) out.Authorization = auth;
+			return out;
+		},
+
+		/** 从页面存储里找 139 的登录令牌（形如 Basic xxxx） */
+		mcloudAuthorization() {
+			const probe = (v) => {
+				const m = String(v || "").match(/Basic\s+[A-Za-z0-9+/=]{8,}/);
+				return m ? m[0] : "";
+			};
+			try {
+				for (let i = 0; i < localStorage.length; i++) {
+					const v = probe(localStorage.getItem(localStorage.key(i)));
+					if (v) return v;
+				}
+			} catch (e) { /* 忽略 */ }
+			try { return probe(document.cookie); } catch (e) { return ""; }
 		},
 
 		/**
