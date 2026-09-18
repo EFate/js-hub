@@ -227,11 +227,24 @@ t("每个适配器都实现了 collect（读取勾选文件）", () => {
 		assert.strictEqual(typeof p.collect, "function", p.id + " 缺少 collect");
 	});
 });
-t("夸克提供完整换链实现，其余网盘明确降级（走捕获兜底）", () => {
+t("夸克与百度分享页提供完整换链实现，其余网盘明确降级（走捕获兜底）", () => {
 	assert.strictEqual(typeof providerApi.byId("quark").resolve, "function", "夸克应支持换直链");
-	["baidu", "alipan", "pan123", "mcloud", "tcloud", "xunlei"].forEach((id) => {
+	assert.strictEqual(typeof providerApi.byId("baidu").resolve, "function", "百度分享页应支持换直链");
+	["alipan", "pan123", "mcloud", "tcloud", "xunlei"].forEach((id) => {
 		assert.strictEqual(providerApi.byId(id).resolve, undefined, id + " 目前应走网络捕获兜底");
 	});
+});
+t("baiduShareInfo 逐项兜底收集分享参数（缺失环境返回完整空结构而不抛错）", () => {
+	const info = providerApi.baiduShareInfo();
+	assert.ok(typeof info === "object" && info !== null);
+	["surl", "baiduId", "uk", "shareId", "bdstoken", "jsToken", "sekey"].forEach((k) => {
+		assert.ok(k in info, "缺少字段 " + k);
+	});
+});
+t("util.b64 结果与 Node Buffer 一致（百度 logid 参数依赖）", () => {
+	assert.strictEqual(util.b64("ABCDEF0123456789"), Buffer.from("ABCDEF0123456789", "utf8").toString("base64"));
+	assert.strictEqual(util.b64("中文"), Buffer.from("中文", "utf8").toString("base64"));
+	assert.strictEqual(util.b64(""), "");
 });
 t("覆盖全部八家主流网盘", () => {
 	const ids = providers.map((p) => p.id);

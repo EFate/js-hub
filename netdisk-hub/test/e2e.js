@@ -403,9 +403,16 @@ async function main() {
 	});
 
 	console.log("\n[直链捕获层]");
-	t("网络层 hook 已安装（XHR 与 fetch 均被包裹）", () => {
-		assert.ok(/__ndUrl/.test(String(window.XMLHttpRequest.prototype.open)), "XHR.open 应已被包裹");
-		assert.ok(/catcher/.test(String(window.fetch)), "fetch 应已被包裹");
+	t("网络层 hook 行为生效：页面发 XHR 即被截获（toString 已伪装成原生样貌）", () => {
+		try {
+			const xhr = new window.XMLHttpRequest();
+			xhr.open("GET", "https://cdn.quark.cn/dl/hooked.zip?dlink=1&sign=x");
+			xhr.send();   // jsdom 对跨域会异步报错，但 put 发生在 send 包装里，已入库
+		} catch (e) { /* 忽略：不同 jsdom 版本对跨域 XHR 的抛错时机不同 */ }
+		assert.ok(
+			mod.catcher.pool.some((f) => f.url.indexOf("hooked.zip") >= 0),
+			"XHR 发出的直链应进入候选池"
+		);
 	});
 
 	mod.catcher.clear();
@@ -450,6 +457,140 @@ async function main() {
 		scope.querySelector('[data-act="close"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 		assert.ok(!panel.classList.contains("nd-open"), "面板应关闭");
 		assert.ok(document.getElementById("nd-scope"), "容器保留以便复开");
+	});
+
+	/* ==================== 场景二：百度分享页 ==================== */
+
+	console.log("\n[百度分享页]");
+	const BD_PAGE = `<!DOCTYPE html><html><body>
+<div class="module-share-top-bar"><div class="x-button-box" id="bdBar"></div></div>
+<div class="file-list" id="bdList"></div>
+</body></html>`;
+	const dom2 = new JSDOM(BD_PAGE, {
+		url: "https://pan.baidu.com/s/1okG6FZw28O8rpasBv-Yl8w?pwd=2twm",
+		runScripts: "outside-only",
+		pretendToBeVisual: true
+	});
+	const w2 = dom2.window;
+	g.window = w2;
+	g.document = w2.document;
+	g.location = w2.location;
+	g.Blob = w2.Blob;
+	g.URL = w2.URL;
+	g.requestAnimationFrame = w2.requestAnimationFrame.bind(w2);
+
+	const storeMap2 = new Map();
+	const requests2 = [];
+	storeMap2.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	g.GM_getValue = (k, d) => (storeMap2.has(k) ? storeMap2.get(k) : d);
+	g.GM_setValue = (k, v) => { storeMap2.set(k, v); };
+	g.GM_deleteValue = (k) => { storeMap2.delete(k); };
+	g.GM_setClipboard = (text) => { g.__clip = text; };
+	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
+	g.GM_xmlhttpRequest = (opt) => {
+		requests2.push(opt);
+		setTimeout(() => {
+			const url = String(opt.url || "");
+			let body;
+			if (/share\/tplconfig/.test(url)) {
+				body = { errno: 0, data: { sign: "SGN123", timestamp: "1700000000" } };
+			} else if (/api\/sharedownload/.test(url)) {
+				body = { errno: 0, list: [{ dlink: "https://d.pcs.baidu.com/file/xyz?fid=111&dst=1", server_filename: "视频.mkv", size: 1623456789 }] };
+			} else if (/getVersion/.test(opt.data || "")) {
+				body = { id: 1, jsonrpc: "2.0", result: { version: "1.36.0" } };
+			} else {
+				body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
+			}
+			if (opt.onload) opt.onload({ status: 200, responseText: JSON.stringify(body), response: body, responseHeaders: "" });
+		}, 0);
+		return { abort() { /* noop */ } };
+	};
+
+	// 模拟百度分享页运行时状态：locals.dump / jsToken / sekey / BAIDUID
+	w2.document.cookie = "BAIDUID=ABCDEF0123456789:FG=1";
+	w2.locals = { dump: () => ({ share_uk: { value: "2815629761" }, shareid: { value: "3912345678" }, bdstoken: { value: "tok123" } }) };
+	w2.jsToken = "A9B8C7D6";
+	w2.currentSekey = "@sekey-xyz@";
+	// Vue 勾选态：真实字段 fs_id / server_filename / isdir
+	w2.document.getElementById("bdList").__vue__ = {
+		allFileList: [
+			{ fs_id: 111, server_filename: "视频.mkv", size: 1623456789, isdir: 0, selected: true },
+			{ fs_id: 222, server_filename: "没勾.mp4", size: 10, isdir: 0, selected: false }
+		]
+	};
+
+	delete require.cache[require.resolve(SCRIPT)];
+	const mod2 = require(SCRIPT);
+
+	await tick(60);
+	t("识别为百度网盘分享页", () => {
+		assert.strictEqual(mod2.providerApi.current().id, "baidu");
+		assert.strictEqual(mod2.providerApi.pageType(mod2.providers[0]), "share");
+	});
+	t("baiduShareInfo 读齐运行时参数", () => {
+		const info = mod2.providerApi.baiduShareInfo();
+		assert.strictEqual(info.uk, "2815629761");
+		assert.strictEqual(info.shareId, "3912345678");
+		assert.strictEqual(info.bdstoken, "tok123");
+		assert.strictEqual(info.jsToken, "A9B8C7D6");
+		assert.strictEqual(info.sekey, "@sekey-xyz@");
+		assert.strictEqual(info.surl, "okG6FZw28O8rpasBv-Yl8w", "surl 应去掉开头的 1");
+		assert.ok(info.baiduId.indexOf("ABCDEF0123456789") === 0, "应取到 BAIDUID");
+	});
+
+	requests2.length = 0;
+	mod2.ui.open();
+	await tick(120);   // 等自动换链（tplconfig + sharedownload 各一跳）
+
+	t("打开面板即自动换链：先取签名", () => {
+		const req = requests2.find((r) => /share\/tplconfig/.test(String(r.url)));
+		assert.ok(req, "应请求 tplconfig");
+		assert.ok(req.url.includes("surl=1okG6FZw28O8rpasBv-Yl8w"), "应带 surl：" + req.url);
+		assert.ok(req.url.includes("logid=" + encodeURIComponent(Buffer.from("ABCDEF0123456789:FG=1", "utf8").toString("base64"))), "logid 应为 BAIDUID 的 base64");
+	});
+	t("sharedownload 提交了勾选文件的 fid 与全部分享参数", () => {
+		const req = requests2.find((r) => /api\/sharedownload/.test(String(r.url)));
+		assert.ok(req, "应请求 sharedownload");
+		assert.ok(req.url.includes("sign=SGN123") && req.url.includes("timestamp=1700000000"), "应带上签名与时间戳：" + req.url);
+		assert.ok(req.url.includes("jsToken=A9B8C7D6"), "应带 jsToken");
+		const data = String(req.data || "");
+		assert.ok(data.includes(encodeURIComponent(JSON.stringify([111]))), "fid_list 应只含勾选的 111（222 未勾选不应出现）：" + data);
+		assert.ok(data.includes("uk=2815629761") && data.includes("primaryid=3912345678"), "应带 uk 与 primaryid");
+		assert.ok(data.includes(encodeURIComponent(JSON.stringify({ sekey: "@sekey-xyz@" }))), "带提取码的分享应有 extra.sekey");
+	});
+	t("dlink 入库且随行携带下载所需请求头", () => {
+		const hit = mod2.catcher.pool.find((f) => f.url.indexOf("d.pcs.baidu.com") >= 0);
+		assert.ok(hit, "直链应入库");
+		assert.strictEqual(hit.name, "视频.mkv");
+		assert.ok(hit.headers, "应随行保存请求头");
+		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com", "直链下载需专属 UA");
+		assert.ok(/BAIDUID=ABCDEF0123456789/.test(hit.headers.Cookie || ""), "需页面 Cookie");
+		assert.strictEqual(hit.headers.Referer, "https://pan.baidu.com/");
+	});
+	t("推送 Aria2 时请求头原样带出（否则直链 403）", async () => {
+		requests2.length = 0;
+		const btn = document.querySelector('[data-act="caught-aria"]');
+		btn.dispatchEvent(new w2.MouseEvent("click", { bubbles: true }));
+		await tick(60);
+		const req = requests2.find((r) => String(r.url).includes("/jsonrpc"));
+		assert.ok(req, "应发出 RPC 请求");
+		const payload = JSON.parse(req.data);
+		const headerArr = payload.params[1].header || [];
+		assert.ok(headerArr.some((h) => /^User-Agent: pan\.baidu\.com$/.test(h)), "应带 UA：pan.baidu.com");
+		assert.ok(headerArr.some((h) => /^Cookie:.*BAIDUID/.test(h)), "应带 Cookie");
+	});
+
+	t("入口按钮被宿主重渲染替换后，点击仍能打开面板（capture 委托兜底）", () => {
+		mod2.ui.close();
+		const bar = w2.document.getElementById("bdBar");
+		const old = bar.querySelector(".nd-entry");
+		if (old) old.remove();
+		// 模拟宿主重渲染：放一个全新的、没绑任何监听的节点
+		const fresh = w2.document.createElement("div");
+		fresh.className = "nd-entry";
+		bar.appendChild(fresh);
+		fresh.dispatchEvent(new w2.MouseEvent("click", { bubbles: true }));
+		assert.ok(mod2.ui.isOpen(), "捕获阶段委托应接住点击并打开面板");
 	});
 
 	console.log("\n========================================");

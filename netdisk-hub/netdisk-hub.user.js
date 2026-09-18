@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.1
+// @version      1.0.2
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.0";
+	const VERSION = "1.0.2";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -86,6 +86,18 @@
 				.replace(/[\r\n\t]/g, " ")
 				.trim();
 			return safe || fallback;
+		},
+
+		/** UTF-8 安全的 base64（百度接口的 logid 参数用） */
+		b64(str) {
+			const s = String(str === undefined || str === null ? "" : str);
+			try {
+				if (typeof btoa === "function") return btoa(unescape(encodeURIComponent(s)));
+			} catch (e) { /* 落到 Buffer 分支 */ }
+			try {
+				if (typeof Buffer !== "undefined") return Buffer.from(s, "utf8").toString("base64");
+			} catch (e) { /* 忽略 */ }
+			return "";
 		},
 
 		/** 取扩展名（大写，无扩展名返回空串） */
@@ -326,6 +338,27 @@
 			});
 		},
 
+		/** POST 表单：百度 sharedownload 一类接口要求 x-www-form-urlencoded */
+		postForm(url, bodyText, headers) {
+			return new Promise((resolve, reject) => {
+				net.raw({
+					method: "POST",
+					url,
+					headers: util.standHeaders(Object.assign({ "Content-Type": "application/x-www-form-urlencoded" }, headers || {})),
+					data: String(bodyText || ""),
+					responseType: "text",
+					onload(res) {
+						let data = null;
+						try { data = JSON.parse(res.responseText); } catch (e) { data = null; }
+						if (data === null) return reject(new Error("接口未返回合法 JSON（HTTP " + res.status + "）"));
+						resolve(data);
+					},
+					onerror: () => reject(new Error("请求失败：" + url)),
+					ontimeout: () => reject(new Error("请求超时：" + url))
+				});
+			});
+		},
+
 		/** GET 文本 */
 		async text(url, headers) {
 			return new Promise((resolve, reject) => {
@@ -550,6 +583,8 @@
 				share: [".module-share-top-bar .x-button-box"]
 			},
 			header: { "User-Agent": "pan.baidu.com", "Referer": "https://pan.baidu.com/" },
+			/** 直链下载校验页面 Referer 与 Cookie，缺失会被判为盗链（与夸克同款 403） */
+			credential: true,
 			hint: "百度网盘：请在文件列表中勾选目标文件，再点「获取直链」。",
 
 			/** 读取勾选文件：取数自 Vue 实例（新旧两版页面各有一条通道） */
@@ -564,6 +599,15 @@
 					const wp = pageState.findVue(document.querySelector(".wp-s-core-pan"));
 					if (wp && Array.isArray(wp.selectedList)) list = wp.selectedList;
 				}
+				if (!list.length) {
+					// 最老版页面：勾选态在内部上下文里，不在 Vue 上
+					try {
+						const w = pageState.win();
+						const ctx = (w && typeof w.require === "function") ? w.require("system-core:context/context.js") : null;
+						const sel = ctx && ctx.instanceForSystem && ctx.instanceForSystem.list && ctx.instanceForSystem.list.getSelected();
+						if (Array.isArray(sel) && sel.length) list = sel;
+					} catch (e) { /* 老通道不可用则忽略 */ }
+				}
 				list.forEach((f) => {
 					out.push({
 						fid: f.fs_id || f.fid,
@@ -574,6 +618,14 @@
 					});
 				});
 				return out;
+			},
+
+			/** 分享页换直链：tplconfig 签名 + sharedownload（网盘内页需另走 OAuth，暂不支持） */
+			async resolve(files, page) {
+				if (page !== "share") {
+					throw new Error("百度网盘：自动换链目前仅支持分享页。网盘内文件可先点一次「下载」由脚本截获。");
+				}
+				return providerApi.baiduResolve(files, providerApi.baiduShareInfo());
 			}
 		},
 		{
@@ -915,6 +967,89 @@
 			}
 		},
 
+		/**
+		 * 百度分享页的运行时参数。字段位置随页面版本不同，逐项兜底：
+		 * uk / shareid / bdstoken 在 locals.dump()，jsToken 挂在 window，
+		 * 带提取码的分享另有 sekey（验证后写入）。
+		 */
+		baiduShareInfo() {
+			const w = pageState.win();
+			const dump = (w && w.locals && typeof w.locals.dump === "function") ? w.locals.dump() : null;
+			let surl = "";
+			try { surl = (String(location.pathname).split("/").pop() || "").replace(/^1(.{22})$/, "$1"); } catch (e) { surl = ""; }
+			let bid = "";
+			try { bid = ((document.cookie || "").split("BAIDUID=")[1] || "").split(";")[0]; } catch (e) { bid = ""; }
+			const cacheCfg = w && w.cache && w.cache.list && w.cache.list.config && w.cache.list.config.params;
+			return {
+				surl,
+				baiduId: bid,
+				uk: dump && dump.share_uk && dump.share_uk.value,
+				shareId: dump && dump.shareid && dump.shareid.value,
+				bdstoken: (dump && dump.bdstoken && dump.bdstoken.value) || "",
+				jsToken: (w && w.jsToken) || "",
+				sekey: (w && (w.currentSekey || (cacheCfg && cacheCfg.sekey))) || ""
+			};
+		},
+
+		/**
+		 * 百度分享页换链：tplconfig 取签名 → sharedownload 逐个换 dlink。
+		 * 错误码直达文案：112 页面过期、9019 令牌过期；list 为字符串表示文件
+		 * 超出分享直接下载的大小上限。换出的 dlink 下载时需 UA pan.baidu.com +
+		 * 页面 Referer + Cookie，统一由 downloadHeaders 随行带出。
+		 */
+		async baiduResolve(files, info) {
+			const enc = (v) => encodeURIComponent(String(v === undefined || v === null ? "" : v));
+			if (!info || !info.uk || !info.shareId) {
+				throw new Error("未能从页面读取分享参数（uk / shareid），请刷新分享页后重试。");
+			}
+			const logid = util.b64(info.baiduId);
+			const signRes = await net.text(
+				"https://pan.baidu.com/share/tplconfig?fields=sign,timestamp&channel=chunlei&web=1&app_id=250528&clienttype=0&view_mode=1"
+				+ "&surl=1" + enc(info.surl) + "&bdstoken=" + enc(info.bdstoken) + "&logid=" + enc(logid)
+			);
+			let signData = null;
+			try { signData = JSON.parse(signRes.responseText); } catch (e) { signData = null; }
+			if (!signData || signData.errno !== 0 || !signData.data || !signData.data.sign) {
+				throw new Error("获取分享签名失败（errno=" + (signData && signData.errno) + "），请刷新页面重试。");
+			}
+
+			const out = [];
+			for (let i = 0; i < files.length; i++) {
+				const f = files[i];
+				if (f.dir) continue;
+				let body = "encrypt=0&product=share&uk=" + enc(info.uk)
+					+ "&primaryid=" + enc(info.shareId)
+					+ "&fid_list=" + enc(JSON.stringify([f.fid]));
+				if (info.sekey) body += "&extra=" + enc(JSON.stringify({ sekey: info.sekey }));
+				const res = await net.postForm(
+					"https://pan.baidu.com/api/sharedownload?channel=chunlei&clienttype=0&web=1&app_id=250528"
+					+ "&sign=" + enc(signData.data.sign) + "&timestamp=" + enc(signData.data.timestamp)
+					+ "&bdstoken=" + enc(info.bdstoken) + "&logid=" + enc(logid)
+					+ "&jsToken=" + enc(info.jsToken),
+					body,
+					{ "User-Agent": "netdisk;" }
+				);
+				if (res.errno === 112) throw new Error("分享页面已过期，刷新页面后重试。（errno 112）");
+				if (res.errno === 9019) throw new Error("访问令牌已过期，刷新页面后重试。（errno 9019）");
+				if (res.errno === 0 && typeof res.list === "string") {
+					throw new Error("该文件超出分享直接下载的大小上限，请先「保存到网盘」后再从网盘页下载。");
+				}
+				if (res.errno !== 0 || !Array.isArray(res.list) || !res.list.length) {
+					throw new Error("换取直链失败（errno=" + (res.errno || "未知") + (res.errmsg ? "：" + res.errmsg : "") + "）。");
+				}
+				const it = res.list[0] || {};
+				if (!it.dlink) throw new Error("接口未返回直链，请刷新页面重试。");
+				out.push({
+					url: it.dlink,
+					name: f.name || it.server_filename || util.nameFromUrl(it.dlink),
+					size: f.size || it.size || 0,
+					headers: providerApi.downloadHeaders(providers[0])
+				});
+				if (i + 1 < files.length) await util.sleep(300);
+			}
+			return out;
+		},
+
 		/** 按 pathname 判定当前页面类型：home | share | ""（无法判定） */
 		pageType(provider) {
 			const p = provider || providerApi.current();
@@ -1218,6 +1353,22 @@
 			const win = (typeof unsafeWindow !== "undefined" && unsafeWindow) ? unsafeWindow : window;
 			if (!win) return;
 
+			/**
+			 * 伪装包装函数：String(hook) 返回原生样貌。
+			 * 部分网盘的风控会检查原生 API 是否被脚本改写，检测到就拒绝发链接
+			 * （表现为点「下载」一直停在「正在获取下载链接」）。这一层不是对抗，
+			 * 只是让被包装后的函数在外观上与原生保持一致。
+			 */
+			const mask = (wrapped, raw) => {
+				if (typeof wrapped !== "function" || typeof raw !== "function") return;
+				try {
+					Object.defineProperty(wrapped, "name", { value: raw.name || "", configurable: true });
+				} catch (e) { /* 忽略 */ }
+				try {
+					wrapped.toString = function () { return Function.prototype.toString.call(raw); };
+				} catch (e) { /* 忽略 */ }
+			};
+
 			// --- XMLHttpRequest ---
 			const XP = win.XMLHttpRequest && win.XMLHttpRequest.prototype;
 			if (XP && XP.open && XP.send) {
@@ -1227,6 +1378,7 @@
 					try { this.__ndUrl = url; } catch (e) { /* 忽略 */ }
 					return rawOpen.apply(this, arguments);
 				};
+				mask(XP.open, rawOpen);
 				XP.send = function () {
 					try {
 						const url = this.__ndUrl;
@@ -1281,6 +1433,7 @@
 					} catch (e) { /* 忽略 */ }
 					return p;
 				};
+				mask(win.fetch, rawFetch);
 			}
 		},
 
@@ -1470,7 +1623,7 @@
 			btn.addEventListener("click", (e) => {
 				e.preventDefault();
 				e.stopPropagation();
-				ui.open();
+				ui.openSafe();
 			});
 			btn.addEventListener("keydown", (e) => {
 				if (e.key === "Enter" || e.key === " ") {
@@ -1883,6 +2036,19 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			await ui.resolveLinks(ui.root.querySelector('[data-el="resolve-btn"]'));
 		},
 
+		/**
+		 * 打开面板（所有入口统一走这里）。
+		 * 包一层错误可见化：真出问题时用户看到的是提示而不是「点了没反应」。
+		 */
+		openSafe() {
+			try {
+				ui.open();
+			} catch (e) {
+				try { console.error("[netdisk-hub] 面板打开失败：", e); } catch (e2) { /* 忽略 */ }
+				try { ui.toast("面板打开失败：" + e.message, "err", 5000); } catch (e3) { /* 忽略 */ }
+			}
+		},
+
 		close() {
 			if (!ui.panel) return;
 			ui.panel.classList.remove("nd-open");
@@ -2227,9 +2393,20 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 		const ready = () => {
 			const menu = (typeof GM_registerMenuCommand === "function") ? GM_registerMenuCommand : null;
 			if (menu) {
-				try { menu("打开下载助手", ui.open, "o"); } catch (e) { /* 某些管理器不支持第三参数 */ try { menu("打开下载助手", ui.open); } catch (e2) { /* 忽略 */ } }
-				try { menu("Aria2 设置", () => { ui.open(); ui.switchTab("cfg"); }); } catch (e) { /* 忽略 */ }
+				try { menu("打开下载助手", ui.openSafe, "o"); } catch (e) { /* 某些管理器不支持第三参数 */ try { menu("打开下载助手", ui.openSafe); } catch (e2) { /* 忽略 */ } }
+				try { menu("Aria2 设置", () => { ui.openSafe(); ui.switchTab("cfg"); }); } catch (e) { /* 忽略 */ }
 			}
+
+			// 入口点击的双保险：在捕获阶段统一接住 .nd-entry 的点击。
+			// 部分网盘（如百度新版分享页）会重渲染工具栏或在容器上拦截冒泡，
+			// 按钮自身的监听可能收不到事件 —— 捕获阶段先于一切，最稳。
+			document.addEventListener("click", (e) => {
+				const t = e.target && e.target.closest ? e.target.closest(".nd-entry") : null;
+				if (!t) return;
+				e.preventDefault();
+				e.stopPropagation();
+				ui.openSafe();
+			}, true);
 
 			// 页面注入：把入口挂进宿主工具栏（仅在识别到网盘时执行）
 			const injected = inject.start();
