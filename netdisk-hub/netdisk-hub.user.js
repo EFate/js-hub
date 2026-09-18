@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.8
+// @version      1.0.9
 // @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -59,7 +59,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.8";
+	const VERSION = "1.0.9";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -1860,8 +1860,14 @@
 		/** 精确选择器落空后，等多久再尝试模糊匹配（毫秒） */
 		fallbackDelay: 3000,
 
-		/** 按操作词模糊匹配的按钮文案 */
-		ACTION_WORDS: /^(保存到网盘|下载|上传|新建|分享|保存|批量下载|离线下载)$/,
+		/**
+		 * 按文案匹配动作按钮 —— 网盘改版会换类名，但「下载 / 保存到网盘 / 上传」
+		 * 这些**用户可见文案**是稳定的，用它定位挂载点比类名可靠得多。
+		 */
+		ACTION_WORDS: /^(下载|批量下载|离线下载|保存到网盘|转存|保存|上传|新建|新建文件夹|分享|更多|排序|全选|删除|移动|复制)$/,
+
+		/** 主匹配落空时的次级匹配（文案只要含这些词即可） */
+		ACTION_LOOSE: /(保存到网盘|下载|转存|上传)/,
 
 		/** 注入过程的现场记录：注入失败时靠它定位（面板「关于」页可一键复制） */
 		report: {
@@ -1994,18 +2000,134 @@
 			return all;
 		},
 
-		/** 为指定挂载点注入入口：容器出现才注入，已存在则跳过 */
+		/**
+		 * 文案匹配：在页面里找一个可见的动作按钮（下载 / 保存到网盘 / 上传…），
+		 * 返回它所在的那排按钮容器与自身位置 —— 网盘改版换类名时靠它兜底。
+		 * 无布局环境（jsdom / 测试）不做可见性过滤，只按文案与结构匹配。
+		 */
+		actionHost() {
+			if (typeof document === "undefined") return null;
+			const layout = inject.hasLayout();
+			const nodes = document.querySelectorAll("button, a, [role=button], span, div");
+			const strict = [];
+			const loose = [];
+			for (let i = 0; i < nodes.length && i < 6000; i++) {
+				const el = nodes[i];
+				if (el.classList && el.classList.contains(inject.FLAG)) continue;
+				// 只认「叶子文案」，避免把整页容器也算进来
+				if (el.querySelector && el.querySelector("button, a, [role=button]")) continue;
+				const text = (el.textContent || "").trim();
+				if (!text || text.length > 12) continue;
+				if (inject.ACTION_WORDS.test(text)) {
+					if (!layout || inject.visible(el)) strict.push(el);
+				} else if (inject.ACTION_LOOSE.test(text)) {
+					if (!layout || inject.visible(el)) loose.push(el);
+				}
+			}
+			const pick = strict[0] || loose[0] || null;
+			if (!pick) return null;
+			return { host: inject.rowOf(pick), anchor: pick };
+		},
+
+		/** 当前环境是否具备布局能力（jsdom 等测试环境没有，此时跳过可见性判断） */
+		hasLayout() {
+			try {
+				if (typeof document === "undefined" || !document.body) return false;
+				const r = document.body.getBoundingClientRect();
+				return !!(r && (r.width > 0 || r.height > 0));
+			} catch (e) {
+				return false;
+			}
+		},
+
+		/** 元素是否可见（尺寸与样式都要过） */
+		visible(el) {
+			try {
+				const r = el.getBoundingClientRect();
+				if (!r) return false;
+				if (r.width === 0 && r.height === 0) return true;   // 无布局环境：不据尺寸否决
+				if (r.width < 24 || r.height < 14) return false;
+				const st = getComputedStyle(el);
+				if (st.visibility === "hidden" || st.display === "none" || Number(st.opacity) < 0.2) return false;
+				return true;
+			} catch (e) {
+				return true;
+			}
+		},
+
+		/**
+		 * 从按钮上探出「一排按钮」的容器（最多 3 级）——
+		 * 注入到容器里才能与原生按钮并排，而不是塞进某个按钮内部。
+		 */
+		rowOf(el) {
+			let host = el.parentElement;
+			for (let up = 0; up < 3 && host && host.tagName !== "BODY"; up++) {
+				const count = host.querySelectorAll("button, a, [role=button]").length;
+				if (count >= 2) return host;
+				host = host.parentElement;
+			}
+			return (el.parentElement && el.parentElement.tagName !== "BODY") ? el.parentElement : el;
+		},
+
+		/**
+		 * 注入挂载：三级降级 ——
+		 * ① 各网盘精确选择器（可出现即命中，MutationObserver 等待）
+		 * ② 文案匹配（等待一档后仍无命中则执行，改版免疫）
+		 * ③ 脚本管理器菜单（始终可用，属于兜底而非此处逻辑）
+		 * 全过程记进 inject.report，面板「关于」页可查看/复制，便于定位。
+		 */
 		mount(provider) {
 			if (!provider) return;
 			inject.ensureStyle();
 			const selectors = inject.selectorsFor(provider);
+			inject.report = {
+				provider: provider.id,
+				pageType: providerApi.pageType(provider),
+				url: (typeof location !== "undefined" ? location.href : ""),
+				tried: selectors.slice(),
+				via: "",
+				host: "",
+				done: false,
+				note: ""
+			};
+
+			let settled = false;
+			const place = (host, via, anchor) => {
+				if (settled || !host) return;
+				settled = true;
+				inject.report.via = via;
+				inject.report.done = true;
+				try {
+					inject.report.host = host.tagName + (host.className ? "." + String(host.className).trim().split(/\s+/).slice(0, 2).join(".") : "");
+				} catch (e) { /* 忽略 */ }
+				if (host.querySelector("." + inject.FLAG)) return;   // 防重复注入
+				const btn = inject.entry(provider);
+				/**
+				 * 位置：优先 append 到容器末尾 —— 入口落在工具栏最右侧，
+				 * 与「保存到网盘 / 下载」等主操作同一排、且不打断原生排列。
+				 * 仅当容器本身就是那个按钮时才插在它之后。
+				 */
+				if (anchor && host === anchor) {
+					anchor.insertAdjacentElement("afterend", btn);
+				} else {
+					host.append(btn);
+				}
+			};
+
 			selectors.forEach((selector) => {
-				inject.waitFor(selector, (host) => {
-					if (host.querySelector("." + inject.FLAG)) return;   // 防重复注入
-					// append 到容器末尾 —— 入口落在工具栏最右侧，紧邻「保存到网盘」等主操作，好找也好点
-					host.append(inject.entry(provider));
-				});
+				inject.waitFor(selector, (host) => place(host, "精确选择器 " + selector, null));
 			});
+
+			// ② 文案匹配兜底：精确选择器没能命中时，用页面上的动作按钮定位
+			setTimeout(() => {
+				if (settled) return;
+				const hit = inject.actionHost();
+				if (hit) {
+					place(hit.host, "文案匹配「" + (hit.anchor.textContent || "").trim().slice(0, 8) + "」", hit.anchor);
+				} else {
+					inject.report.note = "精确选择器与文案匹配均未命中 —— 可用脚本管理器菜单打开面板";
+				}
+			}, inject.fallbackDelay);
 		},
 
 		/** 启动注入：仅在识别到网盘且其配置了挂载点时执行 */
@@ -2311,6 +2433,8 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
       <p><b>用法</b>：在网盘里勾选要下载的文件，打开本面板即自动换取直链。文件夹取不到直链，请进入文件夹后再勾选。</p>
       <p><b>入口</b>：网盘工具栏上的「下载助手」按钮；若未出现，可用脚本管理器菜单中的「打开下载助手」。</p>
       <p><b>出口</b>：推送 Aria2 · 浏览器下载 · 复制直链。</p>
+      <p><b>注入状态</b>：<span data-el="inject-report">—</span>
+        <button class="nd-btn nd-ghost" data-act="copy-report" style="margin-left:6px">复制诊断</button></p>
     </div>
   </div>
 </div>
@@ -2354,6 +2478,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 				case "test-aria": return ui.testAria(act);
 				case "save-aria": return ui.saveAria(act);
 				case "baidu-auth": return ui.baiduAuth(act);
+				case "copy-report": return ui.copyReport();
 				default: return undefined;
 			}
 		},
@@ -2423,6 +2548,36 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			ui.root.querySelectorAll(".nd-page").forEach((p) => {
 				p.classList.toggle("nd-on", p.getAttribute("data-page") === page);
 			});
+			if (page === "about") ui.syncReport();
+		},
+
+		/** 注入现场回显：入口没出现时，用户能在这里看到卡在哪一步 */
+		syncReport() {
+			const el = ui.root && ui.root.querySelector('[data-el="inject-report"]');
+			if (!el) return;
+			const r = inject.report || {};
+			if (!r.provider) {
+				el.textContent = "当前页面不在已内置的网盘范围内 —— 请用脚本管理器菜单打开面板。";
+				return;
+			}
+			const status = r.done ? "已注入" : "未注入";
+			const how = r.via || r.note || "等待中";
+			el.textContent = status + "（" + how + "）；网盘 " + r.provider + " · 页面 " + (r.pageType || "未识别");
+		},
+
+		/** 复制注入诊断（含试过的选择器），便于反馈问题 */
+		copyReport() {
+			const r = inject.report || {};
+			const lines = [
+				"网盘: " + (r.provider || "-"),
+				"页面: " + (r.pageType || "-"),
+				"URL: " + (r.url || "-"),
+				"结果: " + (r.done ? "已注入" : "未注入") + " · " + (r.via || r.note || "-"),
+				"宿主: " + (r.host || "-"),
+				"试过: " + ((r.tried || []).join(" | ") || "-")
+			];
+			const ok = outlet.copy(lines.join("\n"));
+			ui.toast(ok ? "诊断信息已复制。" : "复制失败。", ok ? "ok" : "err");
 		},
 
 		/* ---------- Toast ---------- */

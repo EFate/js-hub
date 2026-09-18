@@ -815,19 +815,23 @@ async function main() {
 		assert.ok(requests4.some((r) => /getContentInfoFromOutLink/.test(String(r.url))), "应请求备用接口");
 		assert.ok(mod4.catcher.pool.some((f) => f.url.indexOf("fallback.mkv") >= 0), "备用接口的地址应入库");
 	});
-	t("加密请求被服务端拒绝时，自动改用明文重试并成功取链", async () => {
-		g.__mcSetV3Empty(false);
-		g.__mcSetPlainOnly(true);
-		mod4.catcher.clear();
-		mod4.ui._resolvedSig = "";
-		requests4.length = 0;
-		await mod4.engine.resolveSelected(mod4.providers.find((p) => p.id === "mcloud"));
-		await tick(300);
-		const bodies = requests4.filter((r) => /dlFromOutLinkV3/.test(String(r.url))).map((r) => String(r.data || "").trim().charAt(0));
-		assert.ok(bodies.length >= 2, "应对同一接口发起两次尝试（加密 + 明文），实际 " + bodies.length);
-		assert.ok(bodies.some((c) => c === "{"), "第二次应为明文 JSON");
-		assert.ok(mod4.catcher.pool.some((f) => f.url.indexOf("file.mkv") >= 0), "明文重试应取到直链");
-		g.__mcSetPlainOnly(false);
+	t("加密请求被拒时，自动改用明文重试并取到链接", async () => {
+		const orig = mod4.net.postText;
+		const seen = [];
+		mod4.net.postText = async (url, body) => {
+			const plain = String(body).trim().charAt(0) === "{";
+			seen.push(plain ? "明文" : "加密");
+			const payload = plain
+				? { data: { extInfo: { cdnDownloadURL: "https://cdn.139.com/plain.mkv?p=1" } } }
+				: { resultCode: "PARAM_ERROR", desc: "encrypted body rejected", data: {}, success: false, code: 400 };
+			return { responseText: await mod4Helper.encrypt(payload) };
+		};
+		const r = await mod4.providerApi.mcloudShareCall("dlFromOutLinkV3", { dlFromOutLinkReqV3: {} });
+		mod4.net.postText = orig;
+		assert.ok(seen.length >= 2, "同一接口应先后尝试两种协议：" + seen.join("/"));
+		assert.strictEqual(seen[0], "加密", "首次应为加密请求");
+		assert.strictEqual(seen[1], "明文", "被拒后应为明文重试");
+		assert.ok(/plain[.]mkv/.test(r.url), "明文重试应取到链接：" + r.url);
 	});
 	t("两个接口都给不出链接时，提示带服务端响应特征（便于定位）", async () => {
 		const backup = mod4.providerApi.mcloudShareCall;
@@ -843,6 +847,58 @@ async function main() {
 		assert.ok(/字段/.test(err), "错误里应含响应字段诊断：" + err);
 	});
 
+
+	/* ==================== 场景五：改版后的工具栏（选择器全部落空） ==================== */
+
+	console.log("\n[网盘改版兜底注入]");
+	// 页面里只有「上传 / 下载」这类原生按钮，没有任何我们配置过的类名
+	const RV_PAGE = `<!DOCTYPE html><html><body>
+<div class="page-main"><div class="toolbar-row"><button>上传</button><button>下载</button><button>分享</button></div></div>
+<div class="file-list" id="rvList"></div>
+</body></html>`;
+	const dom5 = new JSDOM(RV_PAGE, {
+		url: "https://pan.quark.cn/list",
+		runScripts: "outside-only",
+		pretendToBeVisual: true
+	});
+	const w5 = dom5.window;
+	g.window = w5;
+	g.document = w5.document;
+	g.location = w5.location;
+	g.Blob = w5.Blob;
+	g.URL = w5.URL;
+	g.requestAnimationFrame = w5.requestAnimationFrame.bind(w5);
+	g.GM_getValue = (k, d) => d;
+	g.GM_setValue = () => {};
+	g.GM_deleteValue = () => {};
+	g.GM_setClipboard = (t) => { g.__clip = t; };
+	g.GM_registerMenuCommand = () => {};
+	g.GM_xmlhttpRequest = () => ({ abort() {} });
+
+	delete require.cache[require.resolve(SCRIPT)];
+	const mod5 = require(SCRIPT);
+	mod5.inject.fallbackDelay = 60;   // 缩短等待，测试内验证兜底路径
+	mod5.inject.start();
+	await tick(200);
+
+	t("精确选择器全部落空时，按文案匹配仍把入口注入到按钮排里", () => {
+		const entry = document.querySelector(".nd-entry");
+		assert.ok(entry, "应通过文案兜底注入入口");
+		const row = document.querySelector(".toolbar-row");
+		assert.ok(row.contains(entry), "入口应落在原生按钮所在的那一排");
+		assert.strictEqual(row.lastElementChild, entry, "入口应落在按钮排末尾（最右侧）");
+		assert.ok(row.querySelectorAll("button").length >= 3, "原生按钮应保持原样");
+	});
+	t("注入现场记录写明走的是哪条路（可诊断）", () => {
+		assert.strictEqual(mod5.inject.report.done, true);
+		assert.ok(/文案匹配/.test(mod5.inject.report.via), "via 应说明是文案匹配：" + mod5.inject.report.via);
+		assert.ok(mod5.inject.report.tried.length > 0, "应记录试过的选择器");
+	});
+	t("入口未脱离文档流（不是悬浮器件）", () => {
+		const entry = document.querySelector(".nd-entry");
+		const direct = Array.prototype.indexOf.call(document.body.children, entry) >= 0;
+		assert.ok(!direct, "入口不应直挂 body");
+	});
 	await Promise.all(pending);   // 等齐所有异步断言，避免假绿
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);
