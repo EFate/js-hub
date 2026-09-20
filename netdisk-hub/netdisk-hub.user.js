@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.0.10
-// @description  网盘文件直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
+// @version      1.1.0
+// @description  百度网盘 / 夸克网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/netdisk-hub/netdisk-hub.user.js
@@ -10,7 +10,6 @@
 // @match        *://pan.baidu.com/*
 // @match        *://yun.baidu.com/*
 // @match        *://pan.quark.cn/*
-// @match        *://drive.uc.cn/*
 // @connect      *
 // @connect      localhost
 // @connect      127.0.0.1
@@ -25,29 +24,30 @@
 // ==/UserScript==
 
 /**
- * 网盘直链下载助手
+ * 网盘直链下载助手 · 百度网盘 / 夸克网盘
  *
  * 设计要点：
- * 1. 文件识别**读页面框架状态**，不扫 DOM。网盘是 SPA，「有哪些文件」「勾选了哪些」
+ * 1. 只做两家网盘，做到位。**百度**（分享页签名换链 + 网盘内页静默授权换链）与
+ *    **夸克**（列表页与分享页均直接换链），两家的勾选读取与换链都是完整实现，
+ *    不存在「识别得到、拿不到直链」的中间态。
+ * 2. 文件识别**读页面框架状态**，不扫 DOM。网盘是 SPA，「有哪些文件」「勾选了哪些」
  *    都存放在 React / Vue 的内部状态里；从文件列表容器反查框架实例即可读出勾选项，
  *    再调网盘接口换成直链。文件夹换不出直链，会单独标出并从请求里剔除。
- * 2. 未实现换链的网盘由**网络层捕获**兜底。网盘文件列表本身不含直链（地址是点击
- *    「下载」时由页面 JS 实时换回来的），所以脚本在文档解析前 hook XMLHttpRequest
- *    与 fetch，把直链截下来。
- * 3. 入口**注入宿主工具栏**，不做悬浮器件。等容器渲染出来再把按钮挂进去，与宿主原生
+ * 3. 网络层捕获仅作**被动补充**。网盘文件列表本身不含直链（地址是点击「下载」时由
+ *    页面 JS 实时换回来的），脚本仍在文档解析前 hook XMLHttpRequest 与 fetch，
+ *    在您正常点「下载」时顺带截下地址 —— 但两家都不依赖它。
+ * 4. 入口**注入宿主工具栏**，不做悬浮器件。等容器渲染出来再把按钮挂进去，与宿主原生
  *    按钮并排；同时始终保留脚本管理器菜单兜底。不注册任何全局快捷键。
- * 4. 下载出口层分两条独立通道：
+ * 5. 下载出口层分两条独立通道：
  *    - API 下载通道：直接下载 / 复制直链 / 推送 IDM（可选）
  *    - Aria2 下载通道：JSON-RPC 推送 / 生成 aria2c 命令行 / 连通性测试
  *    另提供批量出口（复制全部直链、复制全部命令行、全部推送）。
- * 5. 网盘适配层（Providers）做成可插拔表，新增网盘只需追加一项
- *    （页面判据 + 挂载点 + 请求头 + collect / resolve）。
  * 6. UI 遵循仓库统一的轻量设计规范：面板 + 分组卡片 + Toast，零第三方依赖。
  */
 (function () {
 	"use strict";
 
-	const VERSION = "1.0.9";
+	const VERSION = "1.1.0";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -75,16 +75,6 @@
 				.replace(/[\r\n\t]/g, " ")
 				.trim();
 			return safe || fallback;
-		},
-
-		/** 键排序的 JSON 序列化（移动分享接口的加密原文要求键有序） */
-		sortedJson(obj) {
-			if (Array.isArray(obj)) return "[" + obj.map((v) => util.sortedJson(v)).join(",") + "]";
-			if (obj && typeof obj === "object") {
-				return "{" + Object.keys(obj).sort()
-					.map((k) => JSON.stringify(k) + ":" + util.sortedJson(obj[k])).join(",") + "}";
-			}
-			return JSON.stringify(obj);
 		},
 
 		/** UTF-8 安全的 base64（百度接口的 logid 参数用） */
@@ -115,21 +105,6 @@
 			do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
 			const fixed = n >= 100 ? 0 : n >= 10 ? 1 : 2;
 			return n.toFixed(fixed) + " " + units[i];
-		},
-
-		pad(n) { return n < 10 ? "0" + n : String(n); },
-
-		/** 剩余秒数 → 人类可读，24 小时制，无 AM/PM */
-		remain(sec) {
-			if (!isFinite(sec) || sec < 0) return "--:--";
-			let s = Math.floor(sec);
-			const d = Math.floor(s / 86400); s %= 86400;
-			const h = Math.floor(s / 3600); s %= 3600;
-			const m = Math.floor(s / 60);
-			s = s % 60;
-			if (d > 0) return `${d}天 ${util.pad(h)}:${util.pad(m)}:${util.pad(s)}`;
-			if (h > 0) return `${util.pad(h)}:${util.pad(m)}:${util.pad(s)}`;
-			return `${util.pad(m)}:${util.pad(s)}`;
 		},
 
 		/** 请求头归一化：支持对象或原始字符串，键名统一为驼峰 */
@@ -163,19 +138,6 @@
 		headersToArray(headers) {
 			const obj = util.standHeaders(headers);
 			return Object.keys(obj).map((k) => `${k}: ${obj[k]}`);
-		},
-
-		/** 解析 GM_xmlhttpRequest 的 responseHeaders 原始字符串 */
-		parseHeaders(text) {
-			const obj = {};
-			String(text || "").split(/[\r\n]+/).forEach((line) => {
-				const idx = line.indexOf(":");
-				if (idx <= 0) return;
-				const k = line.slice(0, idx).trim().toLowerCase();
-				const v = line.slice(idx + 1).trim();
-				if (k) obj[k] = v;
-			});
-			return obj;
 		},
 
 		/**
@@ -355,22 +317,6 @@
 						if (data === null) return reject(new Error("接口未返回合法 JSON（HTTP " + res.status + "）"));
 						resolve(data);
 					},
-					onerror: () => reject(new Error("请求失败：" + url)),
-					ontimeout: () => reject(new Error("请求超时：" + url))
-				});
-			});
-		},
-
-		/** POST 文本：返回原始响应（响应体可能是加密串，交由调用方处理） */
-		postText(url, bodyText, headers) {
-			return new Promise((resolve, reject) => {
-				net.raw({
-					method: "POST",
-					url,
-					headers: util.standHeaders(headers),
-					data: String(bodyText || ""),
-					responseType: "text",
-					onload: (res) => resolve(res),
 					onerror: () => reject(new Error("请求失败：" + url)),
 					ontimeout: () => reject(new Error("请求超时：" + url))
 				});
@@ -653,27 +599,16 @@
 		},
 		{
 			id: "quark",
-			name: "夸克 / UC 网盘",
-			match: /(^|\.)(quark|uc)\.cn$/i,
+			name: "夸克网盘",
+			match: /(^|\.)quark\.cn$/i,
 			pages: { home: /^\/list/, share: /^\/(s|share)\// },
 			mount: {
 				home: [".btn-operate .btn-main"],
 				share: [".share-btns", ".file-info-share-buttom"]
 			},
-			/**
-			 * 夸克与 UC 共用同一套采集与换链逻辑，但接口地址与客户端 UA 不同
-			 * （两家客户端各自要求），按当前域名取用。
-			 */
-			api: {
-				quark: {
-					endpoint: "https://drive-pc.quark.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=ucpro",
-					ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.20.0 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch"
-				},
-				uc: {
-					endpoint: "https://pc-api.uc.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser",
-					ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) uc-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
-				}
-			},
+			/** 换链接口。必须携带夸克客户端 UA，页面自身的 UA 会被拒 */
+			endpoint: "https://drive-pc.quark.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=ucpro",
+			ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.20.0 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch",
 			/** 直链需要 Referer 与 Cookie 才不被判为盗链 */
 			credential: true,
 			hint: "请在文件列表中勾选要下载的文件；文件夹无法取直链，请进入文件夹后再勾选其中的文件。",
@@ -705,8 +640,7 @@
 			/** 调网盘接口把勾选的文件换成直链 */
 			async resolve(files, page) {
 				const p = providerApi.byId("quark");
-				const conf = p.api[providerApi.flavor(p) || "quark"];
-				const API = conf.endpoint;
+				const API = p.endpoint;
 				const BATCH = 15;
 
 				// 文件夹没有直链可换，先剔除；一个文件都不剩时给出可操作的提示
@@ -733,7 +667,7 @@
 						body.pwd_id = pwdId;
 						body.stoken = stoken;
 					}
-					const res = await net.postJson(API, body, { "Content-Type": "application/json", "User-Agent": conf.ua });
+					const res = await net.postJson(API, body, { "Content-Type": "application/json", "User-Agent": p.ua });
 					if (res && res.code === 31001) throw new Error("请先在浏览器里登录网盘，再重试。");
 					if (res && res.code === 23018) throw new Error("超出游客可获取的大小上限，请登录网盘后重试。");
 					if (res && res.code !== 0) throw new Error("接口返回 code=" + res.code + (res.message ? "：" + res.message : ""));
@@ -767,51 +701,36 @@
 		},
 
 		/**
-		 * 判定一个文件项是否为文件夹。
-		 * 各网盘字段名不同 —— 夸克/UC 用 `file`（false 表示文件夹），百度用 `isdir`，
-		 * 阿里用 `isDir`，123 用 `IsFolder`。早年只判 `dir`，在夸克上恒为 false，
-		 * 于是文件夹被当成文件送进换链接口，什么也取不回来。这里统一收敛。
+		 * 判定一个文件项是否为文件夹。两家的字段名不同：
+		 * 夸克用 `file`（**false 表示文件夹**，页面里根本没有 dir 字段），百度用 `isdir`。
+		 * 早年只判 `dir`，在夸克上恒为 false，于是文件夹被当成文件送进换链接口，
+		 * 一条直链也换不回来 —— 这里统一收敛。
 		 */
 		isFolder(item) {
 			const it = item || {};
-			if (typeof it.file === "boolean") return !it.file;        // 夸克 / UC：file=false 即文件夹
-			if (typeof it.isdir === "boolean") return it.isdir;       // 百度
-			if (typeof it.isDir === "boolean") return it.isDir;       // 阿里云盘
-			if (typeof it.IsFolder === "boolean") return it.IsFolder; // 123 云盘
-			if (typeof it.dir === "boolean") return it.dir;            // 兜底字段
-			if (typeof it.IsDir === "boolean") return it.IsDir;
+			if (typeof it.file === "boolean") return !it.file;       // 夸克：file=false 即文件夹
+			if (typeof it.isdir === "boolean") return it.isdir;      // 百度
+			if (typeof it.dir === "boolean") return it.dir;           // 通用兜底
 			return false;
 		},
 
 		/**
-		 * 当前命中的是夸克还是 UC。两者采集逻辑相同，
-		 * 但换链接口地址与客户端 UA 不同，必须按域名区分。
-		 */
-		flavor(provider) {
-			const p = provider || providerApi.current();
-			if (!(p && p.api)) return "";
-			let host = "";
-			try { host = (typeof location !== "undefined" && location.hostname) || ""; } catch (e) { host = ""; }
-			return /(^|\.)uc\.cn$/i.test(host) ? "uc" : "quark";
-		},
-
-		/**
 		 * 直链下载所需的请求头。
-		 * UA 取自 provider 的 api 表（夸克 / UC 各一份）；对标记了 credential 的网盘
-		 * 再补上页面级 Referer 与 Cookie —— 这些网盘的直链会校验这两项，只带 UA 会 403。
+		 * provider.header 里的静态头（百度是 UA pan.baidu.com）先铺开，
+		 * provider.ua 覆盖 User-Agent（夸克要求客户端 UA）；对标记了 credential
+		 * 的网盘再补上页面级 Referer 与 Cookie —— 两家直链都校验这两项，
+		 * 只带 UA 会被判为盗链（403）。
 		 */
 		downloadHeaders(provider) {
 			const p = provider || providerApi.current();
 			const out = {};
 			if (!p) return out;
-			if (p.api) {
-				const conf = p.api[providerApi.flavor(p) || "quark"];
-				if (conf && conf.ua) out["User-Agent"] = conf.ua;
-			} else if (p.header) {
+			if (p.header) {
 				for (const k in p.header) {
 					if (Object.prototype.hasOwnProperty.call(p.header, k)) out[k] = p.header[k];
 				}
 			}
+			if (p.ua) out["User-Agent"] = p.ua;
 			if (!p.credential) return out;
 			try {
 				if (typeof location !== "undefined" && location.origin && location.origin !== "null") {
@@ -999,11 +918,9 @@
 		},
 
 		/**
-		 * 移动分享协议辅助：AES-128-CBC（固定密钥 + 随机 IV 前置）+ 键排序 JSON。
-		 * 依赖浏览器原生 crypto.subtle（https 页面可用）。
+		 * 按 pathname 判定当前页面类型：home | share | ""（无法判定）。
+		 * 用于挑选合适的挂载点，也决定百度走「分享页签名换链」还是「内页静默授权换链」。
 		 */
-
-		/** 按 pathname 判定当前页面类型：home | share | ""（无法判定） */
 		pageType(provider) {
 			const p = provider || providerApi.current();
 			if (!p || !p.pages) return "";
@@ -1014,59 +931,6 @@
 			if (p.pages.share && p.pages.share.test(path)) return "share";
 			return "";
 		},
-
-		/**
-		 * 从元素上挑出真正可用的直链。
-		 * 页面常见坑：href 是 javascript:; / # 这类占位值，真实地址藏在 data-* 属性里，
-		 * 因此必须逐属性尝试，取第一个 http(s) 值，而不是「href 优先且一旦取到就放弃」。
-		 */
-		pickHref(el) {
-			const keys = ["href", "data-download-url", "data-dlink", "data-url"];
-			for (let i = 0; i < keys.length; i++) {
-				const v = String(el.getAttribute(keys[i]) || "").trim();
-				if (/^https?:\/\//i.test(v)) return v;
-			}
-			return "";
-		},
-
-		/**
-		 * 通用文件收集策略：
-		 * 依次扫描页面上的链接型元素，挑出「看起来是下载直链」的地址。
-		 * 站点改版后只需在对应 provider 上重写 collect 即可，不影响其它网盘。
-		 */
-		collect(provider) {
-			if (provider && util.isFn(provider.collect)) return provider.collect();
-
-			const found = [];
-			const seen = {};
-			const isDirect = (href) => /^https?:\/\//i.test(href)
-				&& !/\.(html?|js|css|png|jpe?g|gif|svg|webp|ico)(\?|$)/i.test(href)
-				&& /(download|dlink|file|share|content)/i.test(href);
-
-			const consider = (href, name) => {
-				if (!href || seen[href] || !isDirect(href)) return;
-				seen[href] = true;
-				found.push({
-					id: util.uid(),
-					name: util.fixFilename(name || util.nameFromUrl(href) || "未命名文件"),
-					size: 0,
-					url: href,
-					headers: (provider && provider.header) || {}
-				});
-			};
-
-			const nodes = document.querySelectorAll("a[href], [data-download-url], [data-dlink], [data-url]");
-			for (let i = 0; i < nodes.length && found.length < 50; i++) {
-				const el = nodes[i];
-				const href = providerApi.pickHref(el);
-				const name = el.getAttribute("download")
-					|| el.getAttribute("data-name")
-					|| el.getAttribute("title")
-					|| (el.textContent || "").trim().slice(0, 120);
-				consider(href, name);
-			}
-			return found;
-		}
 	};
 
 	/* ==========================================================================
@@ -1755,7 +1619,7 @@
 	};
 
 	/* ==========================================================================
-	 * 11. 样式：遵循仓库统一设计规范
+	 * 12. 样式：遵循仓库统一设计规范
 	 * ========================================================================== */
 
 	const CSS = `
@@ -1907,7 +1771,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 	};
 
 	/* ==========================================================================
-	 * 12. UI 层
+	 * 13. UI 层
 	 * ========================================================================== */
 
 	const ui = {
@@ -2528,7 +2392,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 	};
 
 	/* ==========================================================================
-	 * 13. 启动
+	 * 14. 启动
 	 * ========================================================================== */
 
 	function boot() {
@@ -2582,7 +2446,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 	boot();
 
 	/* ==========================================================================
-	 * 14. 导出（供 Node 环境直测真实代码）
+	 * 15. 导出（供 Node 环境直测真实代码）
 	 * ========================================================================== */
 
 	if (typeof module !== "undefined" && module.exports) {

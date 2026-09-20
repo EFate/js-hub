@@ -45,13 +45,6 @@ t("sizeFormat 非法输入回退", () => {
 	assert.strictEqual(util.sizeFormat(undefined), "-");
 });
 
-t("remain 24 小时制格式化", () => {
-	assert.strictEqual(util.remain(3661), "01:01:01");
-	assert.strictEqual(util.remain(61), "01:01");
-	assert.strictEqual(util.remain(90061), "1天 01:01:01");
-	assert.strictEqual(util.remain(-5), "--:--");
-});
-
 t("standHeaders 键名归一化为驼峰", () => {
 	assert.deepStrictEqual(util.standHeaders({ "user-agent": "x", "referer": "y" }), { "User-Agent": "x", "Referer": "y" });
 });
@@ -60,10 +53,6 @@ t("standHeaders 解析原始字符串", () => {
 });
 t("headersToArray 生成 Aria2 header 数组", () => {
 	assert.deepStrictEqual(util.headersToArray({ "user-agent": "x" }), ["User-Agent: x"]);
-});
-t("parseHeaders 解析响应头", () => {
-	assert.deepStrictEqual(util.parseHeaders("Content-Length: 100\r\nAccept-Ranges: bytes"),
-		{ "content-length": "100", "accept-ranges": "bytes" });
 });
 t("nameFromUrl 仅在带扩展名时才采用", () => {
 	assert.strictEqual(util.nameFromUrl("https://a.com/b/c%20d.zip"), "c d.zip");
@@ -141,15 +130,16 @@ t("域名匹配规则", () => {
 	assert.strictEqual(hit("pan.baidu.com"), "baidu");
 	assert.strictEqual(hit("yun.baidu.com"), "baidu");
 	assert.strictEqual(hit("pan.quark.cn"), "quark");
-	assert.strictEqual(hit("drive.uc.cn"), "quark");
+	assert.strictEqual(hit("drive.uc.cn"), null, "UC 已按需求移除，不应再命中");
+	assert.strictEqual(hit("www.aliyundrive.com"), null, "未保留的网盘不应命中");
 	assert.strictEqual(hit("example.com"), null);
 });
 t("每个适配器都提供请求头来源与提示语", () => {
 	providers.forEach((p) => {
 		assert.ok(p.id && p.name, "需有 id 与 name");
 		const hasHeader = p.header && typeof p.header === "object";
-		const hasApi = p.api && p.api.quark && p.api.uc;   // 夸克/UC 按 flavor 取 UA
-		assert.ok(hasHeader || hasApi, p.id + " 缺少 header 或 api");
+		// 百度把 UA 写在 header 里，夸克单列 ua 字段（要求客户端 UA）
+		assert.ok(hasHeader || typeof p.ua === "string", p.id + " 缺少 header 或 ua");
 		assert.ok(typeof p.hint === "string" && p.hint.length > 0, p.id + " 缺少 hint");
 	});
 });
@@ -237,13 +227,11 @@ t("util.b64 结果与 Node Buffer 一致（百度 logid 参数依赖）", () => 
 	assert.strictEqual(util.b64("中文"), Buffer.from("中文", "utf8").toString("base64"));
 	assert.strictEqual(util.b64(""), "");
 });
-t("覆盖百度与夸克两家网盘", () => {
-	const ids = providers.map((p) => p.id);
-	["baidu", "quark"].forEach((id) => {
-		assert.ok(ids.indexOf(id) >= 0, "缺少网盘适配：" + id);
-	});
-	assert.ok(providers.some((p) => p.match.test("drive.uc.cn")), "UC 应由夸克/UC 适配器覆盖");
+t("只保留百度与夸克两家，且两家都是完整实现", () => {
+	const ids = providers.map((p) => p.id).sort();
+	assert.deepStrictEqual(ids, ["baidu", "quark"], "适配器应恰好两家：" + ids.join(", "));
 	providers.forEach((p) => {
+		assert.strictEqual(typeof p.resolve, "function", p.id + " 缺少换链实现（不应存在只能识别不能换链的网盘）");
 		assert.ok(p.pages && p.pages.home, p.id + " 缺少 pages.home");
 		assert.ok(p.mount && p.mount.home && p.mount.home.length, p.id + " 缺少 home 挂载点");
 		assert.strictEqual(typeof p.collect, "function", p.id + " 缺少 collect");
@@ -254,7 +242,7 @@ t("覆盖百度与夸克两家网盘", () => {
 group("providers 辅助");
 
 t("isFolder 按各网盘的真实字段识别文件夹", () => {
-	// 夸克 / UC 的真实字段是 file（false 表示文件夹），页面里没有 dir ——
+	// 夸克的真实字段是 file（false 表示文件夹），页面里没有 dir ——
 	// 早先只判 dir，于是文件夹被当成文件送进换链接口，自然什么也取不回来
 	assert.strictEqual(providerApi.isFolder({ file: false }), true, "夸克：file=false 是文件夹");
 	assert.strictEqual(providerApi.isFolder({ file: true }), false, "夸克：file=true 是文件");
@@ -302,15 +290,13 @@ t("拿不到文件名时退回按 URL 去重，无名条目不会挤成一条", 
 	assert.strictEqual(catcher.pool.length, 2, "无名条目应各自保留");
 	catcher.clear();
 });
-t("按当前域名区分夸克 / UC 的接口与客户端 UA", () => {
+t("夸克的换链接口与客户端 UA 使用官方客户端标识", () => {
 	const p = providerApi.byId("quark");
-	assert.strictEqual(providerApi.flavor(p), "quark", "Node 无 location，默认夸克");
-	assert.ok(/drive-pc\.quark\.cn/.test(p.api.quark.endpoint), "夸克接口");
-	assert.ok(/pc-api\.uc\.cn/.test(p.api.uc.endpoint), "UC 接口");
-	assert.ok(/quark-cloud-drive/.test(p.api.quark.ua), "夸克客户端 UA");
-	assert.ok(/uc-cloud-drive/.test(p.api.uc.ua), "UC 客户端 UA");
+	assert.ok(/drive-pc\.quark\.cn/.test(p.endpoint), "换链应走 drive-pc 客户端接口");
+	assert.ok(/pr=ucpro/.test(p.endpoint), "应带客户端标识 pr=ucpro");
+	assert.ok(/quark-cloud-drive/.test(p.ua), "UA 应为夸克客户端");
 	const q = providerApi.downloadHeaders(p);
-	assert.ok(/quark-cloud-drive/.test(q["User-Agent"] || ""), "默认取夸克 UA");
+	assert.ok(/quark-cloud-drive/.test(q["User-Agent"] || ""), "下载头应带客户端 UA");
 });
 
 /* ---------------- 注入层 ---------------- */
@@ -474,8 +460,8 @@ t("地址往返无损：addressOf → parseAddress 回到原值", () => {
 group("engine");
 
 t("mergeHeaders 保留业务请求头", () => {
-	const h = engine.mergeHeaders({ Referer: "https://www.alipan.com/" });
-	assert.strictEqual(h.Referer, "https://www.alipan.com/");
+	const h = engine.mergeHeaders({ Referer: "https://pan.baidu.com/" });
+	assert.strictEqual(h.Referer, "https://pan.baidu.com/");
 });
 t("commandOf 走通完整链路", () => {
 	const cmd = engine.commandOf({ url: "https://f/x.zip", name: "x.zip", headers: { "User-Agent": "ua" } });
