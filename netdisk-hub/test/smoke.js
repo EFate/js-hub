@@ -130,8 +130,9 @@ t("域名匹配规则", () => {
 	assert.strictEqual(hit("pan.baidu.com"), "baidu");
 	assert.strictEqual(hit("yun.baidu.com"), "baidu");
 	assert.strictEqual(hit("pan.quark.cn"), "quark");
-	assert.strictEqual(hit("drive.uc.cn"), null, "UC 已按需求移除，不应再命中");
+	assert.strictEqual(hit("drive.uc.cn"), "uc", "UC 是独立一家，应命中 uc 而非夸克");
 	assert.strictEqual(hit("www.aliyundrive.com"), null, "未保留的网盘不应命中");
+	assert.strictEqual(hit("www.123pan.com"), null, "未保留的网盘不应命中");
 	assert.strictEqual(hit("example.com"), null);
 });
 t("每个适配器都提供请求头来源与提示语", () => {
@@ -227,9 +228,9 @@ t("util.b64 结果与 Node Buffer 一致（百度 logid 参数依赖）", () => 
 	assert.strictEqual(util.b64("中文"), Buffer.from("中文", "utf8").toString("base64"));
 	assert.strictEqual(util.b64(""), "");
 });
-t("只保留百度与夸克两家，且两家都是完整实现", () => {
+t("只保留百度 / 夸克 / UC 三家，且三家都是完整实现", () => {
 	const ids = providers.map((p) => p.id).sort();
-	assert.deepStrictEqual(ids, ["baidu", "quark"], "适配器应恰好两家：" + ids.join(", "));
+	assert.deepStrictEqual(ids, ["baidu", "quark", "uc"], "适配器应恰好三家：" + ids.join(", "));
 	providers.forEach((p) => {
 		assert.strictEqual(typeof p.resolve, "function", p.id + " 缺少换链实现（不应存在只能识别不能换链的网盘）");
 		assert.ok(p.pages && p.pages.home, p.id + " 缺少 pages.home");
@@ -290,13 +291,28 @@ t("拿不到文件名时退回按 URL 去重，无名条目不会挤成一条", 
 	assert.strictEqual(catcher.pool.length, 2, "无名条目应各自保留");
 	catcher.clear();
 });
-t("夸克的换链接口与客户端 UA 使用官方客户端标识", () => {
-	const p = providerApi.byId("quark");
-	assert.ok(/drive-pc\.quark\.cn/.test(p.endpoint), "换链应走 drive-pc 客户端接口");
-	assert.ok(/pr=ucpro/.test(p.endpoint), "应带客户端标识 pr=ucpro");
-	assert.ok(/quark-cloud-drive/.test(p.ua), "UA 应为夸克客户端");
-	const q = providerApi.downloadHeaders(p);
-	assert.ok(/quark-cloud-drive/.test(q["User-Agent"] || ""), "下载头应带客户端 UA");
+t("夸克与 UC 各用自己那套接口与客户端 UA（混用必然失败）", () => {
+	const q = providerApi.byId("quark");
+	assert.ok(/drive-pc\.quark\.cn/.test(q.endpoint), "夸克应走 drive-pc 客户端接口");
+	assert.ok(/pr=ucpro/.test(q.endpoint), "夸克应带客户端标识 pr=ucpro");
+	assert.ok(/quark-cloud-drive/.test(q.ua), "夸克 UA 应为 quark-cloud-drive");
+
+	const u = providerApi.byId("uc");
+	assert.ok(/pc-api\.uc\.cn/.test(u.endpoint), "UC 应走 pc-api 客户端接口");
+	assert.ok(/pr=UCBrowser/.test(u.endpoint), "UC 应带客户端标识 pr=UCBrowser");
+	assert.ok(/uc-cloud-drive/.test(u.ua), "UC UA 应为 uc-cloud-drive");
+
+	assert.notStrictEqual(q.endpoint, u.endpoint, "两家接口不能相同");
+	assert.notStrictEqual(q.ua, u.ua, "两家 UA 不能相同");
+	assert.deepStrictEqual(q.mount.share, [".share-btns"], "夸克分享页挂载点");
+	assert.deepStrictEqual(u.mount.share, [".file-info-share-buttom"], "UC 分享页挂载点");
+
+	// 下载头各取各的 UA（Referer / Cookie 取自页面，Node 无 location，由 e2e 覆盖）
+	[q, u].forEach((p) => {
+		const h = providerApi.downloadHeaders(p);
+		assert.strictEqual(h["User-Agent"], p.ua, p.id + " 下载头应为自己的客户端 UA");
+		assert.strictEqual(p.credential, true, p.id + " 应标记 credential（直链需页面 Referer + Cookie）");
+	});
 });
 
 /* ---------------- 注入层 ---------------- */

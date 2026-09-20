@@ -26,10 +26,21 @@ const PAGE = `<!DOCTYPE html><html><body>
 let pass = 0;
 let fail = 0;
 const pending = [];
+/**
+ * 登记一条断言。同步断言当场出结果（保持输出与场景顺序一致）；
+ * 异步断言收进 pending，末尾统一等齐 —— 否则失败会被吞掉、出现假绿。
+ */
 const t = (name, fn) => {
 	pending.push((async () => {
-		try { await fn(); pass++; console.log("  ok   " + name); }
-		catch (e) { fail++; console.log("  FAIL " + name + "  ->  " + e.message); }
+		try {
+			const r = fn();
+			if (r && typeof r.then === "function") await r;
+			pass++;
+			console.log("  ok   " + name);
+		} catch (e) {
+			fail++;
+			console.log("  FAIL " + name + "  ->  " + e.message);
+		}
 	})());
 };
 const tick = (ms) => new Promise((r) => setTimeout(r, ms || 30));
@@ -700,7 +711,111 @@ async function main() {
 		assert.ok(/BAIDUID=FFFF111122223333/.test(hit.headers.Cookie || ""), "需页面 Cookie");
 	});
 
-	/* ==================== 场景四：改版后的工具栏（选择器全部落空） ==================== */
+	/* ==================== 场景四：UC 网盘分享页（与夸克同协议、接入信息各一套） ==================== */
+
+	console.log("\n[UC 分享页]");
+	const UC_PAGE = `<!DOCTYPE html><html><body>
+<div class="frame"><div class="file-info-share-buttom" id="ucBar"><button>保存到网盘</button></div></div>
+<div class="frame-main"><div class="file-list" id="ucList"></div></div>
+</body></html>`;
+	const domUC = new JSDOM(UC_PAGE, {
+		url: "https://drive.uc.cn/s/ucshare789",
+		runScripts: "outside-only",
+		pretendToBeVisual: true
+	});
+	const wUC = domUC.window;
+	g.window = wUC;
+	g.document = wUC.document;
+	g.location = wUC.location;
+	g.Blob = wUC.Blob;
+	g.URL = wUC.URL;
+	g.requestAnimationFrame = wUC.requestAnimationFrame.bind(wUC);
+
+	const storeMapUC = new Map();
+	const requestsUC = [];
+	storeMapUC.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	g.GM_getValue = (k, d) => (storeMapUC.has(k) ? storeMapUC.get(k) : d);
+	g.GM_setValue = (k, v) => { storeMapUC.set(k, v); };
+	g.GM_deleteValue = (k) => { storeMapUC.delete(k); };
+	g.GM_setClipboard = (text) => { g.__clip = text; };
+	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
+	g.GM_xmlhttpRequest = (opt) => {
+		requestsUC.push(opt);
+		setTimeout(() => {
+			const url = String(opt.url || "");
+			let body;
+			if (/clouddrive\/file\/download/.test(url)) {
+				body = { code: 0, data: [{ file_name: "UC影片.mp4", size: 4096, download_url: "https://cdn.uc.cn/dl/uc1?sign=u1" }] };
+			} else if (/getVersion/.test(opt.data || "")) {
+				body = { id: 1, jsonrpc: "2.0", result: { version: "1.36.0" } };
+			} else {
+				body = { id: 1, jsonrpc: "2.0", result: "task-ok" };
+			}
+			if (opt.onload) opt.onload({ status: 200, responseText: JSON.stringify(body), response: body, responseHeaders: "" });
+		}, 0);
+		return { abort() { /* noop */ } };
+	};
+
+	// UC 的页面结构与夸克同构（同一套 file-list + React props），只是域名与挂载点不同
+	wUC.factStat = { ut: { baseParams: { pwd_id: "ucshare789" } } };
+	const ucProps = {
+		stoken: "uc-st-1",
+		list: [
+			{ fid: "u1", file_name: "UC影片.mp4", size: 4096, file: true, share_fid_token: "uctk1" },
+			{ fid: "ud1", file_name: "UC文件夹", size: 0, file: false, share_fid_token: "uctk2" }
+		],
+		selectedRowKeys: ["u1", "ud1"]
+	};
+	wUC.document.getElementById("ucList")["__reactFiber$nd"] = {
+		type: "div",
+		return: { type: function FileList() {}, stateNode: { props: ucProps } }
+	};
+	wUC.document.cookie = "uc_test=1";
+
+	delete require.cache[require.resolve(SCRIPT)];
+	const modUC = require(SCRIPT);
+	await tick(60);
+
+	t("识别为 UC 网盘（不是夸克）", () => {
+		assert.strictEqual(modUC.providerApi.current().id, "uc");
+		assert.strictEqual(modUC.providerApi.pageType(modUC.providerApi.current()), "share");
+	});
+	t("入口注入到 UC 专属的分享页挂载点", () => {
+		const bar = wUC.document.getElementById("ucBar");
+		assert.ok(bar.querySelector(".nd-entry"), "应在 .file-info-share-buttom 内出现入口");
+	});
+
+	requestsUC.length = 0;
+	modUC.ui.open();
+	await tick(400);
+
+	t("换链打到 UC 自己的接口，且只带 UC 客户端 UA", () => {
+		const req = requestsUC.find((r) => /clouddrive\/file\/download/.test(String(r.url)));
+		assert.ok(req, "应请求 UC 换链接口");
+		assert.ok(/pc-api\.uc\.cn/.test(String(req.url)), "URL 应为 pc-api.uc.cn：" + req.url);
+		assert.ok(!/drive-pc\.quark\.cn/.test(String(req.url)), "不应误用夸克接口");
+		const headers = JSON.stringify(req.headers || {});
+		assert.ok(/uc-cloud-drive/.test(headers), "应带 UC 客户端 UA");
+		assert.ok(!/quark-cloud-drive/.test(headers), "不应带夸克 UA");
+	});
+	t("分享页请求体带分享 ID 与勾选文件的 token（文件夹被剔除）", () => {
+		const req = requestsUC.find((r) => /clouddrive\/file\/download/.test(String(r.url)));
+		const body = JSON.parse(req.data);
+		assert.deepStrictEqual(body.fids, ["u1"], "只提交文件，文件夹不应进请求");
+		assert.deepStrictEqual(body.fids_token, ["uctk1"]);
+		assert.strictEqual(body.pwd_id, "ucshare789");
+		assert.strictEqual(body.stoken, "uc-st-1");
+	});
+	t("UC 直链入库并随行 UC 的下载请求头", () => {
+		const hit = modUC.catcher.pool.find((f) => f.url.indexOf("cdn.uc.cn") >= 0);
+		assert.ok(hit, "直链应入库");
+		assert.strictEqual(hit.name, "UC影片.mp4");
+		assert.ok(/uc-cloud-drive/.test(hit.headers["User-Agent"] || ""), "应带 UC UA");
+		assert.strictEqual(hit.headers.Referer, "https://drive.uc.cn/", "Referer 应取页面 origin");
+		assert.ok(/uc_test=1/.test(hit.headers.Cookie || ""), "应带页面 Cookie");
+	});
+
+	/* ==================== 场景五：改版后的工具栏（选择器全部落空） ==================== */
 
 	console.log("\n[网盘改版兜底注入]");
 	// 页面里只有「上传 / 下载」这类原生按钮，没有任何我们配置过的类名

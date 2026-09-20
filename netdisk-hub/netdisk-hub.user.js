@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.1.0
-// @description  百度网盘 / 夸克网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
+// @version      1.2.0
+// @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
 // @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/netdisk-hub/netdisk-hub.user.js
@@ -10,6 +10,7 @@
 // @match        *://pan.baidu.com/*
 // @match        *://yun.baidu.com/*
 // @match        *://pan.quark.cn/*
+// @match        *://drive.uc.cn/*
 // @connect      *
 // @connect      localhost
 // @connect      127.0.0.1
@@ -24,18 +25,18 @@
 // ==/UserScript==
 
 /**
- * 网盘直链下载助手 · 百度网盘 / 夸克网盘
+ * 网盘直链下载助手 · 百度网盘 / 夸克网盘 / UC 网盘
  *
  * 设计要点：
- * 1. 只做两家网盘，做到位。**百度**（分享页签名换链 + 网盘内页静默授权换链）与
- *    **夸克**（列表页与分享页均直接换链），两家的勾选读取与换链都是完整实现，
- *    不存在「识别得到、拿不到直链」的中间态。
+ * 1. 只做三家网盘，都把识别与换链做完整：**百度**（分享页签名换链 + 网盘内页静默授权
+ *    换链）、**夸克**与 **UC**（列表页与分享页均直接换链，两家协议一致、接入信息各一套）。
+ *    三家都不存在「识别得到、拿不到直链」的中间态。
  * 2. 文件识别**读页面框架状态**，不扫 DOM。网盘是 SPA，「有哪些文件」「勾选了哪些」
  *    都存放在 React / Vue 的内部状态里；从文件列表容器反查框架实例即可读出勾选项，
  *    再调网盘接口换成直链。文件夹换不出直链，会单独标出并从请求里剔除。
  * 3. 网络层捕获仅作**被动补充**。网盘文件列表本身不含直链（地址是点击「下载」时由
  *    页面 JS 实时换回来的），脚本仍在文档解析前 hook XMLHttpRequest 与 fetch，
- *    在您正常点「下载」时顺带截下地址 —— 但两家都不依赖它。
+ *    在您正常点「下载」时顺带截下地址 —— 但三家都不依赖它。
  * 4. 入口**注入宿主工具栏**，不做悬浮器件。等容器渲染出来再把按钮挂进去，与宿主原生
  *    按钮并排；同时始终保留脚本管理器菜单兜底。不注册任何全局快捷键。
  * 5. 下载出口层分两条独立通道：
@@ -47,7 +48,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.1.0";
+	const VERSION = "1.2.0";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -533,9 +534,96 @@
 	 *           用于挑选合适的挂载点，避免在登录页等无关页面乱注入。
 	 *   mount   工具栏挂载点，按页面类型分组：{ home: [...], share: [...] }。
 	 *           必须指向宿主既有容器，且**不得使用 :has()** —— 旧内核会直接抛异常。
-	 *   header  直链请求所需请求头（Aria2 / 命令行 / IDM 均使用）
+	 *   endpoint / ua  换链接口与它要求的客户端 UA
+	 *   header  直链请求所需的静态请求头（Aria2 / 命令行 / IDM 均使用）
 	 *   hint    未识别到文件时的提示
 	 */
+	/**
+	 * 夸克与 UC 是两家不同的网盘：域名、换链接口、客户端 UA、分享页挂载点都不同，
+	 * 但**页面结构与换链协议完全一致**（两份实现逐行相同）。因此采集与换链共用一份
+	 * 逻辑，各家只提供自己的接入信息：
+	 *   夸克  drive-pc.quark.cn · pr=ucpro    · quark-cloud-drive UA · 分享页 .share-btns
+	 *   UC    pc-api.uc.cn      · pr=UCBrowser · uc-cloud-drive UA    · 分享页 .file-info-share-buttom
+	 */
+	const quarkLike = (cfg) => ({
+		id: cfg.id,
+		name: cfg.name,
+		match: cfg.match,
+		pages: { home: /^\/list/, share: /^\/(s|share)\// },
+		mount: { home: [".btn-operate .btn-main"], share: cfg.shareMount },
+		/** 换链必须走各自的客户端接口并带上客户端 UA，页面自身 UA 会被拒 */
+		endpoint: cfg.endpoint,
+		ua: cfg.ua,
+		/** 直链需要 Referer 与 Cookie 才不被判为盗链 */
+		credential: true,
+		hint: "请在文件列表中勾选要下载的文件；文件夹无法取直链，请进入文件夹后再勾选其中的文件。",
+
+		/** 读取当前勾选的文件：取数自 React 组件的 props，而非 DOM */
+		collect() {
+			const out = [];
+			const dom = document.getElementsByClassName("file-list")[0];
+			const props = pageState.propsOf(pageState.findReact(dom));
+			if (!props) return out;
+			const stoken = props.stoken || "";
+			const files = props.list || [];
+			const keys = props.selectedRowKeys || [];
+			for (let i = 0; i < files.length; i++) {
+				const f = files[i];
+				if (keys.indexOf(f.fid) < 0) continue;
+				out.push({
+					fid: f.fid,
+					name: f.file_name,
+					size: f.size,
+					dir: providerApi.isFolder(f),
+					stoken,
+					shareToken: f.share_fid_token
+				});
+			}
+			return out;
+		},
+
+		/** 调网盘接口把勾选的文件换成直链（两家同一协议，只有端点与 UA 不同） */
+		async resolve(files, page) {
+			const API = this.endpoint;
+			const BATCH = 15;
+
+			// 文件夹没有直链可换，先剔除；一个文件都不剩时给出可操作的提示
+			const list = (files || []).filter((f) => !f.dir);
+			if (!list.length) throw new Error("勾选的都是文件夹 —— 文件夹无法取直链，请进入文件夹后勾选其中的文件。");
+
+			let pwdId = "";
+			let stoken = "";
+			if (page === "share") {
+				pwdId = providerApi.sharePwdId();
+				if (!pwdId) throw new Error("无法从页面提取分享 ID，请刷新页面后重试。");
+				stoken = (list[0] && list[0].stoken) || "";
+			}
+
+			// 直链会校验 Referer 与 Cookie，只带 UA 会被判为盗链
+			const headers = providerApi.downloadHeaders(this);
+
+			const out = [];
+			for (let i = 0; i < list.length; i += BATCH) {
+				const batch = list.slice(i, i + BATCH);
+				const body = { fids: batch.map((f) => f.fid) };
+				if (page === "share") {
+					body.fids_token = batch.map((f) => f.shareToken);
+					body.pwd_id = pwdId;
+					body.stoken = stoken;
+				}
+				const res = await net.postJson(API, body, { "Content-Type": "application/json", "User-Agent": this.ua });
+				if (res && res.code === 31001) throw new Error("请先在浏览器里登录网盘，再重试。");
+				if (res && res.code === 23018) throw new Error("超出游客可获取的大小上限，请登录网盘后重试。");
+				if (res && res.code !== 0) throw new Error("接口返回 code=" + res.code + (res.message ? "：" + res.message : ""));
+				(res.data || []).forEach((d) => {
+					if (d && d.download_url) out.push({ url: d.download_url, name: d.file_name || "", size: d.size, headers });
+				});
+				if (i + BATCH < list.length) await util.sleep(1000);   // 节流，避免触发风控
+			}
+			return out;
+		}
+	});
+
 	const providers = [
 		{
 			id: "baidu",
@@ -597,88 +685,22 @@
 				return providerApi.baiduHomeResolve(files, token);
 			}
 		},
-		{
+		quarkLike({
 			id: "quark",
 			name: "夸克网盘",
 			match: /(^|\.)quark\.cn$/i,
-			pages: { home: /^\/list/, share: /^\/(s|share)\// },
-			mount: {
-				home: [".btn-operate .btn-main"],
-				share: [".share-btns", ".file-info-share-buttom"]
-			},
-			/** 换链接口。必须携带夸克客户端 UA，页面自身的 UA 会被拒 */
 			endpoint: "https://drive-pc.quark.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=ucpro",
 			ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.20.0 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch",
-			/** 直链需要 Referer 与 Cookie 才不被判为盗链 */
-			credential: true,
-			hint: "请在文件列表中勾选要下载的文件；文件夹无法取直链，请进入文件夹后再勾选其中的文件。",
-
-			/** 读取当前勾选的文件：取数自 React 组件的 props，而非 DOM */
-			collect() {
-				const out = [];
-				const dom = document.getElementsByClassName("file-list")[0];
-				const props = pageState.propsOf(pageState.findReact(dom));
-				if (!props) return out;
-				const stoken = props.stoken || "";
-				const files = props.list || [];
-				const keys = props.selectedRowKeys || [];
-				for (let i = 0; i < files.length; i++) {
-					const f = files[i];
-					if (keys.indexOf(f.fid) < 0) continue;
-					out.push({
-						fid: f.fid,
-						name: f.file_name,
-						size: f.size,
-						dir: providerApi.isFolder(f),
-						stoken,
-						shareToken: f.share_fid_token
-					});
-				}
-				return out;
-			},
-
-			/** 调网盘接口把勾选的文件换成直链 */
-			async resolve(files, page) {
-				const p = providerApi.byId("quark");
-				const API = p.endpoint;
-				const BATCH = 15;
-
-				// 文件夹没有直链可换，先剔除；一个文件都不剩时给出可操作的提示
-				const list = (files || []).filter((f) => !f.dir);
-				if (!list.length) throw new Error("勾选的都是文件夹 —— 文件夹无法取直链，请进入文件夹后勾选其中的文件。");
-
-				let pwdId = "";
-				let stoken = "";
-				if (page === "share") {
-					pwdId = providerApi.sharePwdId();
-					if (!pwdId) throw new Error("无法从页面提取分享 ID，请刷新页面后重试。");
-					stoken = (list[0] && list[0].stoken) || "";
-				}
-
-				// 夸克直链会校验 Referer 与 Cookie，只带 UA 会被判为盗链
-				const headers = providerApi.downloadHeaders(p);
-
-				const out = [];
-				for (let i = 0; i < list.length; i += BATCH) {
-					const batch = list.slice(i, i + BATCH);
-					const body = { fids: batch.map((f) => f.fid) };
-					if (page === "share") {
-						body.fids_token = batch.map((f) => f.shareToken);
-						body.pwd_id = pwdId;
-						body.stoken = stoken;
-					}
-					const res = await net.postJson(API, body, { "Content-Type": "application/json", "User-Agent": p.ua });
-					if (res && res.code === 31001) throw new Error("请先在浏览器里登录网盘，再重试。");
-					if (res && res.code === 23018) throw new Error("超出游客可获取的大小上限，请登录网盘后重试。");
-					if (res && res.code !== 0) throw new Error("接口返回 code=" + res.code + (res.message ? "：" + res.message : ""));
-					(res.data || []).forEach((d) => {
-						if (d && d.download_url) out.push({ url: d.download_url, name: d.file_name || "", size: d.size, headers });
-					});
-					if (i + BATCH < list.length) await util.sleep(1000);   // 节流，避免触发风控
-				}
-				return out;
-			}
-		},
+			shareMount: [".share-btns"]
+		}),
+		quarkLike({
+			id: "uc",
+			name: "UC 网盘",
+			match: /(^|\.)uc\.cn$/i,
+			endpoint: "https://pc-api.uc.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser",
+			ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) uc-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch",
+			shareMount: [".file-info-share-buttom"]
+		})
 	];
 
 	const providerApi = {
@@ -838,7 +860,7 @@
 					url: it.dlink,
 					name: f.name || it.server_filename || util.nameFromUrl(it.dlink),
 					size: f.size || it.size || 0,
-					headers: providerApi.downloadHeaders(providers[0])
+					headers: providerApi.downloadHeaders(providerApi.byId("baidu"))
 				});
 				if (i + 1 < files.length) await util.sleep(300);
 			}
@@ -909,7 +931,7 @@
 						url: it.dlink,
 						name: f.name || it.server_filename || it.filename || util.nameFromUrl(it.dlink),
 						size: f.size || it.size || 0,
-						headers: providerApi.downloadHeaders(providers[0])
+						headers: providerApi.downloadHeaders(providerApi.byId("baidu"))
 					});
 				});
 				if (i + BATCH < fsids.length) await util.sleep(500);
