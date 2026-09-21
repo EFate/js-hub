@@ -1133,7 +1133,7 @@
 		autoJump: true,  // 已落在中转页时自动跳走
 		guard: true,     // 压掉站点拦截：点击接管 + window.open 接管
 		panAuto: true,   // 网盘自动带提取码：链接旁取码 + 落地填入 + 自动提交
-		entry: "auto",   // 注入入口配色：auto / light / dark
+		entry: "auto",   // 页面入口按钮：auto / light / dark / off（off = 永不注入）
 		skipHosts: [],   // 不处理的站点（命中则本页直接跳过）
 		mute: []         // 被单独停用的站点规则名
 	};
@@ -1145,6 +1145,14 @@
 
 	const stat = { skip: 0, resolve: 0, fill: 0 };
 	let eventLog = [];
+
+	/**
+	 * **本页**被处理过的链接数（仅当前页面，不落盘）。
+	 *
+	 * 与 `stat.resolve` 的区别：那个是全局累计（存 GM 存储，跨页面跨会话），
+	 * 拿它判断「本页有没有干活」会恒为真。入口注入要靠这个按页计数。
+	 */
+	let pageHits = 0;
 
 	/** 把 v1.1.x 的 10 个开关映射到 v1.2.0 的 5 个 */
 	function migrateOpt(saved) {
@@ -1375,6 +1383,9 @@
 		a.setAttribute(ATTR, "1");
 		a.setAttribute(ATTR + "-to", to);
 		a.href = to;
+		// 只把「地址真的变了」计入本页可见工作量：单纯落标记的网盘直链
+		// 用户看不出任何差别，不值得据此让入口按钮露脸
+		if (to !== href) pageHits++;
 		return true;
 	}
 
@@ -1414,20 +1425,36 @@
 				}
 			}
 			if (i < list.length) schedule(step);
-			else if (n) {
-				bump("resolve");
-				log(`深度预解析完成，共改写 ${n} 条链接`);
+			else {
+				if (n) {
+					bump("resolve");
+					log(`深度预解析完成，共改写 ${n} 条链接`);
+				}
+				// 扫完一轮才知道本页有没有活干，再决定要不要露脸
+				maybeInjectEntry();
 			}
 		};
 		schedule(step);
 	}
 
+	/**
+	 * 让出一帧再跑，避免长列表阻塞首屏。
+	 *
+	 * 执行前校验文档没被换掉 —— 延迟回调是异步的，跑起来时页面可能已经
+	 * 不是当初那个了（重导航、或宿主替换了 document）。此时再按老上下文
+	 * 去操作新文档，就会改错别人的链接。
+	 */
 	function schedule(fn) {
+		const doc = document;
+		const run = () => {
+			if (document !== doc) return; // 环境已失效，这次调度作废
+			fn();
+		};
 		try {
-			if (typeof requestIdleCallback === "function") requestIdleCallback(fn, { timeout: 500 });
-			else setTimeout(fn, 32);
+			if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 500 });
+			else setTimeout(run, 32);
 		} catch (e) {
-			setTimeout(fn, 32);
+			setTimeout(run, 32);
 		}
 	}
 
@@ -2086,12 +2113,12 @@ html{
 			</div>
 		</div>
 		<div class="jh-card">
-			<h3>入口按钮配色</h3>
+			<h3>入口按钮</h3>
 			<div class="jh-field" style="border:none; padding-top:0;">
-				<span class="jh-name">网盘页工具栏里的「直跳」按钮</span>
-				<span class="jh-desc"></span>
+				<span class="jh-name">页面入口按钮</span>
+				<span class="jh-desc">跳转本身全自动，按钮只是查看入口：仅当本页有链接被接管、且找到宿主页头工具栏时才出现，网盘分享页不出现</span>
 				<div class="jh-btns">
-					${[["auto", "跟随宿主"], ["light", "浅色"], ["dark", "暗色"]]
+					${[["auto", "跟随宿主"], ["light", "浅色"], ["dark", "暗色"], ["off", "不显示"]]
 						.map(([k, label]) => `<button class="jh-btn${opt.entry === k ? " jh-primary" : ""}" data-act="entry" data-entry="${k}">${label}</button>`)
 						.join("")}
 				</div>
@@ -2253,7 +2280,12 @@ html{
 
 	function applyRuntimeOpts() {
 		const entry = qs(".jh-entry");
-		if (entry) entry.className = "jh-entry " + entryThemeClass();
+		if (!entry) return;
+		if (!worthEntry()) {
+			entry.remove(); // 被关掉、或本页已不值当露脸
+			return;
+		}
+		entry.className = "jh-entry " + entryThemeClass();
 	}
 
 	function handleAction(act, el) {
@@ -2271,6 +2303,7 @@ html{
 				opt.entry = el.getAttribute("data-entry") || "auto";
 				saveOpt();
 				applyRuntimeOpts();
+				maybeInjectEntry();
 				renderPages();
 				break;
 			case "all-on":
@@ -2299,33 +2332,65 @@ html{
 		}
 	}
 
-	/* ---- 入口注入 ---- */
+	/* ---- 入口注入（按需露脸，不是每个页面都注入）---- */
 
-	/** 宿主工具栏候选容器（按网盘分别给，找不到就不注入，菜单仍然可用） */
-	const ENTRY_SLOTS = {
-		baidu: [".wp-s-agile-tool-bar", ".nd-toolbar", "#share-header .share-toolbar", ".share-file-toolbar"],
-		quark: [".ant-layout-header .toolbar", ".header-toolbar", ".share-header .actions"],
-		uc: [".share-header .actions", ".header-toolbar"],
-		default: [".toolbar", ".header-actions", "[class*='toolbar']"]
-	};
+	/**
+	 * 宿主工具栏候选容器。
+	 *
+	 * 只挑「本来就是页头操作区」的容器 —— 找不到就静默。
+	 * 管理器菜单（Tampermonkey 图标）始终可用，不为此硬凑注入点，
+	 * 更不会做成脱离文档流、跟着页面滚的那种常驻件。
+	 */
+	const ENTRY_SLOTS = [
+		".toolbar",
+		".header-actions",
+		".header-toolbar",
+		".page-actions",
+		"header .actions",
+		"header .toolbar"
+	];
 
 	function entryThemeClass() {
 		const mode = opt.entry === "auto" ? hostTheme() : opt.entry;
 		return mode === "light" ? "jh-entry--light" : mode === "dark" ? "jh-entry--dark" : "";
 	}
 
+	/**
+	 * 本页值不值得注入入口？三条同时成立才露脸：
+	 *
+	 * ① 顶层文档、脚本启用、站点不在「不处理」名单；
+	 * ② **不在网盘分享页** —— 那是终点站。用户都到分享页了，那里既没有中转
+	 *    需要剥、也没有提取码需要补，脚本本就该收手，更不该往人家工具栏塞东西；
+	 * ③ 本页**确实处理过链接**（`pageHits > 0`）—— 一条都没动过就别出声，
+	 *    免得在「脚本什么也没做」的页面上凭空多出一个按钮。
+	 *
+	 * 这是「看情况决定是否注入」：跳转本身是全自动的，入口按钮只是「脚本在
+	 * 这页干了活」的可见凭证 + 顺手打开面板，它不该是每页都有的常驻物。
+	 */
+	function worthEntry() {
+		if (!IS_TOP || !opt.on || isSkippedSite()) return false;
+		if (opt.entry === "off") return false;
+		if (panOf(HOST)) return false;
+		return pageHits > 0;
+	}
+
+	let entryPending = false;
+
 	function injectEntry() {
-		if (!IS_TOP || !opt.on) return;
-		const pan = panOf(HOST);
-		if (!pan) return; // 非网盘页面不注入，遵守「不脱离文档流」的规范
-		const slots = ENTRY_SLOTS[pan.id] || ENTRY_SLOTS.default;
-		waitFor(slots, (bar) => {
+		if (entryPending || qs(".jh-entry")) return;
+		entryPending = true;
+		const doc = document;
+		waitFor(ENTRY_SLOTS, (bar) => {
+			entryPending = false;
+			if (document !== doc) return; // 页面已被换掉，本次注入作废
+			// 容器出现可能晚于条件成立，此刻复检一次：期间本页可能已经不值当露脸了
+			if (!worthEntry()) return;
 			if (bar.querySelector(".jh-entry")) return; // 防重复
 			const btn = document.createElement("button");
 			btn.type = "button";
 			btn.className = "jh-entry " + entryThemeClass();
 			btn.innerHTML = ICON.link + "<span>直跳</span>";
-			btn.title = "链接直跳（含网盘提取码）";
+			btn.title = "链接直跳：本页已处理 " + pageHits + " 条链接，点击查看";
 			btn.addEventListener("click", (e) => {
 				e.preventDefault();
 				e.stopPropagation();
@@ -2333,7 +2398,13 @@ html{
 			}, true);
 			bar.appendChild(btn);
 			log("入口已注入宿主工具栏");
-		}, 12000);
+		}, 6000);
+	}
+
+	/** 扫描之后调用：本页确实干了活才露脸 */
+	function maybeInjectEntry() {
+		if (!worthEntry()) return;
+		injectEntry();
 	}
 
 	function registerMenu() {
@@ -2419,13 +2490,19 @@ html{
 			if (node.closest && node.closest("[" + ATTR + "]") === node) continue;
 			scanRoot(node);
 		}
+		// 异步增量也有可能是本页唯一「干活」的地方（水合后才出链接的站点）
+		maybeInjectEntry();
 	}
 
 	function startObserver() {
 		const root = document.documentElement;
 		if (!root || observer) return;
+		// 回调是异步的，跑起来时文档可能已经不是当初那个了（重导航 / 宿主换文档），
+		// 那时再按老上下文扫新 DOM 只会改错别人的链接
+		const doc = document;
 		let queued = false;
 		observer = new MutationObserver((records) => {
+			if (document !== doc) return; // 环境已失效
 			// 页面变了，整页提取码缓存作废 —— 帖子异步加载出「提取码：xxxx」时才知道有码
 			invalidatePagePwd();
 			for (const r of records) {
@@ -2437,6 +2514,7 @@ html{
 			queued = true;
 			// 合并同一帧内的多次变更，避免动态页面里反复查询
 			const run = () => {
+				if (document !== doc) return; // 环境已失效
 				queued = false;
 				// ① 站点规则命中的部分仍走 scan（它按选择器精确改写）
 				const n = scan(document);
@@ -2469,8 +2547,8 @@ html{
 			addStyle("jh-style", CSS);
 			startObserver();
 			scan(document);
+			// deepScan 扫完会自己判断要不要注入入口（见 maybeInjectEntry）
 			deepScan();
-			injectEntry();
 			registerMenu();
 			setTimeout(() => {
 				autoFill();
@@ -2544,7 +2622,13 @@ html{
 			pagePwds,
 			invalidatePagePwd,
 			navigate,
-			pageText
+			pageText,
+			worthEntry,
+			injectEntry,
+			maybeInjectEntry,
+			get pageHits() {
+				return pageHits;
+			}
 		},
 		ui: {
 			open: openPanel,

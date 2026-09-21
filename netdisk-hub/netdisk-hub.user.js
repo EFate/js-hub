@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.5.6
+// @version      1.5.7
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -48,7 +48,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.3.0";
+	const VERSION = "1.5.7";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -189,8 +189,7 @@
 		[KEY.opt]: {
 			showIdm: false,       // 是否在直链行上显示「IDM」出口（默认关闭）
 			entryStyle: "auto",   // 入口按钮配色：auto 跟随宿主页面 | light 白色 | dark 暗色
-			firstTip: true,       // 首次安装提示
-			history: []           // 最近提交的任务（最多 20 条）
+			firstTip: true        // 首次安装提示
 		}
 	};
 
@@ -231,14 +230,7 @@
 			return next;
 		},
 		aria() { return store.get(KEY.aria); },
-		opt() { return store.get(KEY.opt); },
-		/** 记录一条历史（仅保留最近 20 条） */
-		log(entry) {
-			const opt = store.opt();
-			const history = Array.isArray(opt.history) ? opt.history.slice(0, 19) : [];
-			history.unshift(Object.assign({ time: Date.now() }, entry));
-			store.patch(KEY.opt, { history });
-		}
+		opt() { return store.get(KEY.opt); }
 	};
 
 	/* ==========================================================================
@@ -976,7 +968,6 @@
 				headers: engine.mergeHeaders(file.headers)
 			};
 			const res = await aria.addUri(cfg, payload);
-			store.log({ kind: "aria2", name: file.name, ok: res === "success" });
 			return res;
 		},
 

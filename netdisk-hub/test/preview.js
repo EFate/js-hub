@@ -39,7 +39,7 @@ g.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 try { g.navigator = window.navigator; } catch (e) { /* 保留宿主 navigator */ }
 
 const storeMap = new Map();
-storeMap.set("nd.opt", { showIdm: false, entryStyle: "light", firstTip: false, history: [] });
+storeMap.set("nd.opt", { showIdm: false, entryStyle: "light", firstTip: false });
 g.GM_getValue = (k, d) => (storeMap.has(k) ? storeMap.get(k) : d);
 g.GM_setValue = (k, v) => { storeMap.set(k, v); };
 g.GM_deleteValue = (k) => { storeMap.delete(k); };

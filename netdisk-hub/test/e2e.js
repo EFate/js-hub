@@ -69,7 +69,7 @@ async function main() {
 	const menus = [];
 	const requests = [];
 	const opened = [];
-	storeMap.set("nd.opt", { channel: "api", showIdm: true, firstTip: false, history: [] });
+	storeMap.set("nd.opt", { showIdm: true, firstTip: false });
 
 	g.GM_getValue = (k, d) => (storeMap.has(k) ? storeMap.get(k) : d);
 	g.GM_setValue = (k, v) => { storeMap.set(k, v); };
@@ -334,10 +334,6 @@ async function main() {
 		assert.strictEqual(body.params[1].out, "影片A.mp4");
 		assert.ok(Array.isArray(body.params[1].header), "应携带 header 数组");
 	});
-	t("推送后写入历史记录", () => {
-		assert.ok(storeMap.get("nd.opt").history.length >= 1, "应记录一条历史");
-	});
-
 	console.log("\n[设置页：连通性测试]");
 	requests.length = 0;
 	const testBtn = scope.querySelector('[data-act="test-aria"]');
@@ -446,7 +442,7 @@ async function main() {
 
 	const storeMap2 = new Map();
 	const requests2 = [];
-	storeMap2.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	storeMap2.set("nd.opt", { showIdm: false, firstTip: false });
 	g.GM_getValue = (k, d) => (storeMap2.has(k) ? storeMap2.get(k) : d);
 	g.GM_setValue = (k, v) => { storeMap2.set(k, v); };
 	g.GM_deleteValue = (k) => { storeMap2.delete(k); };
@@ -580,7 +576,7 @@ async function main() {
 
 	const storeMap3 = new Map();
 	const requests3 = [];
-	storeMap3.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	storeMap3.set("nd.opt", { showIdm: false, firstTip: false });
 	g.GM_getValue = (k, d) => (storeMap3.has(k) ? storeMap3.get(k) : d);
 	g.GM_setValue = (k, v) => { storeMap3.set(k, v); };
 	g.GM_deleteValue = (k) => { storeMap3.delete(k); };
@@ -685,7 +681,7 @@ async function main() {
 
 	const storeMapUC = new Map();
 	const requestsUC = [];
-	storeMapUC.set("nd.opt", { showIdm: false, firstTip: false, history: [] });
+	storeMapUC.set("nd.opt", { showIdm: false, firstTip: false });
 	g.GM_getValue = (k, d) => (storeMapUC.has(k) ? storeMapUC.get(k) : d);
 	g.GM_setValue = (k, v) => { storeMapUC.set(k, v); };
 	g.GM_deleteValue = (k) => { storeMapUC.delete(k); };
