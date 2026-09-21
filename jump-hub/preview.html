@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>链接直跳助手 · 界面预览</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 64px;
+    background: #0b0f14; color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  .page-head { max-width: 1120px; margin: 0 auto 28px; }
+  .page-head h1 { margin: 0 0 6px; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  .page-head p { margin: 0; color: #8b949e; font-size: 13px; line-height: 1.7; }
+  .page-head code { background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+  .grid { max-width: 1120px; margin: 0 auto; display: grid; gap: 24px; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); }
+  .cell { background: #10151c; border: 1px solid #21262d; border-radius: 14px; padding: 16px; }
+  .cell h2 { margin: 0 0 4px; font-size: 14px; font-weight: 620; color: #e6edf3; }
+  .cell .cap { margin: 0 0 14px; font-size: 12px; color: #8b949e; line-height: 1.6; min-height: 38px; }
+  .stage { padding: 16px; border-radius: 10px; background: #0d1117; display: flex; justify-content: center; overflow: hidden; }
+  .stage.light { background: #ffffff; }
+
+  /* 静态预览覆盖：把固定居中的弹窗变成文档流里的卡片 */
+  .jh-panel-demo {
+    position: relative !important; left: auto !important; top: auto !important;
+    transform: none !important; opacity: 1 !important; pointer-events: auto !important;
+    width: 460px; max-width: 100%; max-height: none; margin: 0;
+  }
+  .jh-panel-demo .jh-body { max-height: 520px; }
+</style>
+<style>
+html{
+  --jh-accent:#2da44e; --jh-accent-2:#1a7f37; --jh-accent-fg:#ffffff;
+  --jh-good:#2da44e; --jh-warn:#d29922; --jh-bad:#f85149;
+}
+.jh-scope{
+  --jh-bg:#0d1117; --jh-bg-2:#161b22; --jh-bg-3:#21262d;
+  --jh-bd:#30363d; --jh-bd-2:#21262d;
+  --jh-fg:#e6edf3; --jh-fg-2:#8b949e; --jh-fg-3:#6e7681;
+  --jh-shadow:0 16px 44px rgba(0,0,0,.5);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  color:var(--jh-fg); font-size:13px; line-height:1.5;
+}
+.jh-scope.jh-light{
+  --jh-bg:#ffffff; --jh-bg-2:#f6f8fa; --jh-bg-3:#eaeef2;
+  --jh-bd:#d0d7de; --jh-bd-2:#d8dee4;
+  --jh-fg:#1f2328; --jh-fg-2:#59636e; --jh-fg-3:#818b98;
+  --jh-shadow:0 16px 44px rgba(31,35,40,.16);
+}
+.jh-scope svg{width:1em;height:1em;fill:currentColor;flex:none;vertical-align:-.125em;}
+
+.jh-overlay-demo{position:fixed; inset:0; z-index:2147483001; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .2s;}
+.jh-overlay-demo.jh-open{opacity:1; pointer-events:auto;}
+.jh-panel-demo{position:fixed; left:50%; top:50%; z-index:2147483002; width:460px; max-width:calc(100vw - 32px); max-height:84vh;
+  background:var(--jh-bg); border:1px solid var(--jh-bd); border-radius:14px; box-shadow:var(--jh-shadow);
+  display:flex; flex-direction:column; overflow:hidden; opacity:0; transform:translate(-50%,-46%) scale(.97); pointer-events:none;
+  transition:opacity .22s, transform .22s cubic-bezier(.4,0,.2,1);}
+.jh-panel-demo.jh-open{opacity:1; transform:translate(-50%,-50%) scale(1); pointer-events:auto;}
+
+.jh-head{display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--jh-bd-2); flex:none;}
+.jh-head h2{margin:0; font-size:15px; font-weight:600; color:var(--jh-fg);}
+.jh-head .jh-ver{font-size:11px; color:var(--jh-fg-2); border:1px solid var(--jh-bd); border-radius:999px; padding:1px 7px;}
+.jh-spacer{flex:1;}
+.jh-tabs{display:flex; border-bottom:1px solid var(--jh-bd-2); flex:none; background:var(--jh-bg-2);}
+.jh-tab{flex:1; padding:10px 0; border:none; background:transparent; cursor:pointer; font-family:inherit; font-size:13px;
+  color:var(--jh-fg-2); border-bottom:2px solid transparent; transition:color .15s, background .15s;}
+.jh-tab:hover{color:var(--jh-fg); background:var(--jh-bg-3);}
+.jh-tab.jh-on{color:var(--jh-fg); font-weight:600; border-bottom-color:var(--jh-accent);}
+.jh-body{flex:1; overflow-y:auto; min-height:200px;}
+.jh-body::-webkit-scrollbar{width:8px;}
+.jh-body::-webkit-scrollbar-thumb{background:var(--jh-bd); border-radius:4px;}
+.jh-page{display:none; padding:14px 16px 16px;} .jh-page.jh-on{display:block;}
+
+.jh-card{background:var(--jh-bg-2); border:1px solid var(--jh-bd-2); border-radius:10px; padding:12px; margin-bottom:12px;}
+.jh-card h3{margin:0 0 10px; font-size:12px; font-weight:600; color:var(--jh-fg-2); letter-spacing:.02em;}
+.jh-stats{display:flex; gap:10px;}
+.jh-stat{flex:1; background:var(--jh-bg-3); border-radius:8px; padding:10px 12px; text-align:center;}
+.jh-stat b{display:block; font-size:20px; font-weight:600; color:var(--jh-fg); line-height:1.2;}
+.jh-stat span{font-size:11px; color:var(--jh-fg-2);}
+
+.jh-btn{display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid var(--jh-bd); border-radius:6px;
+  background:var(--jh-bg-3); color:var(--jh-fg); font-family:inherit; font-size:12px; cursor:pointer; white-space:nowrap;
+  transition:background .15s, border-color .15s, opacity .15s;}
+.jh-btn:hover{background:var(--jh-bd); border-color:var(--jh-fg-3);}
+.jh-btn[disabled]{opacity:.5; pointer-events:none;}
+.jh-btn.jh-primary{background:var(--jh-accent); border-color:var(--jh-accent); color:var(--jh-accent-fg);}
+.jh-btn.jh-primary:hover{background:var(--jh-accent-2);}
+.jh-btn.jh-danger:hover{background:var(--jh-bad); border-color:var(--jh-bad); color:#fff;}
+.jh-icon-btn{width:28px; height:28px; display:flex; align-items:center; justify-content:center; border:none; border-radius:6px;
+  background:transparent; color:var(--jh-fg-2); cursor:pointer; font-size:16px; transition:background .15s, color .15s;}
+.jh-icon-btn:hover{background:var(--jh-bg-3); color:var(--jh-fg);}
+
+.jh-switch{position:relative; width:40px; height:22px; flex:none; cursor:pointer;}
+.jh-switch input{position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; z-index:1;}
+.jh-switch i{display:block; width:40px; height:22px; border-radius:11px; background:var(--jh-bd); transition:background .22s; position:relative;}
+.jh-switch i::after{content:''; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff;
+  transition:transform .22s cubic-bezier(.4,0,.2,1);}
+.jh-switch input:checked + i{background:var(--jh-accent);}
+.jh-switch input:checked + i::after{transform:translateX(18px);}
+
+.jh-field{display:flex; align-items:center; gap:10px; padding:7px 0;}
+.jh-field + .jh-field{border-top:1px solid var(--jh-bd-2);}
+.jh-field .jh-name{font-size:13px; color:var(--jh-fg); flex:none;}
+.jh-field .jh-desc{font-size:11px; color:var(--jh-fg-2); flex:1;}
+.jh-tag{display:inline-block; font-size:11px; padding:2px 7px; margin:0 6px 6px 0; border-radius:999px;
+  border:1px solid var(--jh-bd); color:var(--jh-fg-2); cursor:pointer; transition:all .15s;}
+.jh-tag:hover{border-color:var(--jh-fg-3); color:var(--jh-fg);}
+.jh-tag.jh-off{opacity:.42; text-decoration:line-through;}
+.jh-row{display:flex; align-items:center; gap:8px; padding:7px 0;}
+.jh-row + .jh-row{border-top:1px solid var(--jh-bd-2);}
+.jh-row .jh-k{font-size:11px; color:var(--jh-fg-2); flex:none;}
+.jh-row .jh-v{font-size:12px; color:var(--jh-fg); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.jh-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11.5px;}
+.jh-empty{font-size:12px; color:var(--jh-fg-2); padding:6px 0;}
+.jh-note{font-size:11px; color:var(--jh-fg-3); line-height:1.6;}
+.jh-pill{font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--jh-bd); color:var(--jh-fg-2);}
+.jh-pill.jh-ok{color:var(--jh-good); border-color:var(--jh-good);}
+.jh-pill.jh-warn{color:var(--jh-warn); border-color:var(--jh-warn);}
+.jh-btns{display:flex; gap:8px; flex-wrap:wrap;}
+
+/* 入口：注入宿主既有容器，不悬浮 */
+.jh-entry{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 10px; margin-left:8px;
+  border:1px solid var(--jh-bd); border-radius:6px; background:var(--jh-bg-3); color:var(--jh-fg);
+  font-family:inherit; font-size:12px; cursor:pointer; vertical-align:middle; transition:background .15s, border-color .15s;}
+.jh-entry:hover{background:var(--jh-bd);}
+.jh-entry.jh-entry--light{--jh-bg-3:#ffffff; --jh-bd:#d0d7de; --jh-fg:#1f2328; --jh-fg-2:#59636e;}
+.jh-entry.jh-entry--dark{--jh-bg-3:#21262d; --jh-bd:#30363d; --jh-fg:#e6edf3; --jh-fg-2:#8b949e;}
+
+.jh-toasts-demo{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:2147483004; display:flex;
+  flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
+.jh-toast{display:flex; align-items:center; gap:8px; max-width:min(560px, calc(100vw - 32px)); padding:9px 14px;
+  border-radius:8px; font-family:inherit; font-size:13px; color:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35);
+  opacity:0; transform:translateY(12px); transition:opacity .22s, transform .22s;}
+.jh-toast.jh-show{opacity:1; transform:none;}
+.jh-toast.jh-info{background:#1f6feb;} .jh-toast.jh-ok{background:var(--jh-good);}
+.jh-toast.jh-warn{background:#9e6a03;} .jh-toast.jh-err{background:#b62324;}
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <h1>链接直跳助手 · 界面预览</h1>
+    <p>这一页由 <code>node test/preview.js</code> 生成：面板 DOM 是真实脚本在 jsdom 里渲染出来的，样式直接取脚本里的 <code>ui.css</code>，所以预览不会和脚本漂移。</p>
+  </div>
+  <div class="grid">
+    <div class="cell">
+      <h2>概览</h2>
+      <p class="cap">打开面板就能看到当前页命中的规则、三项累计数字与最近事件；「怎么用」一栏写明：什么都不用做，直接点链接。</p>
+      <div class="stage"><div class="jh-scope jh-open jh-panel-demo" role="dialog" aria-label="链接直跳助手">
+			<div class="jh-head">
+				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"></path></svg>
+				<h2>链接直跳</h2>
+				<span class="jh-ver">v1.3.0</span>
+				<span class="jh-spacer"></span>
+				<button class="jh-icon-btn" data-act="close" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg></button>
+			</div>
+			<div class="jh-tabs">
+				<button class="jh-tab jh-on" data-tab="overview">概览</button>
+				<button class="jh-tab" data-tab="opt">设置</button>
+			</div>
+			<div class="jh-body">
+				<div class="jh-page jh-on" data-page="overview">
+		<div class="jh-card">
+			<h3>当前页面</h3>
+			<div class="jh-row"><span class="jh-k">站点</span><span class="jh-v jh-mono">www.baidu.com</span><span class="jh-pill jh-ok">已适配</span></div>
+			<div class="jh-row"><span class="jh-k">规则</span><span class="jh-v">百度搜索</span>
+				<span class="jh-pill ">仅链接改写</span></div>
+			<div class="jh-row"><span class="jh-k">网盘</span><span class="jh-v">当前页面不是网盘分享页</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn" data-act="rescan" title="页面链接是分批加载的，必要时手动补一次">重新扫描本页</button>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>统计</h3>
+			<div class="jh-stats">
+				<div class="jh-stat"><b>128</b><span>已免中转</span></div>
+				<div class="jh-stat"><b>1476</b><span>已预解析链接</span></div>
+				<div class="jh-stat"><b>24</b><span>已带提取码</span></div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>怎么用</h3>
+			<p class="jh-note">不用做任何操作 —— <b>直接点链接就行</b>：<br>
+			· 站外链接：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页<br>
+			· 网盘链接：自动把写在链接旁边的提取码拼上，落地后自动填入并提交<br>
+			· 统一在新标签页打开，原页面留着；中键 / 右键同样生效<br>
+			· <b>过程里不会有任何弹窗或提示</b>。这里只是用来看状态和改设置的地方。</p>
+		</div>
+		<div class="jh-card">
+			<h3>最近事件</h3>
+			
+				<div class="jh-row">
+					<span class="jh-k">16:48:42</span>
+					<span class="jh-pill">带提取码</span>
+					<span class="jh-v jh-mono" title="k9x2">k9x2</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:48:17</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://github.com/EFate/js-hub">https://github.com/EFate/js-hub</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:47:28</span>
+					<span class="jh-pill">带提取码</span>
+					<span class="jh-v jh-mono" title="7w3q">7w3q</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:46:16</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://example.com/post/2026">https://example.com/post/2026</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:45:04</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://pan.baidu.com/s/1abcdef?pwd=k9x2">https://pan.baidu.com/s/1abcdef?pwd=k9x2</span>
+				</div>
+		</div></div>
+				<div class="jh-page" data-page="opt">
+		
+		<div class="jh-card">
+			<h3>主开关</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">总开关</span>
+				<span class="jh-desc">全部功能的总闸</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="on" checked=""><i></i></label>
+			</div>
+			<p class="jh-note" style="margin:8px 0 0;">关掉后所有功能停用，管理器菜单仍然保留，方便再打开。</p>
+		</div>
+		<div class="jh-card">
+			<h3>跳转行为</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">在新标签页打开</span>
+				<span class="jh-desc">原页面留着，不被打断</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="newTab" checked=""><i></i></label>
+			</div>
+			<div class="jh-field">
+				<span class="jh-name">落地中转页自动跳走</span>
+				<span class="jh-desc">不用再点「继续访问」</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="autoJump" checked=""><i></i></label>
+			</div>
+			<div class="jh-field">
+				<span class="jh-name">压掉站点拦截</span>
+				<span class="jh-desc">站点自己的跳转 / 统计 / 弹窗处理器抢不走这次点击</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="guard" checked=""><i></i></label>
+			</div>
+			
+		</div>
+		<div class="jh-card">
+			<h3>网盘</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">自动带提取码</span>
+				<span class="jh-desc">点网盘链接时取链接旁的码拼上，落地后填入并提交</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="panAuto" checked=""><i></i></label>
+			</div>
+			<p class="jh-note" style="margin:8px 0 0;">带码、填码、提交是一件事的三个步骤，所以合成一个开关。抓错码就整体关掉，免中转部分不受影响。</p>
+		</div>
+		<div class="jh-card">
+			<h3>站点</h3>
+			<div class="jh-field">
+				<span class="jh-name">本站不处理</span>
+				<span class="jh-desc">www.baidu.com　命中后本页完全跳过</span>
+				<label class="jh-switch"><input type="checkbox" data-skip-here=""><i></i></label>
+			</div>
+			<div style="margin-top:10px;">
+				<p class="jh-note" style="margin:0 0 6px;">不处理名单（点一下移除）：</p>
+				<div class="jh-empty">还没有不处理的站点。</div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>站点规则 · 49 条（点标签停用单条）</h3>
+			<div><span class="jh-tag " data-mute="百度贴吧（安全检测页）" title="/^jump2?\.bdimg\.com$/">百度贴吧（安全检测页）</span><span class="jh-tag " data-mute="百度贴吧" title="/(^|\.)tieba\.baidu\.com$/">百度贴吧</span><span class="jh-tag " data-mute="百度搜索" title="/(^|\.)baidu\.com$/">百度搜索</span><span class="jh-tag " data-mute="Bing 搜索" title="/(^|\.)bing\.com$/">Bing 搜索</span><span class="jh-tag " data-mute="Google 搜索 / 重定向页" title="/(^|\.)google\.(com|com?\.[a-z]{2}|co\.[a-z]{2}|[a-z]{2})$/">Google 搜索 / 重定向页</span><span class="jh-tag " data-mute="360 搜索" title="/(^|\.)so\.com$/">360 搜索</span><span class="jh-tag " data-mute="搜狗搜索" title="/(^|\.)sogou\.com$/">搜狗搜索</span><span class="jh-tag " data-mute="知乎 / 知乎专栏" title="/(^|\.)zhihu\.com$/">知乎 / 知乎专栏</span><span class="jh-tag " data-mute="掘金" title="/(^|\.)juejin\.cn$/">掘金</span><span class="jh-tag " data-mute="CSDN" title="/(^|\.)csdn\.net$/">CSDN</span><span class="jh-tag " data-mute="GitCode" title="/(^|\.)gitcode\.(com|net)$/">GitCode</span><span class="jh-tag " data-mute="码云" title="/(^|\.)gitee\.com$/">码云</span><span class="jh-tag " data-mute="开源中国" title="/(^|\.)oschina\.net$/">开源中国</span><span class="jh-tag " data-mute="博客园" title="/(^|\.)cnblogs\.com$/">博客园</span><span class="jh-tag " data-mute="简书" title="/(^|\.)jianshu\.com$/">简书</span><span class="jh-tag " data-mute="豆瓣" title="/(^|\.)douban\.com$/">豆瓣</span><span class="jh-tag " data-mute="少数派" title="/(^|\.)sspai\.com$/">少数派</span><span class="jh-tag " data-mute="InfoQ" title="/(^|\.)infoq\.cn$/">InfoQ</span><span class="jh-tag " data-mute="51CTO 博客" title="/(^|\.)51cto\.com$/">51CTO 博客</span><span class="jh-tag " data-mute="链滴" title="/(^|\.)ld246\.com$/">链滴</span><span class="jh-tag " data-mute="LINUX DO" title="/(^|\.)linux\.do$/">LINUX DO</span><span class="jh-tag " data-mute="NodeSeek" title="/(^|\.)nodeseek\.com$/">NodeSeek</span><span class="jh-tag " data-mute="NGA 玩家社区" title="/(^|\.)(nga\.cn|ngabbs\.com)$/">NGA 玩家社区</span><span class="jh-tag " data-mute="牛客网" title="/(^|\.)nowcoder\.com$/">牛客网</span><span class="jh-tag " data-mute="酷安" title="/(^|\.)coolapk\.com$/">酷安</span><span class="jh-tag " data-mute="力扣" title="/(^|\.)leetcode\.(cn|com)$/">力扣</span><span class="jh-tag " data-mute="Steam 社区" title="/(^|\.)steamcommunity\.com$/">Steam 社区</span><span class="jh-tag " data-mute="哔哩哔哩游戏 WIKI" title="/(^|\.)game\.bilibili\.com$/">哔哩哔哩游戏 WIKI</span><span class="jh-tag " data-mute="ACG 盒子" title="/(^|\.)acgbox\.link$/">ACG 盒子</span><span class="jh-tag " data-mute="书签地球" title="/(^|\.)bookmarkearth\.cn$/">书签地球</span><span class="jh-tag " data-mute="花瓣网" title="/(^|\.)huaban\.com$/">花瓣网</span><span class="jh-tag " data-mute="爱发电" title="/(^|\.)afdian\.(com|net)$/">爱发电</span><span class="jh-tag " data-mute="pixiv" title="/(^|\.)pixiv\.net$/">pixiv</span><span class="jh-tag " data-mute="腾讯云开发者社区" title="/(^|\.)cloud\.tencent\.com$/">腾讯云开发者社区</span><span class="jh-tag " data-mute="腾讯兔小巢" title="/^(txc|support)\.qq\.com$/">腾讯兔小巢</span><span class="jh-tag " data-mute="语雀" title="/(^|\.)yuque\.com$/">语雀</span><span class="jh-tag " data-mute="金山文档" title="/(^|\.)kdocs\.cn$/">金山文档</span><span class="jh-tag " data-mute="腾讯文档" title="/^docs\.qq\.com$/">腾讯文档</span><span class="jh-tag " data-mute="石墨文档" title="/(^|\.)shimo\.im$/">石墨文档</span><span class="jh-tag " data-mute="微博" title="/(^|\.)weibo\.(com|cn)$/">微博</span><span class="jh-tag " data-mute="微博短链接" title="/(^|\.)t\.cn$/">微博短链接</span><span class="jh-tag " data-mute="微信" title="/(^|\.)weixin110\.qq\.com$/">微信</span><span class="jh-tag " data-mute="微信开放社区" title="/(^|\.)developers\.weixin\.qq\.com$/">微信开放社区</span><span class="jh-tag " data-mute="QQ 邮箱" title="/(^|\.)mail\.qq\.com$/">QQ 邮箱</span><span class="jh-tag " data-mute="PC 版 QQ" title="/(^|\.)c\.pc\.qq\.com$/">PC 版 QQ</span><span class="jh-tag " data-mute="Twitter / X" title="/(^|\.)(twitter|x)\.com$/">Twitter / X</span><span class="jh-tag " data-mute="Facebook" title="/(^|\.)(facebook|fb)\.com$/">Facebook</span><span class="jh-tag " data-mute="Instagram" title="/(^|\.)instagram\.com$/">Instagram</span><span class="jh-tag " data-mute="YouTube" title="/(^|\.)youtube\.com$/">YouTube</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn" data-act="all-on">全部启用</button>
+				<button class="jh-btn" data-act="reset">恢复默认设置</button>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>入口按钮配色</h3>
+			<div class="jh-field" style="border:none; padding-top:0;">
+				<span class="jh-name">网盘页工具栏里的「直跳」按钮</span>
+				<span class="jh-desc"></span>
+				<div class="jh-btns">
+					<button class="jh-btn jh-primary" data-act="entry" data-entry="auto">跟随宿主</button><button class="jh-btn" data-act="entry" data-entry="light">浅色</button><button class="jh-btn" data-act="entry" data-entry="dark">暗色</button>
+				</div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>数据</h3>
+			<div class="jh-row"><span class="jh-k">存储键</span><span class="jh-v jh-mono">jh.opt · jh.stat · jh.log</span></div>
+			<div class="jh-row"><span class="jh-k">读取</span><span class="jh-v">提取码从 URL 的 pwd 参数读取，不发任何网络请求</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn jh-danger" data-act="reset-stat">重置统计与日志</button>
+			</div>
+		</div></div>
+			</div>
+		</div></div>
+    </div>
+    <div class="cell">
+      <h2>设置</h2>
+      <p class="cap">10 个功能开关、入口配色三档、49 条站点规则的逐条停用、不处理名单，以及数据清理。</p>
+      <div class="stage"><div class="jh-scope jh-open jh-panel-demo" role="dialog" aria-label="链接直跳助手">
+			<div class="jh-head">
+				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"></path></svg>
+				<h2>链接直跳</h2>
+				<span class="jh-ver">v1.3.0</span>
+				<span class="jh-spacer"></span>
+				<button class="jh-icon-btn" data-act="close" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg></button>
+			</div>
+			<div class="jh-tabs">
+				<button class="jh-tab" data-tab="overview">概览</button>
+				<button class="jh-tab jh-on" data-tab="opt">设置</button>
+			</div>
+			<div class="jh-body">
+				<div class="jh-page" data-page="overview">
+		<div class="jh-card">
+			<h3>当前页面</h3>
+			<div class="jh-row"><span class="jh-k">站点</span><span class="jh-v jh-mono">www.baidu.com</span><span class="jh-pill jh-ok">已适配</span></div>
+			<div class="jh-row"><span class="jh-k">规则</span><span class="jh-v">百度搜索</span>
+				<span class="jh-pill ">仅链接改写</span></div>
+			<div class="jh-row"><span class="jh-k">网盘</span><span class="jh-v">当前页面不是网盘分享页</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn" data-act="rescan" title="页面链接是分批加载的，必要时手动补一次">重新扫描本页</button>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>统计</h3>
+			<div class="jh-stats">
+				<div class="jh-stat"><b>128</b><span>已免中转</span></div>
+				<div class="jh-stat"><b>1476</b><span>已预解析链接</span></div>
+				<div class="jh-stat"><b>24</b><span>已带提取码</span></div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>怎么用</h3>
+			<p class="jh-note">不用做任何操作 —— <b>直接点链接就行</b>：<br>
+			· 站外链接：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页<br>
+			· 网盘链接：自动把写在链接旁边的提取码拼上，落地后自动填入并提交<br>
+			· 统一在新标签页打开，原页面留着；中键 / 右键同样生效<br>
+			· <b>过程里不会有任何弹窗或提示</b>。这里只是用来看状态和改设置的地方。</p>
+		</div>
+		<div class="jh-card">
+			<h3>最近事件</h3>
+			
+				<div class="jh-row">
+					<span class="jh-k">16:48:42</span>
+					<span class="jh-pill">带提取码</span>
+					<span class="jh-v jh-mono" title="k9x2">k9x2</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:48:17</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://github.com/EFate/js-hub">https://github.com/EFate/js-hub</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:47:28</span>
+					<span class="jh-pill">带提取码</span>
+					<span class="jh-v jh-mono" title="7w3q">7w3q</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:46:16</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://example.com/post/2026">https://example.com/post/2026</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:45:04</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://pan.baidu.com/s/1abcdef?pwd=k9x2">https://pan.baidu.com/s/1abcdef?pwd=k9x2</span>
+				</div>
+		</div></div>
+				<div class="jh-page jh-on" data-page="opt">
+		
+		<div class="jh-card">
+			<h3>主开关</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">总开关</span>
+				<span class="jh-desc">全部功能的总闸</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="on" checked=""><i></i></label>
+			</div>
+			<p class="jh-note" style="margin:8px 0 0;">关掉后所有功能停用，管理器菜单仍然保留，方便再打开。</p>
+		</div>
+		<div class="jh-card">
+			<h3>跳转行为</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">在新标签页打开</span>
+				<span class="jh-desc">原页面留着，不被打断</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="newTab" checked=""><i></i></label>
+			</div>
+			<div class="jh-field">
+				<span class="jh-name">落地中转页自动跳走</span>
+				<span class="jh-desc">不用再点「继续访问」</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="autoJump" checked=""><i></i></label>
+			</div>
+			<div class="jh-field">
+				<span class="jh-name">压掉站点拦截</span>
+				<span class="jh-desc">站点自己的跳转 / 统计 / 弹窗处理器抢不走这次点击</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="guard" checked=""><i></i></label>
+			</div>
+			
+		</div>
+		<div class="jh-card">
+			<h3>网盘</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">自动带提取码</span>
+				<span class="jh-desc">点网盘链接时取链接旁的码拼上，落地后填入并提交</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="panAuto" checked=""><i></i></label>
+			</div>
+			<p class="jh-note" style="margin:8px 0 0;">带码、填码、提交是一件事的三个步骤，所以合成一个开关。抓错码就整体关掉，免中转部分不受影响。</p>
+		</div>
+		<div class="jh-card">
+			<h3>站点</h3>
+			<div class="jh-field">
+				<span class="jh-name">本站不处理</span>
+				<span class="jh-desc">www.baidu.com　命中后本页完全跳过</span>
+				<label class="jh-switch"><input type="checkbox" data-skip-here=""><i></i></label>
+			</div>
+			<div style="margin-top:10px;">
+				<p class="jh-note" style="margin:0 0 6px;">不处理名单（点一下移除）：</p>
+				<div class="jh-empty">还没有不处理的站点。</div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>站点规则 · 49 条（点标签停用单条）</h3>
+			<div><span class="jh-tag " data-mute="百度贴吧（安全检测页）" title="/^jump2?\.bdimg\.com$/">百度贴吧（安全检测页）</span><span class="jh-tag " data-mute="百度贴吧" title="/(^|\.)tieba\.baidu\.com$/">百度贴吧</span><span class="jh-tag " data-mute="百度搜索" title="/(^|\.)baidu\.com$/">百度搜索</span><span class="jh-tag " data-mute="Bing 搜索" title="/(^|\.)bing\.com$/">Bing 搜索</span><span class="jh-tag " data-mute="Google 搜索 / 重定向页" title="/(^|\.)google\.(com|com?\.[a-z]{2}|co\.[a-z]{2}|[a-z]{2})$/">Google 搜索 / 重定向页</span><span class="jh-tag " data-mute="360 搜索" title="/(^|\.)so\.com$/">360 搜索</span><span class="jh-tag " data-mute="搜狗搜索" title="/(^|\.)sogou\.com$/">搜狗搜索</span><span class="jh-tag " data-mute="知乎 / 知乎专栏" title="/(^|\.)zhihu\.com$/">知乎 / 知乎专栏</span><span class="jh-tag " data-mute="掘金" title="/(^|\.)juejin\.cn$/">掘金</span><span class="jh-tag " data-mute="CSDN" title="/(^|\.)csdn\.net$/">CSDN</span><span class="jh-tag " data-mute="GitCode" title="/(^|\.)gitcode\.(com|net)$/">GitCode</span><span class="jh-tag " data-mute="码云" title="/(^|\.)gitee\.com$/">码云</span><span class="jh-tag " data-mute="开源中国" title="/(^|\.)oschina\.net$/">开源中国</span><span class="jh-tag " data-mute="博客园" title="/(^|\.)cnblogs\.com$/">博客园</span><span class="jh-tag " data-mute="简书" title="/(^|\.)jianshu\.com$/">简书</span><span class="jh-tag " data-mute="豆瓣" title="/(^|\.)douban\.com$/">豆瓣</span><span class="jh-tag " data-mute="少数派" title="/(^|\.)sspai\.com$/">少数派</span><span class="jh-tag " data-mute="InfoQ" title="/(^|\.)infoq\.cn$/">InfoQ</span><span class="jh-tag " data-mute="51CTO 博客" title="/(^|\.)51cto\.com$/">51CTO 博客</span><span class="jh-tag " data-mute="链滴" title="/(^|\.)ld246\.com$/">链滴</span><span class="jh-tag " data-mute="LINUX DO" title="/(^|\.)linux\.do$/">LINUX DO</span><span class="jh-tag " data-mute="NodeSeek" title="/(^|\.)nodeseek\.com$/">NodeSeek</span><span class="jh-tag " data-mute="NGA 玩家社区" title="/(^|\.)(nga\.cn|ngabbs\.com)$/">NGA 玩家社区</span><span class="jh-tag " data-mute="牛客网" title="/(^|\.)nowcoder\.com$/">牛客网</span><span class="jh-tag " data-mute="酷安" title="/(^|\.)coolapk\.com$/">酷安</span><span class="jh-tag " data-mute="力扣" title="/(^|\.)leetcode\.(cn|com)$/">力扣</span><span class="jh-tag " data-mute="Steam 社区" title="/(^|\.)steamcommunity\.com$/">Steam 社区</span><span class="jh-tag " data-mute="哔哩哔哩游戏 WIKI" title="/(^|\.)game\.bilibili\.com$/">哔哩哔哩游戏 WIKI</span><span class="jh-tag " data-mute="ACG 盒子" title="/(^|\.)acgbox\.link$/">ACG 盒子</span><span class="jh-tag " data-mute="书签地球" title="/(^|\.)bookmarkearth\.cn$/">书签地球</span><span class="jh-tag " data-mute="花瓣网" title="/(^|\.)huaban\.com$/">花瓣网</span><span class="jh-tag " data-mute="爱发电" title="/(^|\.)afdian\.(com|net)$/">爱发电</span><span class="jh-tag " data-mute="pixiv" title="/(^|\.)pixiv\.net$/">pixiv</span><span class="jh-tag " data-mute="腾讯云开发者社区" title="/(^|\.)cloud\.tencent\.com$/">腾讯云开发者社区</span><span class="jh-tag " data-mute="腾讯兔小巢" title="/^(txc|support)\.qq\.com$/">腾讯兔小巢</span><span class="jh-tag " data-mute="语雀" title="/(^|\.)yuque\.com$/">语雀</span><span class="jh-tag " data-mute="金山文档" title="/(^|\.)kdocs\.cn$/">金山文档</span><span class="jh-tag " data-mute="腾讯文档" title="/^docs\.qq\.com$/">腾讯文档</span><span class="jh-tag " data-mute="石墨文档" title="/(^|\.)shimo\.im$/">石墨文档</span><span class="jh-tag " data-mute="微博" title="/(^|\.)weibo\.(com|cn)$/">微博</span><span class="jh-tag " data-mute="微博短链接" title="/(^|\.)t\.cn$/">微博短链接</span><span class="jh-tag " data-mute="微信" title="/(^|\.)weixin110\.qq\.com$/">微信</span><span class="jh-tag " data-mute="微信开放社区" title="/(^|\.)developers\.weixin\.qq\.com$/">微信开放社区</span><span class="jh-tag " data-mute="QQ 邮箱" title="/(^|\.)mail\.qq\.com$/">QQ 邮箱</span><span class="jh-tag " data-mute="PC 版 QQ" title="/(^|\.)c\.pc\.qq\.com$/">PC 版 QQ</span><span class="jh-tag " data-mute="Twitter / X" title="/(^|\.)(twitter|x)\.com$/">Twitter / X</span><span class="jh-tag " data-mute="Facebook" title="/(^|\.)(facebook|fb)\.com$/">Facebook</span><span class="jh-tag " data-mute="Instagram" title="/(^|\.)instagram\.com$/">Instagram</span><span class="jh-tag " data-mute="YouTube" title="/(^|\.)youtube\.com$/">YouTube</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn" data-act="all-on">全部启用</button>
+				<button class="jh-btn" data-act="reset">恢复默认设置</button>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>入口按钮配色</h3>
+			<div class="jh-field" style="border:none; padding-top:0;">
+				<span class="jh-name">网盘页工具栏里的「直跳」按钮</span>
+				<span class="jh-desc"></span>
+				<div class="jh-btns">
+					<button class="jh-btn jh-primary" data-act="entry" data-entry="auto">跟随宿主</button><button class="jh-btn" data-act="entry" data-entry="light">浅色</button><button class="jh-btn" data-act="entry" data-entry="dark">暗色</button>
+				</div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>数据</h3>
+			<div class="jh-row"><span class="jh-k">存储键</span><span class="jh-v jh-mono">jh.opt · jh.stat · jh.log</span></div>
+			<div class="jh-row"><span class="jh-k">读取</span><span class="jh-v">提取码从 URL 的 pwd 参数读取，不发任何网络请求</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn jh-danger" data-act="reset-stat">重置统计与日志</button>
+			</div>
+		</div></div>
+			</div>
+		</div></div>
+    </div>
+    <div class="cell">
+      <h2>浅色主题</h2>
+      <p class="cap">面板跟随宿主明暗自动切换，浅色下同样是一套变量。</p>
+      <div class="stage light"><div class="jh-scope jh-open jh-panel-demo jh-light" role="dialog" aria-label="链接直跳助手">
+			<div class="jh-head">
+				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"></path></svg>
+				<h2>链接直跳</h2>
+				<span class="jh-ver">v1.3.0</span>
+				<span class="jh-spacer"></span>
+				<button class="jh-icon-btn" data-act="close" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg></button>
+			</div>
+			<div class="jh-tabs">
+				<button class="jh-tab jh-on" data-tab="overview">概览</button>
+				<button class="jh-tab" data-tab="opt">设置</button>
+			</div>
+			<div class="jh-body">
+				<div class="jh-page jh-on" data-page="overview">
+		<div class="jh-card">
+			<h3>当前页面</h3>
+			<div class="jh-row"><span class="jh-k">站点</span><span class="jh-v jh-mono">www.baidu.com</span><span class="jh-pill jh-ok">已适配</span></div>
+			<div class="jh-row"><span class="jh-k">规则</span><span class="jh-v">百度搜索</span>
+				<span class="jh-pill ">仅链接改写</span></div>
+			<div class="jh-row"><span class="jh-k">网盘</span><span class="jh-v">当前页面不是网盘分享页</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn" data-act="rescan" title="页面链接是分批加载的，必要时手动补一次">重新扫描本页</button>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>统计</h3>
+			<div class="jh-stats">
+				<div class="jh-stat"><b>128</b><span>已免中转</span></div>
+				<div class="jh-stat"><b>1476</b><span>已预解析链接</span></div>
+				<div class="jh-stat"><b>24</b><span>已带提取码</span></div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>怎么用</h3>
+			<p class="jh-note">不用做任何操作 —— <b>直接点链接就行</b>：<br>
+			· 站外链接：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页<br>
+			· 网盘链接：自动把写在链接旁边的提取码拼上，落地后自动填入并提交<br>
+			· 统一在新标签页打开，原页面留着；中键 / 右键同样生效<br>
+			· <b>过程里不会有任何弹窗或提示</b>。这里只是用来看状态和改设置的地方。</p>
+		</div>
+		<div class="jh-card">
+			<h3>最近事件</h3>
+			
+				<div class="jh-row">
+					<span class="jh-k">16:48:42</span>
+					<span class="jh-pill">带提取码</span>
+					<span class="jh-v jh-mono" title="k9x2">k9x2</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:48:17</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://github.com/EFate/js-hub">https://github.com/EFate/js-hub</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:47:28</span>
+					<span class="jh-pill">带提取码</span>
+					<span class="jh-v jh-mono" title="7w3q">7w3q</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:46:16</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://example.com/post/2026">https://example.com/post/2026</span>
+				</div>
+				<div class="jh-row">
+					<span class="jh-k">16:45:04</span>
+					<span class="jh-pill">免中转</span>
+					<span class="jh-v jh-mono" title="https://pan.baidu.com/s/1abcdef?pwd=k9x2">https://pan.baidu.com/s/1abcdef?pwd=k9x2</span>
+				</div>
+		</div></div>
+				<div class="jh-page" data-page="opt">
+		
+		<div class="jh-card">
+			<h3>主开关</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">总开关</span>
+				<span class="jh-desc">全部功能的总闸</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="on" checked=""><i></i></label>
+			</div>
+			<p class="jh-note" style="margin:8px 0 0;">关掉后所有功能停用，管理器菜单仍然保留，方便再打开。</p>
+		</div>
+		<div class="jh-card">
+			<h3>跳转行为</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">在新标签页打开</span>
+				<span class="jh-desc">原页面留着，不被打断</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="newTab" checked=""><i></i></label>
+			</div>
+			<div class="jh-field">
+				<span class="jh-name">落地中转页自动跳走</span>
+				<span class="jh-desc">不用再点「继续访问」</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="autoJump" checked=""><i></i></label>
+			</div>
+			<div class="jh-field">
+				<span class="jh-name">压掉站点拦截</span>
+				<span class="jh-desc">站点自己的跳转 / 统计 / 弹窗处理器抢不走这次点击</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="guard" checked=""><i></i></label>
+			</div>
+			
+		</div>
+		<div class="jh-card">
+			<h3>网盘</h3>
+			
+			<div class="jh-field">
+				<span class="jh-name">自动带提取码</span>
+				<span class="jh-desc">点网盘链接时取链接旁的码拼上，落地后填入并提交</span>
+				<label class="jh-switch"><input type="checkbox" data-opt="panAuto" checked=""><i></i></label>
+			</div>
+			<p class="jh-note" style="margin:8px 0 0;">带码、填码、提交是一件事的三个步骤，所以合成一个开关。抓错码就整体关掉，免中转部分不受影响。</p>
+		</div>
+		<div class="jh-card">
+			<h3>站点</h3>
+			<div class="jh-field">
+				<span class="jh-name">本站不处理</span>
+				<span class="jh-desc">www.baidu.com　命中后本页完全跳过</span>
+				<label class="jh-switch"><input type="checkbox" data-skip-here=""><i></i></label>
+			</div>
+			<div style="margin-top:10px;">
+				<p class="jh-note" style="margin:0 0 6px;">不处理名单（点一下移除）：</p>
+				<div class="jh-empty">还没有不处理的站点。</div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>站点规则 · 49 条（点标签停用单条）</h3>
+			<div><span class="jh-tag " data-mute="百度贴吧（安全检测页）" title="/^jump2?\.bdimg\.com$/">百度贴吧（安全检测页）</span><span class="jh-tag " data-mute="百度贴吧" title="/(^|\.)tieba\.baidu\.com$/">百度贴吧</span><span class="jh-tag " data-mute="百度搜索" title="/(^|\.)baidu\.com$/">百度搜索</span><span class="jh-tag " data-mute="Bing 搜索" title="/(^|\.)bing\.com$/">Bing 搜索</span><span class="jh-tag " data-mute="Google 搜索 / 重定向页" title="/(^|\.)google\.(com|com?\.[a-z]{2}|co\.[a-z]{2}|[a-z]{2})$/">Google 搜索 / 重定向页</span><span class="jh-tag " data-mute="360 搜索" title="/(^|\.)so\.com$/">360 搜索</span><span class="jh-tag " data-mute="搜狗搜索" title="/(^|\.)sogou\.com$/">搜狗搜索</span><span class="jh-tag " data-mute="知乎 / 知乎专栏" title="/(^|\.)zhihu\.com$/">知乎 / 知乎专栏</span><span class="jh-tag " data-mute="掘金" title="/(^|\.)juejin\.cn$/">掘金</span><span class="jh-tag " data-mute="CSDN" title="/(^|\.)csdn\.net$/">CSDN</span><span class="jh-tag " data-mute="GitCode" title="/(^|\.)gitcode\.(com|net)$/">GitCode</span><span class="jh-tag " data-mute="码云" title="/(^|\.)gitee\.com$/">码云</span><span class="jh-tag " data-mute="开源中国" title="/(^|\.)oschina\.net$/">开源中国</span><span class="jh-tag " data-mute="博客园" title="/(^|\.)cnblogs\.com$/">博客园</span><span class="jh-tag " data-mute="简书" title="/(^|\.)jianshu\.com$/">简书</span><span class="jh-tag " data-mute="豆瓣" title="/(^|\.)douban\.com$/">豆瓣</span><span class="jh-tag " data-mute="少数派" title="/(^|\.)sspai\.com$/">少数派</span><span class="jh-tag " data-mute="InfoQ" title="/(^|\.)infoq\.cn$/">InfoQ</span><span class="jh-tag " data-mute="51CTO 博客" title="/(^|\.)51cto\.com$/">51CTO 博客</span><span class="jh-tag " data-mute="链滴" title="/(^|\.)ld246\.com$/">链滴</span><span class="jh-tag " data-mute="LINUX DO" title="/(^|\.)linux\.do$/">LINUX DO</span><span class="jh-tag " data-mute="NodeSeek" title="/(^|\.)nodeseek\.com$/">NodeSeek</span><span class="jh-tag " data-mute="NGA 玩家社区" title="/(^|\.)(nga\.cn|ngabbs\.com)$/">NGA 玩家社区</span><span class="jh-tag " data-mute="牛客网" title="/(^|\.)nowcoder\.com$/">牛客网</span><span class="jh-tag " data-mute="酷安" title="/(^|\.)coolapk\.com$/">酷安</span><span class="jh-tag " data-mute="力扣" title="/(^|\.)leetcode\.(cn|com)$/">力扣</span><span class="jh-tag " data-mute="Steam 社区" title="/(^|\.)steamcommunity\.com$/">Steam 社区</span><span class="jh-tag " data-mute="哔哩哔哩游戏 WIKI" title="/(^|\.)game\.bilibili\.com$/">哔哩哔哩游戏 WIKI</span><span class="jh-tag " data-mute="ACG 盒子" title="/(^|\.)acgbox\.link$/">ACG 盒子</span><span class="jh-tag " data-mute="书签地球" title="/(^|\.)bookmarkearth\.cn$/">书签地球</span><span class="jh-tag " data-mute="花瓣网" title="/(^|\.)huaban\.com$/">花瓣网</span><span class="jh-tag " data-mute="爱发电" title="/(^|\.)afdian\.(com|net)$/">爱发电</span><span class="jh-tag " data-mute="pixiv" title="/(^|\.)pixiv\.net$/">pixiv</span><span class="jh-tag " data-mute="腾讯云开发者社区" title="/(^|\.)cloud\.tencent\.com$/">腾讯云开发者社区</span><span class="jh-tag " data-mute="腾讯兔小巢" title="/^(txc|support)\.qq\.com$/">腾讯兔小巢</span><span class="jh-tag " data-mute="语雀" title="/(^|\.)yuque\.com$/">语雀</span><span class="jh-tag " data-mute="金山文档" title="/(^|\.)kdocs\.cn$/">金山文档</span><span class="jh-tag " data-mute="腾讯文档" title="/^docs\.qq\.com$/">腾讯文档</span><span class="jh-tag " data-mute="石墨文档" title="/(^|\.)shimo\.im$/">石墨文档</span><span class="jh-tag " data-mute="微博" title="/(^|\.)weibo\.(com|cn)$/">微博</span><span class="jh-tag " data-mute="微博短链接" title="/(^|\.)t\.cn$/">微博短链接</span><span class="jh-tag " data-mute="微信" title="/(^|\.)weixin110\.qq\.com$/">微信</span><span class="jh-tag " data-mute="微信开放社区" title="/(^|\.)developers\.weixin\.qq\.com$/">微信开放社区</span><span class="jh-tag " data-mute="QQ 邮箱" title="/(^|\.)mail\.qq\.com$/">QQ 邮箱</span><span class="jh-tag " data-mute="PC 版 QQ" title="/(^|\.)c\.pc\.qq\.com$/">PC 版 QQ</span><span class="jh-tag " data-mute="Twitter / X" title="/(^|\.)(twitter|x)\.com$/">Twitter / X</span><span class="jh-tag " data-mute="Facebook" title="/(^|\.)(facebook|fb)\.com$/">Facebook</span><span class="jh-tag " data-mute="Instagram" title="/(^|\.)instagram\.com$/">Instagram</span><span class="jh-tag " data-mute="YouTube" title="/(^|\.)youtube\.com$/">YouTube</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn" data-act="all-on">全部启用</button>
+				<button class="jh-btn" data-act="reset">恢复默认设置</button>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>入口按钮配色</h3>
+			<div class="jh-field" style="border:none; padding-top:0;">
+				<span class="jh-name">网盘页工具栏里的「直跳」按钮</span>
+				<span class="jh-desc"></span>
+				<div class="jh-btns">
+					<button class="jh-btn jh-primary" data-act="entry" data-entry="auto">跟随宿主</button><button class="jh-btn" data-act="entry" data-entry="light">浅色</button><button class="jh-btn" data-act="entry" data-entry="dark">暗色</button>
+				</div>
+			</div>
+		</div>
+		<div class="jh-card">
+			<h3>数据</h3>
+			<div class="jh-row"><span class="jh-k">存储键</span><span class="jh-v jh-mono">jh.opt · jh.stat · jh.log</span></div>
+			<div class="jh-row"><span class="jh-k">读取</span><span class="jh-v">提取码从 URL 的 pwd 参数读取，不发任何网络请求</span></div>
+			<div class="jh-btns" style="margin-top:10px;">
+				<button class="jh-btn jh-danger" data-act="reset-stat">重置统计与日志</button>
+			</div>
+		</div></div>
+			</div>
+		</div></div>
+    </div>
+  </div>
+</body>
+</html>
