@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         链接直跳助手
 // @namespace    js-hub/jump-hub
-// @version      1.3.0
+// @version      1.3.1
 // @description  点一次链接就直接到目标网站：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页，网盘链接自动带上旁边写着的提取码直达并解锁，统一在新标签页打开。全自动、全程零提示，不用选文字、不用点第二次、不用手输提取码。
 // @author       EFate
 // @license      MIT
@@ -65,7 +65,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.3.0";
+	const VERSION = "1.3.1";
 	const ATTR = "data-jh";
 	const KEY = {
 		opt: "jh.opt",
