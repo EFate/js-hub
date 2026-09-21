@@ -5,7 +5,7 @@
 const assert = require("assert");
 const mod = require("../netdisk-hub.user.js");
 
-const { VERSION, KEY, util, store, aria, providers, providerApi, engine, catcher, inject, pageState } = mod;
+const { VERSION, KEY, util, store, aria, providers, providerApi, engine, links, inject, pageState } = mod;
 
 let pass = 0;
 let fail = 0;
@@ -263,33 +263,33 @@ t("sharePwdId 在无页面统计对象时安全返回空串", () => {
 	assert.strictEqual(typeof providerApi.sharePwdId(), "string");
 });
 t("put 支持随行请求头入库（推送 Aria2 时携带）", () => {
-	catcher.clear();
-	catcher.put("https://cdn.quark.cn/a.mp4?x=1", "a.mp4", 10, "接口", true, { Referer: "https://pan.quark.cn/" });
-	assert.strictEqual(catcher.pool.length, 1);
-	assert.strictEqual(catcher.pool[0].headers.Referer, "https://pan.quark.cn/");
-	catcher.put("https://cdn.quark.cn/b.mp4?x=1", "b.mp4", 10, "请求", true);
-	assert.strictEqual(catcher.pool[0].headers, null, "未提供时存 null，不臆造");
-	catcher.clear();
+	links.clear();
+	links.put("https://cdn.quark.cn/a.mp4?x=1", "a.mp4", 10, { Referer: "https://pan.quark.cn/" });
+	assert.strictEqual(links.pool.length, 1);
+	assert.strictEqual(links.pool[0].headers.Referer, "https://pan.quark.cn/");
+	links.put("https://cdn.quark.cn/b.mp4?x=1", "b.mp4", 10);
+	assert.strictEqual(links.pool[0].headers, null, "未提供时存 null，不臆造");
+	links.clear();
 });
 t("同名文件视为同一条：重新获取不会堆叠重复", () => {
-	catcher.clear();
+	links.clear();
 	// 直链带签名，两次换取 URL 不同 —— 按 URL 去重挡不住，这正是重复的来源
-	catcher.put("https://cdn.quark.cn/dl/1?sign=old", "影片A.mp4", 100, "接口", true);
-	catcher.put("https://cdn.quark.cn/dl/1?sign=new", "影片A.mp4", 100, "接口", true);
-	assert.strictEqual(catcher.pool.length, 1, "同名只留一条");
-	assert.ok(catcher.pool[0].url.indexOf("sign=new") > 0, "应换成新签名");
+	links.put("https://cdn.quark.cn/dl/1?sign=old", "影片A.mp4", 100);
+	links.put("https://cdn.quark.cn/dl/1?sign=new", "影片A.mp4", 100);
+	assert.strictEqual(links.pool.length, 1, "同名只留一条");
+	assert.ok(links.pool[0].url.indexOf("sign=new") > 0, "应换成新签名");
 	// 不同的文件各占一条，且最新的置顶
-	catcher.put("https://cdn.quark.cn/dl/2?sign=x", "影片B.mp4", 100, "接口", true);
-	assert.strictEqual(catcher.pool.length, 2);
-	assert.ok(/影片B/.test(catcher.pool[0].name), "最新入库的应置顶");
-	catcher.clear();
+	links.put("https://cdn.quark.cn/dl/2?sign=x", "影片B.mp4", 100);
+	assert.strictEqual(links.pool.length, 2);
+	assert.ok(/影片B/.test(links.pool[0].name), "最新入库的应置顶");
+	links.clear();
 });
 t("拿不到文件名时退回按 URL 去重，无名条目不会挤成一条", () => {
-	catcher.clear();
-	catcher.put("https://x.com/api/usercode?a=1", "", 0, "响应头", true);
-	catcher.put("https://x.com/api/report?a=1", "", 0, "响应头", true);
-	assert.strictEqual(catcher.pool.length, 2, "无名条目应各自保留");
-	catcher.clear();
+	links.clear();
+	links.put("https://x.com/api/usercode?a=1", "", 0);
+	links.put("https://x.com/api/report?a=1", "", 0);
+	assert.strictEqual(links.pool.length, 2, "无名条目应各自保留");
+	links.clear();
 });
 t("夸克与 UC 各用自己那套接口与客户端 UA（混用必然失败）", () => {
 	const q = providerApi.byId("quark");
@@ -331,96 +331,45 @@ t("waitFor 在无 document 环境下不抛异常", () => {
 	assert.doesNotThrow(() => inject.waitFor(".nothing", () => { /* 不应被调用 */ }));
 });
 
-/* ---------------- 直链捕获层 ---------------- */
-group("catcher");
+/* ---------------- 直链结果池 ---------------- */
+group("links");
 
-t("isDirectUrl 只认高置信特征", () => {
-	assert.strictEqual(catcher.isDirectUrl("https://d.pcs.baidu.com/file/abc?dlink=1&sign=x"), true);
-	assert.strictEqual(catcher.isDirectUrl("https://api.site.com/file/download?id=1"), true);
+t("按 URL 去重", () => {
+	links.clear();
+	const u = "https://cdn.quark.cn/dl/same?sign=1";
+	assert.strictEqual(links.put(u, "a.zip", 1), true);
+	assert.strictEqual(links.put(u, "a.zip", 1), false, "重复 URL 不应入库");
+	assert.strictEqual(links.pool.length, 1);
+	links.clear();
 });
-t("isDirectUrl 拒绝噪声 URL（回归：曾把接口路径误判为直链）", () => {
-	[
-		"https://pan.baidu.com/api/usercode?x=1",
-		"https://pan.baidu.com/api/report?x=1",
-		"https://pan.baidu.com/api/scene?x=1",
-		"https://pan.baidu.com/api/available?x=1",
-		"https://pan.baidu.com/api/dir?x=1",
-		"https://pan.baidu.com/api/dd_config?x=1",
-		"https://pan.baidu.com/api/detail?x=1"
-	].forEach((u) => {
-		assert.strictEqual(catcher.isDirectUrl(u), false, "不应判定为直链：" + u);
-	});
-});
-t("isDirectUrl 不再靠弱域名特征放行", () => {
-	assert.strictEqual(catcher.isDirectUrl("https://bj29.cn-beijing-data.aliyundrive.net/xx/abc?x=1"), false);
-});
-t("isDirectUrl 排除页面与静态资源", () => {
-	assert.strictEqual(catcher.isDirectUrl("https://pan.baidu.com/disk/main"), false);
-	assert.strictEqual(catcher.isDirectUrl("https://pan.baidu.com/static/app.js"), false);
-	assert.strictEqual(catcher.isDirectUrl("https://pan.baidu.com/img/logo.png"), false);
-});
-t("isDirectUrl 排除纯接口路径", () => {
-	assert.strictEqual(catcher.isDirectUrl("https://api.aliyundrive.com/v2/file/get_download_url"), false);
-	assert.strictEqual(catcher.isDirectUrl("https://pan.baidu.com/api/sharedownload"), false);
-});
-t("isDirectUrl 拒绝非 http 协议与空值", () => {
-	assert.strictEqual(catcher.isDirectUrl("javascript:void(0)"), false);
-	assert.strictEqual(catcher.isDirectUrl(""), false);
-	assert.strictEqual(catcher.isDirectUrl(null), false);
-});
-t("fromBody 递归提取直链字段与文件名", () => {
-	catcher.clear();
-	catcher.fromBody({ code: 0, list: [{ server_filename: "影片.mp4", dlink: "https://d.pcs.baidu.com/file/xyz?dlink=1", size: 1024 }] });
-	assert.strictEqual(catcher.pool.length, 1);
-	assert.strictEqual(catcher.pool[0].name, "影片.mp4");
-	assert.strictEqual(catcher.pool[0].size, 1024);
-});
-t("fromBody 忽略普通字段里的普通链接", () => {
-	catcher.clear();
-	catcher.fromBody({ homepage: "https://www.example.com/", docs: "https://help.example.com/guide" });
-	assert.strictEqual(catcher.pool.length, 0, "非直链键名不应入库");
-});
-t("fromBody 深度受限不会栈溢出", () => {
-	let deep = { dlink: "https://d.pcs.baidu.com/file/deep?dlink=1" };
-	for (let i = 0; i < 20; i++) deep = { child: deep };
-	assert.doesNotThrow(() => catcher.fromBody(deep));
-});
-t("put 按 URL 去重", () => {
-	catcher.clear();
-	const u = "https://d.pcs.baidu.com/file/same?dlink=1";
-	assert.strictEqual(catcher.put(u, "a.zip", 1, "测试"), true);
-	assert.strictEqual(catcher.put(u, "b.zip", 2, "测试"), false, "重复 URL 不应入库");
-	assert.strictEqual(catcher.pool.length, 1);
-});
-t("put 遵守候选池上限", () => {
-	catcher.clear();
-	for (let i = 0; i < catcher.MAX + 10; i++) {
-		catcher.put("https://d.pcs.baidu.com/file/f" + i + "?dlink=1", "f" + i, i, "测试");
+t("遵守结果池上限", () => {
+	links.clear();
+	for (let i = 0; i < links.MAX + 10; i++) {
+		links.put("https://cdn.quark.cn/dl/f" + i + "?sign=1", "f" + i, i);
 	}
-	assert.strictEqual(catcher.pool.length, catcher.MAX);
+	assert.strictEqual(links.pool.length, links.MAX);
+	links.clear();
 });
-t("clear 可重置候选池", () => {
-	catcher.put("https://d.pcs.baidu.com/file/x?dlink=1", "x", 1, "测试");
-	catcher.clear();
-	assert.strictEqual(catcher.pool.length, 0);
+t("非 http 地址不入库（回归：曾把网盘自身资源当成可下载文件收进来）", () => {
+	links.clear();
+	assert.strictEqual(links.put("", "x", 1), false);
+	assert.strictEqual(links.put("javascript:void(0)", "x", 1), false);
+	assert.strictEqual(links.put("data:text/plain,hi", "x", 1), false);
+	assert.strictEqual(links.pool.length, 0);
+	links.clear();
 });
-t("fromResponse 依据响应头识别直链并取出文件名", () => {
-	catcher.clear();
-	assert.strictEqual(catcher.fromResponse("https://cdn.site.com/a/b/c?x=1",
-		{ "content-disposition": 'attachment; filename="影片.mp4"' }), true);
-	assert.strictEqual(catcher.pool.length, 1);
-	assert.strictEqual(catcher.pool[0].name, "影片.mp4");
-	assert.strictEqual(catcher.pool[0].from, "响应头");
+t("clear 可重置", () => {
+	links.put("https://cdn.quark.cn/dl/x?sign=1", "x", 1);
+	links.clear();
+	assert.strictEqual(links.pool.length, 0);
 });
-t("fromResponse 对普通 JSON 响应不误报", () => {
-	catcher.clear();
-	assert.strictEqual(catcher.fromResponse("https://cdn.site.com/a/b/c?x=1", { "content-type": "application/json" }), false);
-	assert.strictEqual(catcher.pool.length, 0);
-});
-t("响应体渠道来的地址不受 URL 启发式误杀", () => {
-	catcher.clear();
-	catcher.fromBody({ dlink: "https://some-cdn.example.net/very/long/path/without/keywords" });
-	assert.strictEqual(catcher.pool.length, 1, "响应体已判定的地址应入库");
+t("结果池只接受换链结果：脚本不再包装页面原生 API", () => {
+	// 这条是行为契约 —— 池子的唯一写入方是 provider 的换链结果，
+	// 因此「一个都没勾」时池子必然是空的（曾经 hook 会往里塞页面资源）。
+	assert.strictEqual(typeof links.put, "function");
+	assert.strictEqual(links.install, undefined, "不应再有网络 hook 安装入口");
+	assert.strictEqual(links.fromBody, undefined, "不应再有响应体提取");
+	assert.strictEqual(links.isDirectUrl, undefined, "不应再有 URL 直链判定");
 });
 
 /* ---------------- 存储层 ---------------- */

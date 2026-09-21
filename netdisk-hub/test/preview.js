@@ -83,13 +83,13 @@ g.GM_xmlhttpRequest = (opt) => {
 	}
 
 	// 换成已换取的直链，模拟「获取直链」完成后的状态
-	mod.catcher.clear();
+	mod.links.clear();
 	[
 		["https://cdn.quark.cn/dl/9f2a1c?sign=preview-a", "电影合集.2026.1080p.BluRay.HEVC.mkv", 4510269440],
 		["https://cdn.quark.cn/dl/4b7d02?sign=preview-b", "中文字幕包.zip", 12582912],
 		["https://cdn.quark.cn/dl/1e88cd?sign=preview-c", "播放说明.pdf", 839680]
 	].reverse().forEach(([url, name, size]) => {
-		mod.catcher.put(url, name, size, "接口", true, { Referer: "https://pan.quark.cn/", Cookie: "nd_preview=1" });
+		mod.links.put(url, name, size, { Referer: "https://pan.quark.cn/", Cookie: "nd_preview=1" });
 	});
 
 	mod.ui.open();

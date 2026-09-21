@@ -116,12 +116,7 @@ async function main() {
 	// 换链后取回的直链需要带上页面 Cookie，这里造一个非空值以便断言
 	window.document.cookie = "nd_test=1";
 	window.open = (url) => { opened.push(url); return null; };
-	// jsdom 不内置 fetch，这里补一个最小实现，以便覆盖脚本的 fetch hook 分支
-	if (typeof window.fetch !== "function") {
-		window.fetch = function () {
-			return Promise.resolve({ ok: true, headers: { get: () => "" }, clone() { return this; } });
-		};
-	}
+	// 脚本不接触 fetch / XMLHttpRequest，无需补桩
 
 	// ---- 加载真实脚本 ----
 	delete require.cache[require.resolve(SCRIPT)];
@@ -238,7 +233,7 @@ async function main() {
 		assert.ok(/可用直链/.test(scope.textContent), "主卡标题应为「可用直链」");
 	});
 	t("没有直链时只给一句可操作的提示，且不做任何统计", () => {
-		mod.catcher.clear();
+		mod.links.clear();
 		mod.ui.renderCaught();
 		const empty = scope.querySelector('[data-el="caught-list"] .nd-empty');
 		assert.ok(empty, "应有空态提示");
@@ -265,13 +260,12 @@ async function main() {
 		assert.ok(/quark-cloud-drive/.test(JSON.stringify(req.headers || {})), "应带夸克客户端 UA");
 	});
 	t("返回的直链被写入候选池", () => {
-		const hit = mod.catcher.pool.find((f) => f.url.indexOf("cdn.quark.cn") >= 0);
-		assert.ok(hit, "直链应入库：" + JSON.stringify(mod.catcher.pool.map((x) => x.url)));
+		const hit = mod.links.pool.find((f) => f.url.indexOf("cdn.quark.cn") >= 0);
+		assert.ok(hit, "直链应入库：" + JSON.stringify(mod.links.pool.map((x) => x.url)));
 		assert.strictEqual(hit.name, "影片A.mp4");
-		assert.strictEqual(hit.from, "接口");
 	});
 	t("直链随行带上 Referer 与 Cookie（否则推送后 403）", () => {
-		const hit = mod.catcher.pool.find((f) => f.url.indexOf("cdn.quark.cn") >= 0);
+		const hit = mod.links.pool.find((f) => f.url.indexOf("cdn.quark.cn") >= 0);
 		assert.ok(hit.headers, "直链应携带请求头");
 		assert.strictEqual(hit.headers.Referer, "https://pan.quark.cn/");
 		assert.strictEqual(hit.headers.Cookie, "nd_test=1");
@@ -279,12 +273,12 @@ async function main() {
 
 	console.log("\n[重复防护：重新获取不堆叠]");
 	{
-		const before = mod.catcher.pool.length;
+		const before = mod.links.pool.length;
 		scope.querySelector('[data-act="resolve"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 		await tick(150);
 		t("重新获取直链不会产生重复（同名覆盖为最新）", () => {
-			assert.ok(mod.catcher.pool.length === before, `条数应不变（${before} → ${mod.catcher.pool.length}）`);
-			const hit = mod.catcher.pool.find((f) => f.name === "影片A.mp4");
+			assert.ok(mod.links.pool.length === before, `条数应不变（${before} → ${mod.links.pool.length}）`);
+			const hit = mod.links.pool.find((f) => f.name === "影片A.mp4");
 			assert.ok(hit, "同名条目应仍在");
 			assert.ok(/sign=s\d+$/.test(hit.url), "签名应已更新为最新：" + hit.url);
 		});
@@ -297,7 +291,7 @@ async function main() {
 	catch (e) { folderErr = e.message; }
 
 	t("勾选里只有文件夹时，提示直接告诉用户该做什么", () => {
-		mod.catcher.clear();
+		mod.links.clear();
 		mod.ui.renderCaught();
 		const empty = scope.querySelector('[data-el="caught-list"] .nd-empty');
 		assert.ok(empty, "无直链时应有提示");
@@ -321,7 +315,7 @@ async function main() {
 	// 前面清理过候选池，这里重新换一次链，确保有可点的条目
 	scope.querySelector('[data-act="resolve"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 	await tick(150);
-	assert.ok(mod.catcher.pool.length > 0, "换链后应有候选");
+	assert.ok(mod.links.pool.length > 0, "换链后应有候选");
 	requests.length = 0;
 	scope.querySelector('[data-act="caught-aria"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 	await tick(60);
@@ -392,7 +386,7 @@ async function main() {
 
 	console.log("\n[批量出口与任务管理页]");
 	// 再补一条候选，用于验证批量复制
-	mod.catcher.put("https://cdn.quark.cn/dl/def?sign=2", "影片B.mp4", 4096, "接口", true);
+	mod.links.put("https://cdn.quark.cn/dl/def?sign=2", "影片B.mp4", 4096, "接口", true);
 	mod.ui.renderCaught();
 
 	g.__clip = null;
@@ -401,64 +395,20 @@ async function main() {
 	t("复制全部直链：按 CRLF 拼接当前候选", () => {
 		assert.ok(g.__clip, "剪贴板应有内容");
 		const lines = String(g.__clip).split("\r\n");
-		assert.strictEqual(lines.length, mod.catcher.pool.length, "行数应等于候选数");
+		assert.strictEqual(lines.length, mod.links.pool.length, "行数应等于候选数");
 		assert.ok(lines[0].indexOf("cdn.quark.cn") >= 0, g.__clip);
 	});
 	t("复制全部命令行：每行一条 aria2c", () => {
 		g.__clip = null;
 		scope.querySelector('[data-act="copy-all-cmds"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 		const lines = String(g.__clip || "").split("\r\n");
-		assert.strictEqual(lines.length, mod.catcher.pool.length);
+		assert.strictEqual(lines.length, mod.links.pool.length);
 		assert.ok(lines.every((l) => l.startsWith("aria2c ")), g.__clip);
 	});
 	t("已移除任务管理页：设置与下载页都不应再有该入口", () => {
 		assert.strictEqual(scope.querySelector('[data-cfg="taskUrl"]'), null, "设置里不应有任务管理页");
 		assert.strictEqual(scope.querySelector('[data-act="open-task"]'), null, "下载页不应有任务管理页入口");
 		assert.strictEqual(scope.textContent.indexOf("任务管理页"), -1, "界面上不应出现该字样");
-	});
-
-	console.log("\n[直链捕获层]");
-	t("网络层 hook 行为生效：页面发 XHR 即被截获（toString 已伪装成原生样貌）", () => {
-		try {
-			const xhr = new window.XMLHttpRequest();
-			xhr.open("GET", "https://cdn.quark.cn/dl/hooked.zip?dlink=1&sign=x");
-			xhr.send();   // jsdom 对跨域会异步报错，但 put 发生在 send 包装里，已入库
-		} catch (e) { /* 忽略：不同 jsdom 版本对跨域 XHR 的抛错时机不同 */ }
-		assert.ok(
-			mod.catcher.pool.some((f) => f.url.indexOf("hooked.zip") >= 0),
-			"XHR 发出的直链应进入候选池"
-		);
-	});
-
-	mod.catcher.clear();
-	t("从接口响应体中捕获到直链", () => {
-		mod.catcher.fromBody({
-			errno: 0,
-			list: [{ server_filename: "影片.mp4", size: 2048, dlink: "https://d.pcs.baidu.com/file/cap1?dlink=1&sign=z" }]
-		});
-		assert.strictEqual(mod.catcher.pool.length, 1, "应捕获 1 条");
-	});
-	t("捕获结果渲染进面板", () => {
-		mod.ui.renderCaught();
-		assert.strictEqual(scope.querySelector('[data-el="caught-count"]').textContent, "1");
-		assert.strictEqual(scope.querySelectorAll('[data-el="caught-list"] .nd-row').length, 1);
-	});
-
-	requests.length = 0;
-	scope.querySelector('[data-act="caught-aria"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-	await tick(60);
-	t("捕获项可一键推送 Aria2", () => {
-		const req = requests.find((r) => r.method === "POST");
-		assert.ok(req, "应有 RPC 请求");
-		const body = JSON.parse(req.data);
-		assert.strictEqual(body.method, "aria2.addUri");
-		assert.ok(body.params[0][0].includes("cap1"), "推送的应是捕获到的直链");
-		assert.strictEqual(body.params[1].out, "影片.mp4");
-	});
-	t("清空按钮可重置捕获列表", () => {
-		scope.querySelector('[data-act="clear-caught"]').dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
-		assert.strictEqual(mod.catcher.pool.length, 0);
-		assert.strictEqual(scope.querySelector('[data-el="caught-count"]').textContent, "0");
 	});
 
 	console.log("\n[标签页切换与关闭]");
@@ -574,7 +524,7 @@ async function main() {
 		assert.ok(data.includes(encodeURIComponent(JSON.stringify({ sekey: "@sekey-xyz@" }))), "带提取码的分享应有 extra.sekey");
 	});
 	t("dlink 入库且随行携带下载所需请求头", () => {
-		const hit = mod2.catcher.pool.find((f) => f.url.indexOf("d.pcs.baidu.com") >= 0);
+		const hit = mod2.links.pool.find((f) => f.url.indexOf("d.pcs.baidu.com") >= 0);
 		assert.ok(hit, "直链应入库");
 		assert.strictEqual(hit.name, "视频.mkv");
 		assert.ok(hit.headers, "应随行保存请求头");
@@ -672,16 +622,18 @@ async function main() {
 		assert.strictEqual(mod3.providerApi.current().id, "baidu");
 		assert.strictEqual(mod3.providerApi.pageType(mod3.providers[0]), "home");
 	});
-	t("百度页面跳过了网络 hook（原生 API 未被包装）", () => {
-		const raw = w3.XMLHttpRequest.prototype.open;
-		assert.ok(!/apply|__ndUrl/.test(String(raw)) && String(raw).indexOf("[native code]") >= 0 || String(raw).indexOf("__ndUrl") < 0,
-			"XHR.open 不应带包装痕迹");
+	t("不包装页面原生 API，也不把页面自身流量当成可下载文件", () => {
+		const xhrOpen = String(w3.XMLHttpRequest.prototype.open);
+		assert.ok(xhrOpen.indexOf("__ndUrl") < 0 && xhrOpen.indexOf("apply") < 0,
+			"XHR.open 不应带包装痕迹：" + xhrOpen.slice(0, 60));
 		try {
 			const probe = new w3.XMLHttpRequest();
+			// 模拟页面自身的资源请求（带直链特征的 URL 是最坏情况）
 			probe.open("GET", "https://d.pcs.baidu.com/file/probe?dlink=1");
 			probe.send();
 		} catch (e) { /* 忽略 */ }
-		assert.ok(!mod3.catcher.pool.some((f) => f.url.indexOf("probe") >= 0), "hook 跳过后不应截获任何请求");
+		assert.strictEqual(mod3.links.pool.length, 0, "页面自身的请求不应进入列表");
+		assert.strictEqual(w3.fetch && w3.fetch.__ndWrapped, undefined, "fetch 也不应被包装");
 	});
 
 	requests3.length = 0;
@@ -704,7 +656,7 @@ async function main() {
 		assert.strictEqual(storeMap3.get("nd.baidu").token, "TOK123abc");
 	});
 	t("内页 dlink 入库且随行 UA + Cookie", () => {
-		const hit = mod3.catcher.pool.find((f) => f.url.indexOf("inner?fid=333") >= 0);
+		const hit = mod3.links.pool.find((f) => f.url.indexOf("inner?fid=333") >= 0);
 		assert.ok(hit, "直链应入库");
 		assert.strictEqual(hit.name, "模型.onnx", "名字应来自勾选文件（勾选名优先于接口字段）");
 		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com");
@@ -807,12 +759,26 @@ async function main() {
 		assert.strictEqual(body.stoken, "uc-st-1");
 	});
 	t("UC 直链入库并随行 UC 的下载请求头", () => {
-		const hit = modUC.catcher.pool.find((f) => f.url.indexOf("cdn.uc.cn") >= 0);
+		const hit = modUC.links.pool.find((f) => f.url.indexOf("cdn.uc.cn") >= 0);
 		assert.ok(hit, "直链应入库");
 		assert.strictEqual(hit.name, "UC影片.mp4");
 		assert.ok(/uc-cloud-drive/.test(hit.headers["User-Agent"] || ""), "应带 UC UA");
 		assert.strictEqual(hit.headers.Referer, "https://drive.uc.cn/", "Referer 应取页面 origin");
 		assert.ok(/uc_test=1/.test(hit.headers.Cookie || ""), "应带页面 Cookie");
+	});
+
+	t("一个文件都没勾时列表必须为空（回归：曾把网盘自身的安装包当成可下载文件）", async () => {
+		ucProps.selectedRowKeys = [];        // 取消全部勾选
+		modUC.ui._resolvedSig = "";
+		modUC.links.clear();
+		let err = "";
+		try { await modUC.engine.resolveSelected(modUC.providerApi.byId("uc")); }
+		catch (e) { err = e.message; }
+		assert.strictEqual(modUC.links.pool.length, 0, "没有勾选就不应有任何条目");
+		assert.ok(err, "应给出可操作的提示，而不是静默返回空");
+		modUC.ui.renderCaught();
+		assert.strictEqual(wUC.document.querySelector('[data-el="caught-count"]').textContent, "0");
+		ucProps.selectedRowKeys = ["u1", "ud1"];   // 还原
 	});
 
 	/* ==================== 场景五：改版后的工具栏（选择器全部落空） ==================== */

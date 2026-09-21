@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.2.0
+// @version      1.3.0
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -34,9 +34,9 @@
  * 2. 文件识别**读页面框架状态**，不扫 DOM。网盘是 SPA，「有哪些文件」「勾选了哪些」
  *    都存放在 React / Vue 的内部状态里；从文件列表容器反查框架实例即可读出勾选项，
  *    再调网盘接口换成直链。文件夹换不出直链，会单独标出并从请求里剔除。
- * 3. 网络层捕获仅作**被动补充**。网盘文件列表本身不含直链（地址是点击「下载」时由
- *    页面 JS 实时换回来的），脚本仍在文档解析前 hook XMLHttpRequest 与 fetch，
- *    在您正常点「下载」时顺带截下地址 —— 但三家都不依赖它。
+ * 3. **不拦截网络、不包装原生 API**。三家都有自动换链，靠 hook 页面请求「捡漏」
+ *    没有收益，反而会把网盘自己的资源（客户端安装包之类）误当可下载文件收进来。
+ *    因此脚本只做「换链」这一件事：您勾选什么，列表里就只有什么。
  * 4. 入口**注入宿主工具栏**，不做悬浮器件。等容器渲染出来再把按钮挂进去，与宿主原生
  *    按钮并排；同时始终保留脚本管理器菜单兜底。不注册任何全局快捷键。
  * 5. 下载出口层分两条独立通道：
@@ -48,7 +48,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.2.0";
+	const VERSION = "1.3.0";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -1017,12 +1017,13 @@
 			if (!util.isFn(p.resolve)) {
 				throw new Error(p.name + " 的自动换链尚未接入（勾选识别已就绪）。");
 			}
-			const links = await p.resolve(files, providerApi.pageType(p));
+			// 注意：局部变量不要叫 links —— 会遮蔽模块级的结果池
+			const resolved = await p.resolve(files, providerApi.pageType(p));
 			let added = 0;
-			links.forEach((l) => {
-				if (catcher.put(l.url, l.name, l.size, "接口", true, l.headers)) added++;
+			resolved.forEach((l) => {
+				if (links.put(l.url, l.name, l.size, l.headers)) added++;
 			});
-			return { total: links.length, added, skipped: files.length - real.length };
+			return { total: resolved.length, added, skipped: files.length - real.length };
 		},
 
 		/** 测试 Aria2 连通性 */
@@ -1056,235 +1057,60 @@
 	};
 
 	/* ==========================================================================
-	 * 9. 直链捕获层：从网络请求里截下真正的下载地址
+	 * 9. 直链结果池：换链结果都落在这里，面板读它渲染列表
 	 * ========================================================================== */
 
 	/**
-	 * 网盘页面的文件列表本身**不含直链** —— 地址是用户点击「下载」时由页面 JS
-	 * 实时请求接口换回来的。因此这里改在网络层拦截：只要用户在网盘里正常点过一次
-	 * 下载，脚本就能把那条直链截下来，供面板一键分发。这也是「开箱即用」的关键：
-	 * 无需为每个网盘实现各自的直链换取逻辑。
+	 * 这里**只存结果，不做任何网络拦截**。
+	 *
+	 * 三家网盘都有完整的自动换链，靠 hook 页面请求「捡漏」没有收益，反而会引入噪声 ——
+	 * 实际遇到过把网盘自己的客户端安装包当成可下载文件收进来的情况：用户一个文件都没勾，
+	 * 「可用直链」里却多出一条（形如 xxx_release_signed.apk、大小未知 —— 捕获条目的 size 恒为 0）。
+	 * 不包装原生 API 也顺带避免了影响网盘自身的「下载」按钮。
 	 */
-	const catcher = {
-		/** 候选池（新的在前，超出上限截断） */
+	const links = {
+		/** 结果列表（新的在前，超出上限截断） */
 		pool: [],
 		MAX: 60,
-		hooked: false,
-
-		/** 仅这些键名承载的 http(s) 值才算直链，避免把普通字段误当直链 */
-		DIRECT_KEY: /^(dlink|download_?url|download_?link|download_?uri|durl|dl_?link)$/i,
 
 		/**
-		 * 强特征：命中即可判定为直链。
-		 * 刻意只保留高置信模式 —— 早先版本还允许「弱域名特征 + 带查询串」入池，
-		 * 结果把大量普通接口请求也收了进来（候选列表里全是 usercode / report 这类噪声）。
+		 * 入库：**同名合并**，而不是按 URL 去重 —— 网盘直链每次换取都带新签名，
+		 * 按 URL 去重挡不住「重新获取」造成的重复（同名文件会越堆越多）。
+		 * 同名即同一文件：覆盖为最新一条（签名与请求头随之更新）并置顶。
+		 * 实在拿不到名字时退回按 URL 去重，避免所有无名条目挤成一条。
 		 */
-		STRONG: /(dlink=|dlink\/|dl\.[a-z0-9-]+\.|\/download\?|\/file\/download\?|getdlink)/i,
-
-		/** 接口路径特征：命中即排除（无论是否带查询串） */
-		API_PATH: /(\/api\/|get_?download_?url|get_?share_?link|\/download_?info|sharedownload|getfilemetas|\/report|\/config)/i,
-
-		/** 排除：页面与静态资源 */
-		EXCLUDE: /\.(html?|js|css|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|otf|map)(\?|$)/i,
-
-		/** URL 层面的高置信判定 */
-		isDirectUrl(url) {
-			const u = String(url || "");
-			if (!/^https?:\/\//i.test(u)) return false;
-			if (catcher.EXCLUDE.test(u)) return false;
-			if (catcher.API_PATH.test(u)) return false;
-			return catcher.STRONG.test(u);
-		},
-
-		/**
-		 * 响应头层面的判定：服务端明确声明「附件下载」时，该请求 URL 就是直链。
-		 * 这条通道比猜 URL 可靠得多，用来补齐那些不带强特征的地址。
-		 */
-		fromResponse(url, headers) {
-			const u = String(url || "");
-			if (!/^https?:\/\//i.test(u)) return false;
-			if (catcher.EXCLUDE.test(u)) return false;
-			const cd = String((headers && (headers["content-disposition"] || headers["Content-Disposition"])) || "");
-			const ct = String((headers && (headers["content-type"] || headers["Content-Type"])) || "");
-			if (/attachment/i.test(cd) || /application\/octet-stream/i.test(ct)) {
-				return catcher.put(u, catcher.nameFromDisposition(cd), 0, "响应头", true);
-			}
-			return false;
-		},
-
-		/** 从 Content-Disposition 里取文件名 */
-		nameFromDisposition(cd) {
-			const m = String(cd || "").match(/filename\*?=(?:UTF-8''|")?([^";]+)/i);
-			if (!m) return "";
-			try { return decodeURIComponent(m[1].replace(/"/g, "").trim()); } catch (e) { return m[1].trim(); }
-		},
-
-		/** 从响应体里递归找直链字段（深度上限 4，避免深递归） */
-		fromBody(data, depth) {
-			const level = depth || 0;
-			if (!data || level > 4) return;
-			if (Array.isArray(data)) {
-				data.forEach((item) => catcher.fromBody(item, level + 1));
-				return;
-			}
-			if (typeof data !== "object") return;
-			for (const key in data) {
-				if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
-				const val = data[key];
-				if (typeof val === "string") {
-					if (catcher.DIRECT_KEY.test(key) && /^https?:\/\//i.test(val)) {
-						catcher.put(val, data.server_filename || data.filename || data.name, data.size || data.file_size, "接口响应", true);
-					}
-				} else if (val && typeof val === "object") {
-					catcher.fromBody(val, level + 1);
-				}
-			}
-		},
-
-		/**
-		 * 入库（按 URL 去重）。
-		 * trusted = true 表示调用方已通过更可靠的渠道（响应体字段 / 响应头）判定过，
-		 * 无需再过一遍 URL 启发式 —— 否则会被 URL 规则误杀，出现「判定了却又被丢掉」。
-		 */
-		put(url, name, size, from, trusted, headers) {
+		put(url, name, size, headers) {
 			const u = String(url || "").trim();
-			if (!trusted && !catcher.isDirectUrl(u)) return false;
+			if (!/^https?:\/\//i.test(u)) return false;
 			const rawName = String(name || "").trim() || util.nameFromUrl(u);
 			const label = util.fixFilename(rawName || "未命名文件");
-			/**
-			 * 主键是文件名，不是 URL —— 网盘直链每次换取都带新签名，
-			 * 按 URL 去重挡不住「重新获取」造成的重复（同名文件会越堆越多）。
-			 * 同名即同一文件：覆盖为最新一条，签名与请求头随之更新。
-			 * 实在拿不到名字时退回按 URL 去重，避免所有无名条目挤成一条。
-			 */
 			const key = rawName ? "name:" + label.toLowerCase() : "url:" + u;
-			for (let i = 0; i < catcher.pool.length; i++) {
-				const it = catcher.pool[i];
+			for (let i = 0; i < links.pool.length; i++) {
+				const it = links.pool[i];
 				if (it.url === u) return false;            // 完全相同，无事可做
 				if (it.key !== key) continue;
 				it.url = u;
 				it.size = Number(size) || it.size;
 				if (headers) it.headers = headers;
-				it.from = from || it.from;
 				it.time = Date.now();
-				catcher.pool.splice(i, 1);
-				catcher.pool.unshift(it);                  // 最新一条置顶
+				links.pool.splice(i, 1);
+				links.pool.unshift(it);                    // 最新一条置顶
 				return true;
 			}
-			catcher.pool.unshift({
+			links.pool.unshift({
 				id: util.uid(),
 				key,
 				url: u,
 				name: label,
 				size: Number(size) || 0,
-				from: from || "请求",
 				headers: headers || null,
 				time: Date.now()
 			});
-			if (catcher.pool.length > catcher.MAX) catcher.pool.length = catcher.MAX;
+			if (links.pool.length > links.MAX) links.pool.length = links.MAX;
 			return true;
 		},
 
-		/** 安装 hook。必须在文档解析前调用，否则会漏掉早发的请求 */
-		install() {
-			if (catcher.hooked) return;
-			// 百度页面跳过 hook：分享页与网盘内页都有自动换链，「点下载截获」对百度
-			// 本来就是多余兜底；而不包装原生 API 可以避免原生「下载」被页面风控盯上
-			// （表现为一直停在「正在获取下载链接」）。
-			try {
-				const cur = providerApi.current();
-				if (cur && cur.id === "baidu") return;
-			} catch (e) { /* 忽略 */ }
-			catcher.hooked = true;
-			const win = (typeof unsafeWindow !== "undefined" && unsafeWindow) ? unsafeWindow : window;
-			if (!win) return;
-
-			/**
-			 * 伪装包装函数：String(hook) 返回原生样貌。
-			 * 部分网盘的风控会检查原生 API 是否被脚本改写，检测到就拒绝发链接
-			 * （表现为点「下载」一直停在「正在获取下载链接」）。这一层不是对抗，
-			 * 只是让被包装后的函数在外观上与原生保持一致。
-			 */
-			const mask = (wrapped, raw) => {
-				if (typeof wrapped !== "function" || typeof raw !== "function") return;
-				try {
-					Object.defineProperty(wrapped, "name", { value: raw.name || "", configurable: true });
-				} catch (e) { /* 忽略 */ }
-				try {
-					wrapped.toString = function () { return Function.prototype.toString.call(raw); };
-				} catch (e) { /* 忽略 */ }
-			};
-
-			// --- XMLHttpRequest ---
-			const XP = win.XMLHttpRequest && win.XMLHttpRequest.prototype;
-			if (XP && XP.open && XP.send) {
-				const rawOpen = XP.open;
-				const rawSend = XP.send;
-				XP.open = function (method, url) {
-					try { this.__ndUrl = url; } catch (e) { /* 忽略 */ }
-					return rawOpen.apply(this, arguments);
-				};
-				mask(XP.open, rawOpen);
-				XP.send = function () {
-					try {
-						const url = this.__ndUrl;
-						if (url) catcher.put(url, "", 0, "请求");
-						this.addEventListener("load", function () {
-							try {
-								if (!this.getResponseHeader) return;
-								const ct = this.getResponseHeader("content-type") || "";
-								// 渠道二：服务端声明为附件下载
-								catcher.fromResponse(url, {
-									"content-disposition": this.getResponseHeader("content-disposition") || "",
-									"content-type": ct
-								});
-								// 渠道三：JSON 响应体里带直链字段
-								if (/json/i.test(ct) && this.responseText && this.responseText.length < 524288) {
-									let data = null;
-									try { data = JSON.parse(this.responseText); } catch (e) { data = null; }
-									if (data) catcher.fromBody(data);
-								}
-							} catch (e) { /* 忽略 */ }
-						});
-					} catch (e) { /* 忽略 */ }
-					return rawSend.apply(this, arguments);
-				};
-			}
-
-			// --- fetch ---
-			const rawFetch = win.fetch;
-			if (typeof rawFetch === "function") {
-				win.fetch = function (input) {
-					try {
-						const url = typeof input === "string" ? input : (input && input.url);
-						if (url) catcher.put(url, "", 0, "请求");
-					} catch (e) { /* 忽略 */ }
-					const p = rawFetch.apply(this, arguments);
-					try {
-						const reqUrl = typeof input === "string" ? input : (input && input.url);
-						p.then((res) => {
-							try {
-								const h = res.headers;
-								if (!h || !h.get) return;
-								const ct = h.get("content-type") || "";
-								catcher.fromResponse(reqUrl, {
-									"content-disposition": h.get("content-disposition") || "",
-									"content-type": ct
-								});
-								if (/json/i.test(ct) && res.clone) {
-									res.clone().json().then((d) => catcher.fromBody(d)).catch(() => { /* 忽略 */ });
-								}
-							} catch (e) { /* 忽略 */ }
-						}).catch(() => { /* 忽略 */ });
-					} catch (e) { /* 忽略 */ }
-					return p;
-				};
-				mask(win.fetch, rawFetch);
-			}
-		},
-
-		/** 清空候选池 */
-		clear() { catcher.pool.length = 0; }
+		clear() { links.pool.length = 0; }
 	};
 
 	/* ==========================================================================
@@ -2001,7 +1827,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			ui.overlay.classList.add("nd-open");
 			ui.panel.classList.add("nd-open");
 			ui.renderCaught();
-			ui.startWatch();
 			ui.scan();
 			ui.autoResolve();
 		},
@@ -2038,7 +1863,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			if (!ui.panel) return;
 			ui.panel.classList.remove("nd-open");
 			ui.overlay.classList.remove("nd-open");
-			ui.stopWatch();
 		},
 
 		switchTab(page) {
@@ -2118,7 +1942,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			const count = ui.root.querySelector('[data-el="caught-count"]');
 			const box = ui.root.querySelector('[data-el="caught-list"]');
 			const bar = ui.root.querySelector('[data-el="batch-bar"]');
-			const pool = catcher.pool;
+			const pool = links.pool;
 			const opt = store.opt();
 
 			if (count) count.textContent = String(pool.length);
@@ -2150,7 +1974,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 
 
 		findCaught(id) {
-			const pool = catcher.pool;
+			const pool = links.pool;
 			for (let i = 0; i < pool.length; i++) {
 				if (pool[i].id === id) return pool[i];
 			}
@@ -2163,7 +1987,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 		},
 
 		async pushCaught() {
-			const pool = catcher.pool;
+			const pool = links.pool;
 			const res = await engine.pushAriaBatch(pool.map(ui._caughtFile));
 			// 推送结果在面板里看不到（队列在 Aria2 / Motrix 那边），所以要提示
 			if (res.ok === res.total) ui.toast(`已推送 ${res.total} 条到 Aria2 队列。`, "ok");
@@ -2172,7 +1996,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 
 		/** 批量复制：kind = "link" | "cmd" */
 		copyAll(kind) {
-			const pool = catcher.pool;
+			const pool = links.pool;
 			if (!pool.length) return;
 			const text = kind === "cmd" ? engine.allCommands(pool) : engine.allLinks(pool);
 			const label = kind === "cmd" ? "命令行" : "直链";
@@ -2182,7 +2006,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 		},
 
 		clearCaught() {
-			catcher.clear();
+			links.clear();
 			ui.renderCaught();
 		},
 
@@ -2214,21 +2038,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			if (!outlet.copy(f.url)) ui.toast("复制失败。", "err", 4600);
 			ui.busy(btn, true, "已复制");
 			setTimeout(() => ui.busy(btn, false), 1200);
-		},
-
-		/** 面板打开期间轮询刷新捕获列表（捕获发生在网络层，是异步的） */
-		startWatch() {
-			ui.stopWatch();
-			ui._timer = setInterval(() => {
-				if (ui.isOpen()) ui.renderCaught();
-			}, 1500);
-		},
-
-		stopWatch() {
-			if (ui._timer) {
-				clearInterval(ui._timer);
-				ui._timer = null;
-			}
 		},
 
 		/* ---------- 下载页 ---------- */
@@ -2421,8 +2230,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 		if (typeof document === "undefined" || typeof window === "undefined") return;
 		if (document.getElementById("nd-style")) return; // 重复注入保护
 
-		// 必须最早执行：网络层捕获一旦错过早期请求就补不回来了
-		catcher.install();
 
 		// 其余工作等 DOM 就绪再跑（@run-at document-start 时 body 还不存在）
 		const ready = () => {
@@ -2472,6 +2279,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 	 * ========================================================================== */
 
 	if (typeof module !== "undefined" && module.exports) {
-		module.exports = { VERSION, KEY, DEFAULTS, util, store, net, aria, idm, outlet, providers, providerApi, pageState, engine, catcher, inject, ui };
+		module.exports = { VERSION, KEY, DEFAULTS, util, store, net, aria, idm, outlet, providers, providerApi, pageState, engine, links, inject, ui };
 	}
 })();
