@@ -44,15 +44,15 @@
 
   <rect x="192" y="94" width="150" height="80" rx="8" class="new"/>
   <text x="267" y="116" class="new-t" text-anchor="middle">增量扫描</text>
-  <text x="267" y="136" class="new-d" text-anchor="middle">MutationObserver</text>
-  <text x="267" y="152" class="new-d" text-anchor="middle">只扫新增子树</text>
-  <text x="267" y="167" class="new-d" text-anchor="middle">水合 / 懒加载不再漏</text>
+  <text x="267" y="136" class="new-d" text-anchor="middle">观察新增子树</text>
+  <text x="267" y="152" class="new-d" text-anchor="middle">只扫新增部分</text>
+  <text x="267" y="167" class="new-d" text-anchor="middle">水合懒加载不漏</text>
 
   <rect x="352" y="94" width="142" height="80" rx="8" class="node"/>
   <text x="423" y="116" class="nt" text-anchor="middle">点击捕获</text>
   <text x="423" y="136" class="nd" text-anchor="middle">composedPath</text>
   <text x="423" y="152" class="nd" text-anchor="middle">兜底最后一道</text>
-  <text x="423" y="167" class="nd" text-anchor="middle">不因 defaultPrevented 放弃</text>
+  <text x="423" y="167" class="nd" text-anchor="middle">默认阻止也接</text>
 
   <rect x="504" y="94" width="136" height="80" rx="8" class="node"/>
   <text x="572" y="116" class="nt" text-anchor="middle">window.open 包装</text>
@@ -132,7 +132,7 @@
 
   <rect x="40" y="672" width="600" height="48" rx="8" class="warn"/>
   <text x="340" y="691" class="warn-t" text-anchor="middle">宁可不动，不可错动：多个不同码 + 就近找不到 → 什么都不做</text>
-  <text x="340" y="709" class="warn-d" text-anchor="middle">拉丁标签必须带 : 或 = 且不收 key · 只加 query 不动 hash（免得毁掉 hash 路由）</text>
+  <text x="340" y="709" class="warn-d" text-anchor="middle">拉丁标签须带 :/= 不收 key · 只加 query 不动 hash</text>
 
   <line x1="340" y1="730" x2="340" y2="750" class="arrow" marker-end="url(#ar)"/>
 
@@ -146,7 +146,7 @@
 
   <rect x="348" y="788" width="292" height="62" rx="8" class="mute"/>
   <text x="494" y="808" class="mute-t" text-anchor="middle">没命中也照常工作</text>
-  <text x="494" y="830" class="mute-d" text-anchor="middle">两条路收敛到同一个 resolveLink()</text>
+  <text x="494" y="830" class="mute-d" text-anchor="middle">收敛到同一 resolveLink()</text>
 
   <line x1="340" y1="866" x2="340" y2="888" class="arrow" marker-end="url(#ar)"/>
 

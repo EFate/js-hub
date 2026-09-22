@@ -37,7 +37,7 @@
   <rect x="238" y="94" width="186" height="62" rx="8" class="band"/>
   <text x="331" y="115" class="band-t" text-anchor="middle">OPT_DEFS 选项定义表</text>
   <text x="331" y="133" class="band-d" text-anchor="middle">净化/阅读/链接/外观</text>
-  <text x="331" y="148" class="band-d" text-anchor="middle">label / 默认值 / 分组</text>
+  <text x="331" y="148" class="band-d" text-anchor="middle">label/默认值/分组</text>
 
   <rect x="436" y="94" width="204" height="62" rx="8" class="node"/>
   <text x="538" y="115" class="nt" text-anchor="middle">存储键约定 zh.*</text>
@@ -76,8 +76,8 @@
 
   <rect x="436" y="350" width="204" height="62" rx="8" class="warn"/>
   <text x="538" y="371" class="warn-t" text-anchor="middle">夜间主题 CSS（常驻）</text>
-  <text x="538" y="389" class="warn-d" text-anchor="middle">始终注入，由 html[data-theme]</text>
-  <text x="538" y="404" class="warn-d" text-anchor="middle">属性门控 —— 切换不用重排 CSS</text>
+  <text x="538" y="389" class="warn-d" text-anchor="middle">常驻</text>
+  <text x="538" y="404" class="warn-d" text-anchor="middle">data-theme 属性门控</text>
 
   <line x1="340" y1="428" x2="340" y2="448" class="arrow" marker-end="url(#ar)"/>
 
@@ -149,17 +149,17 @@
   <rect x="40" y="834" width="192" height="70" rx="8" class="band"/>
   <text x="136" y="855" class="band-t" text-anchor="middle">设置面板</text>
   <text x="136" y="873" class="band-d" text-anchor="middle">4 组分区 + 开关行</text>
-  <text x="136" y="888" class="band-d" text-anchor="middle">首次打开才挂载 · Esc/遮罩关闭</text>
+  <text x="136" y="888" class="band-d" text-anchor="middle">首次挂载 · Esc/遮罩</text>
 
   <rect x="244" y="834" width="192" height="70" rx="8" class="warn"/>
   <text x="340" y="855" class="warn-t" text-anchor="middle">GM 菜单（唯一入口）</text>
   <text x="340" y="873" class="warn-d" text-anchor="middle">⚙ 设置面板</text>
-  <text x="340" y="888" class="warn-d" text-anchor="middle">夜间模式 开/关（即时切换）</text>
+  <text x="340" y="888" class="warn-d" text-anchor="middle">夜间 开/关 · 即时切</text>
 
   <rect x="448" y="834" width="192" height="70" rx="8" class="node"/>
   <text x="544" y="855" class="nt" text-anchor="middle">Toast 反馈</text>
   <text x="544" y="873" class="nd" text-anchor="middle">仅在菜单切换开关时弹出</text>
-  <text x="544" y="888" class="nd" text-anchor="middle">改动即时生效，无需刷新</text>
+  <text x="544" y="888" class="nd" text-anchor="middle">改动即时生效</text>
 
   <line x1="340" y1="920" x2="340" y2="940" class="arrow" marker-end="url(#ar)"/>
 
@@ -181,9 +181,9 @@
 
   <rect x="448" y="978" width="192" height="78" rx="8" class="warn"/>
   <text x="544" y="999" class="warn-t" text-anchor="middle">data-theme 守护</text>
-  <text x="544" y="1017" class="warn-d" text-anchor="middle">夜间模式开启时监听 html 属性</text>
+  <text x="544" y="1017" class="warn-d" text-anchor="middle">开启时监听 html 属性</text>
   <text x="544" y="1032" class="warn-d" text-anchor="middle">被站点重置则立即写回</text>
-  <text x="544" y="1047" class="warn-d" text-anchor="middle">attributes 过滤，零轮询</text>
+  <text x="544" y="1047" class="warn-d" text-anchor="middle">零轮询，仅属性过滤</text>
 
   <text x="24" y="1102" class="note">注：零注入判据 —— 全部功能自动生效或经菜单触发，页面上没有任何需要用户点一下的动作，故不注入任何入口器件；</text>
   <text x="24" y="1120" class="note">夜间主题 CSS 常驻但由 data-theme 属性门控，不注入任何可见 UI。设置与开关的唯一入口是脚本管理器菜单。</text>
