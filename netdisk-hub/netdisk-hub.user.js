@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.5.10
+// @version      1.5.11
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -292,6 +292,26 @@
 						if (data === null) return reject(new Error("接口未返回合法 JSON（HTTP " + res.status + "）"));
 						resolve(data);
 					},
+					onerror: () => reject(new Error("请求失败：" + url)),
+					ontimeout: () => reject(new Error("请求超时：" + url))
+				});
+			});
+		},
+
+		/**
+		 * POST 表单（返回原始响应）：百度授权页 authorize 需要表单提交，
+		 * 但它响应的是 HTML 跳转页而非 JSON，postForm 的 JSON 解析会误判失败，
+		 * 所以授权这一步走原样返回。sharedownload 等 JSON 接口仍走 postForm。
+		 */
+		postFormRaw(url, bodyText, headers) {
+			return new Promise((resolve, reject) => {
+				net.raw({
+					method: "POST",
+					url,
+					headers: util.standHeaders(Object.assign({ "Content-Type": "application/x-www-form-urlencoded" }, headers || {})),
+					data: String(bodyText || ""),
+					responseType: "text",
+					onload: (res) => resolve(res),
 					onerror: () => reject(new Error("请求失败：" + url)),
 					ontimeout: () => reject(new Error("请求超时：" + url))
 				});
@@ -876,25 +896,29 @@
 		},
 
 		/**
-		 * 百度静默授权：访问开放平台授权页拿 access_token。
-		 * 已授权过 → 授权页直接重定向到 oob 页，从 finalUrl 提取令牌；
-		 * 未授权 → 抓授权页表单参数自动提交确认，再提取。令牌缓存复用。
+		 * 百度静默授权：访问开放平台授权页拿 access_token。与参考脚本同源同流：
+		 * 已授权过 → authorize 直接重定向到 oob（finalUrl 含 access_token），直接取；
+		 * 未授权 → finalUrl 仍停在 authorize，抓表单参数自动提交确认后再取。
+		 * 令牌缓存复用；finalUrl 的 #fragment 个别脚本管理器会剥掉，故兜底再从
+		 * responseText 取一次，二者皆空才算失败。
 		 */
 		async baiduGetToken() {
 			const saved = store.get(KEY.baidu).token;
 			if (saved) return saved;
 			const AUTH = "https://openapi.baidu.com/oauth/2.0/authorize?response_type=token&scope=basic,netdisk&client_id=omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO&redirect_uri=oob&confirm_login=0";
-			const pick = (res) => ((res && res.finalUrl || "").match(/access_token=([^&]+)/) || [])[1] || "";
+			const fromUrl = (u) => (String(u || "").match(/access_token=([^&]+)/) || [])[1] || "";
+			const pick = (res) => fromUrl(res && res.finalUrl) || fromUrl(res && res.responseText) || "";
 			const first = await net.text(AUTH, { Origin: "", Referer: "" });
 			let token = pick(first);
-			if (!token && /\/authorize/.test(first.finalUrl || "")) {
-				// 未授权：解析授权页表单并自动提交确认
+			// 与参考脚本一致：finalUrl 还在 authorize，说明未授权，抓表单自动确认
+			if (!token && (first.finalUrl || "").includes("authorize")) {
 				const bdstoken = ((first.responseText || "").match(/name="bdstoken"\s+value="([^"]+)"/) || [])[1] || "";
 				const clientId = ((first.responseText || "").match(/name="client_id"\s+value="([^"]+)"/) || [])[1] || "";
 				const body = "grant_permissions_arr=netdisk&bdstoken=" + encodeURIComponent(bdstoken)
 					+ "&client_id=" + encodeURIComponent(clientId)
 					+ "&response_type=token&display=page&grant_permissions=" + encodeURIComponent("basic,netdisk");
-				await net.postForm(AUTH, body, { Origin: "", Referer: "" });
+				// authorize 提交返回的是 HTML 跳转页而非 JSON，走 postFormRaw 原样接收
+				await net.postFormRaw(AUTH, body, { Origin: "", Referer: "" });
 				token = pick(await net.text(AUTH, { Origin: "", Referer: "" }));
 			}
 			if (token) store.patch(KEY.baidu, { token });

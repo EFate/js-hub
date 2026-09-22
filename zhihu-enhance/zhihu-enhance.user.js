@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.0.1
-// @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
+// @version      1.1.0
+// @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
 // @match        *://*.zhihu.com/*
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.0.1';
+    var VERSION = '1.1.0';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -67,30 +67,45 @@
     // ======================================================================
 
     // 知乎跳转链接 → 目标直链。返回 null 表示无需改写。
-    // 三条路径：link.zhihu.com/?target= 参数解码 → 编码 URL 片段兜底 → 放弃。
-    // 幂等：已是直链的输入不含中转特征，原样返回 null。
+    // 三条路径（命中即返回，优先最明确的）：
+    // ① link.zhihu.com/?target= 参数解码；② 任意 ?next=/&next= 内嵌编码 URL 解码；
+    // ③ href 内嵌编码完整 URL 兜底。幂等：已是直链不含中转特征，原样返回 null。
     function resolveLink(href) {
         if (!href || href.indexOf('http') !== 0) return null;
-        var KEY = 'link.zhihu.com/?target=';
-        var idx = href.indexOf(KEY);
+        // ① 最明确的中转形态：link.zhihu.com/?target=<编码URL>
+        var idx = href.indexOf('link.zhihu.com/?target=');
         if (idx > -1) {
-            var target = href.substring(idx + KEY.length);
+            var target = href.substring(idx + 'link.zhihu.com/?target='.length);
             var amp = target.indexOf('&');
             if (amp > -1) target = target.substring(0, amp);
-            try { target = decodeURIComponent(target); } catch (e) { /* 保留原串 */ }
-            return /^https?:\/\//i.test(target) ? target : null;
+            target = safeDecode(target);
+            return isForeign(target) ? target : null;
         }
-        // 兜底：href 内嵌编码的完整 URL（中转脚本拼参）。
+        // ② 知乎站内链接携带编码目标（?next= / &next=）——最普遍的直跳场景
+        var q = href.match(/[?&]next=([^&]+)/);
+        if (q) {
+            var next = safeDecode(q[1]);
+            return isForeign(next) ? next : null;
+        }
+        // ③ 兜底：href 内嵌编码的完整 URL（中转脚本拼参）。
         // 先在编码态按 & 截断再解码 —— 目标 URL 自身的 & 是 %26，不会被误切。
         var pos = Math.max(href.lastIndexOf('https%3A%2F%2F'), href.lastIndexOf('http%3A%2F%2F'));
         if (pos > -1) {
             var frag = href.substring(pos);
             var a2 = frag.indexOf('&');
             if (a2 > -1) frag = frag.substring(0, a2);
-            try { frag = decodeURIComponent(frag); } catch (e) { /* 保留原串 */ }
-            if (/^https?:\/\//i.test(frag) && !/^https?:\/\/([a-z0-9-]+\.)*zhihu\.com(\/|$)/i.test(frag)) return frag;
+            frag = safeDecode(frag);
+            if (isForeign(frag)) return frag;
         }
         return null;
+    }
+
+    function safeDecode(s) {
+        try { return decodeURIComponent(s); } catch (e) { return s; }
+    }
+    // 目标必须是 http(s) 且不是知乎站内（站内链接无中转，不动）
+    function isForeign(u) {
+        return /^https?:\/\//i.test(u) && !/^https?:\/\/([a-z0-9-]+\.)*zhihu\.com(\/|$)/i.test(u);
     }
 
     // zhimg 尺寸后缀白名单 —— 白名单之外一律不动，避免误伤 hash
@@ -181,6 +196,8 @@
     }
 
     var NIGHT_CSS = `
+        html[data-theme=dark] { color-scheme: dark; }
+        html[data-theme=light] { color-scheme: light; }
         html[data-theme=dark] body { color: #d3d3d3 !important; background: rgb(18,18,18) !important; }
         html[data-theme=dark] .AppHeader { background: rgb(18,18,18) !important; }
         html[data-theme=dark] .AppHeader a { color: #d3d3d3 !important; }
@@ -594,7 +611,8 @@
 
     var API = {
         VERSION: VERSION, GROUPS: GROUPS, OPT_DEFS: OPT_DEFS,
-        buildCSS: buildCSS, resolveLink: resolveLink, normalizeImg: normalizeImg, pickTime: pickTime,
+        buildCSS: buildCSS, resolveLink: resolveLink, safeDecode: safeDecode, isForeign: isForeign,
+        normalizeImg: normalizeImg, pickTime: pickTime,
         applyLink: applyLink, applyTime: applyTime, applyImg: applyImg, cleanSticky: cleanSticky,
         __setOpt: function (name, value) { OPT[name] = value; }   // 测试注入开关用
     };
