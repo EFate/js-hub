@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         链接直跳助手
 // @namespace    js-hub/jump-hub
-// @version      1.3.3
+// @version      1.3.4
 // @description  点一次链接就直接到目标网站：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页，网盘链接自动带上旁边写着的提取码直达并解锁，统一在新标签页打开。全自动、全程零提示，不用选文字、不用点第二次、不用手输提取码。
 // @author       EFate
 // @license      MIT
@@ -56,8 +56,8 @@
  *    （找不到才退到「整页只有一个码」），拼成 ?pwd= 再跳。落在分享页后脚本
  *    读回自己写的参数自动填码 —— 所以不依赖各家网盘认不认这个参数名。
  *    只做「带码 + 填码」，不碰下载、不碰网盘接口、不发任何网络请求。
- * 6. 入口遵守仓库 UI 规范：不悬浮、不占快捷键；能注入宿主工具栏就注入，
- *    管理器菜单永远兜底。
+ * 6. 不往页面注入任何东西：没有按钮、没有悬浮件、不占快捷键，脚本管理器
+ *    菜单是唯一入口。
  * 7. 提示只出现在两处：首次安装一次（否则无法确认脚本是否生效）、面板里的
  *    主动操作反馈。脚本的所有自动行为一律零提示。
  */
@@ -65,7 +65,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.3.3";
+	const VERSION = "1.3.4";
 	const ATTR = "data-jh";
 	const KEY = {
 		opt: "jh.opt",
@@ -165,14 +165,6 @@
 		}
 	}
 
-	function firstOf(list, root) {
-		for (const sel of list) {
-			const el = qs(sel, root);
-			if (el) return el;
-		}
-		return null;
-	}
-
 	/**
 	 * 这个环境有没有布局引擎？
 	 *
@@ -209,27 +201,6 @@
 		} catch (e) {
 			return true;
 		}
-	}
-
-	/** 等宿主容器出现再注入，不做轮询硬等 */
-	function waitFor(target, cb, timeout) {
-		const sels = Array.isArray(target) ? target : [target];
-		const found = firstOf(sels);
-		if (found) {
-			cb(found);
-			return;
-		}
-		const root = document.documentElement;
-		if (!root) return;
-		const ob = new MutationObserver(() => {
-			const hit = firstOf(sels);
-			if (hit) {
-				ob.disconnect();
-				cb(hit);
-			}
-		});
-		ob.observe(root, { childList: true, subtree: true });
-		setTimeout(() => ob.disconnect(), timeout || 15000);
 	}
 
 	/* ==========================================================================
@@ -1170,26 +1141,17 @@
 		autoJump: true,  // 已落在中转页时自动跳走
 		guard: true,     // 压掉站点拦截：点击接管 + window.open 接管
 		panAuto: true,   // 网盘自动带提取码：链接旁取码 + 落地填入 + 自动提交
-		entry: "auto",   // 页面入口按钮：auto / light / dark / off（off = 永不注入）
 		skipHosts: [],   // 不处理的站点（命中则本页直接跳过）
 		mute: []         // 被单独停用的站点规则名
 	};
 
 	/** v1.2.0 之前的旧键：读一次做迁移，然后丢弃 */
-	const LEGACY_OPT_KEYS = ["rewrite", "deepScan", "takeover", "openHook", "panCode", "panFill", "panSubmit", "toast"];
+	const LEGACY_OPT_KEYS = ["rewrite", "deepScan", "takeover", "openHook", "panCode", "panFill", "panSubmit", "toast", "entry"];
 
 	let opt = Object.assign({}, DEFAULT_OPT);
 
 	const stat = { skip: 0, resolve: 0, fill: 0 };
 	let eventLog = [];
-
-	/**
-	 * **本页**被处理过的链接数（仅当前页面，不落盘）。
-	 *
-	 * 与 `stat.resolve` 的区别：那个是全局累计（存 GM 存储，跨页面跨会话），
-	 * 拿它判断「本页有没有干活」会恒为真。入口注入要靠这个按页计数。
-	 */
-	let pageHits = 0;
 
 	/** 把 v1.1.x 的 10 个开关映射到 v1.2.0 的 5 个 */
 	function migrateOpt(saved) {
@@ -1435,9 +1397,6 @@
 		a.setAttribute(ATTR, "1");
 		a.setAttribute(ATTR + "-to", to);
 		a.href = to;
-		// 只把「地址真的变了」计入本页可见工作量：单纯落标记的网盘直链
-		// 用户看不出任何差别，不值得据此让入口按钮露脸
-		if (to !== href) pageHits++;
 		return true;
 	}
 
@@ -1482,8 +1441,6 @@
 					bump("resolve");
 					log(`深度预解析完成，共改写 ${n} 条链接`);
 				}
-				// 扫完一轮才知道本页有没有活干，再决定要不要露脸
-				maybeInjectEntry();
 			}
 		};
 		schedule(step);
@@ -1941,14 +1898,6 @@ html{
 .jh-pill.jh-warn{color:var(--jh-warn); border-color:var(--jh-warn);}
 .jh-btns{display:flex; gap:8px; flex-wrap:wrap;}
 
-/* 入口：注入宿主既有容器，不悬浮 */
-.jh-entry{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 10px; margin-left:8px;
-  border:1px solid var(--jh-bd); border-radius:6px; background:var(--jh-bg-3); color:var(--jh-fg);
-  font-family:inherit; font-size:12px; cursor:pointer; vertical-align:middle; transition:background .15s, border-color .15s;}
-.jh-entry:hover{background:var(--jh-bd);}
-.jh-entry.jh-entry--light{--jh-bg-3:#ffffff; --jh-bd:#d0d7de; --jh-fg:#1f2328; --jh-fg-2:#59636e;}
-.jh-entry.jh-entry--dark{--jh-bg-3:#21262d; --jh-bd:#30363d; --jh-fg:#e6edf3; --jh-fg-2:#8b949e;}
-
 #jh-toasts{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:2147483004; display:flex;
   flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
 .jh-toast{display:flex; align-items:center; gap:8px; max-width:min(560px, calc(100vw - 32px)); padding:9px 14px;
@@ -1966,20 +1915,6 @@ html{
 
 	let uiRoot = null;
 	let uiLight = false;
-
-	/** 宿主是深色还是浅色（按 body 背景亮度判断） */
-	function hostTheme() {
-		try {
-			const probe = document.body || document.documentElement;
-			const bg = getComputedStyle(probe).backgroundColor || "";
-			const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(bg);
-			if (!m) return "auto";
-			const lum = 0.299 * +m[1] + 0.587 * +m[2] + 0.114 * +m[3];
-			return lum > 150 ? "light" : "dark";
-		} catch (e) {
-			return "auto";
-		}
-	}
 
 	/**
 	 * 轻提示。
@@ -2165,18 +2100,6 @@ html{
 			</div>
 		</div>
 		<div class="jh-card">
-			<h3>入口按钮</h3>
-			<div class="jh-field" style="border:none; padding-top:0;">
-				<span class="jh-name">页面入口按钮</span>
-				<span class="jh-desc">跳转本身全自动，按钮只是查看入口：仅当本页有链接被接管、且找到宿主页头工具栏时才出现，网盘分享页不出现</span>
-				<div class="jh-btns">
-					${[["auto", "跟随宿主"], ["light", "浅色"], ["dark", "暗色"], ["off", "不显示"]]
-						.map(([k, label]) => `<button class="jh-btn${opt.entry === k ? " jh-primary" : ""}" data-act="entry" data-entry="${k}">${label}</button>`)
-						.join("")}
-				</div>
-			</div>
-		</div>
-		<div class="jh-card">
 			<h3>数据</h3>
 			<div class="jh-row"><span class="jh-k">存储键</span><span class="jh-v jh-mono">${KEY.opt} · ${KEY.stat} · ${KEY.log}</span></div>
 			<div class="jh-row"><span class="jh-k">读取</span><span class="jh-v">提取码从 URL 的 pwd 参数读取，不发任何网络请求</span></div>
@@ -2294,7 +2217,6 @@ html{
 			if (!key) return;
 			opt[key] = !!t.checked;
 			saveOpt();
-			applyRuntimeOpts();
 		}, true);
 
 		document.addEventListener("keydown", (e) => {
@@ -2330,16 +2252,6 @@ html{
 		renderPages();
 	}
 
-	function applyRuntimeOpts() {
-		const entry = qs(".jh-entry");
-		if (!entry) return;
-		if (!worthEntry()) {
-			entry.remove(); // 被关掉、或本页已不值当露脸
-			return;
-		}
-		entry.className = "jh-entry " + entryThemeClass();
-	}
-
 	function handleAction(act, el) {
 		switch (act) {
 			case "close":
@@ -2351,13 +2263,6 @@ html{
 				invalidatePagePwd();
 				toast("已重新扫描本页链接", "ok");
 				break;
-			case "entry":
-				opt.entry = el.getAttribute("data-entry") || "auto";
-				saveOpt();
-				applyRuntimeOpts();
-				maybeInjectEntry();
-				renderPages();
-				break;
 			case "all-on":
 				opt.mute = [];
 				saveOpt();
@@ -2368,7 +2273,6 @@ html{
 				opt = Object.assign({}, DEFAULT_OPT);
 				saveOpt();
 				renderPages();
-				applyRuntimeOpts();
 				toast("已恢复默认设置", "ok");
 				break;
 			case "reset-stat":
@@ -2382,81 +2286,6 @@ html{
 			default:
 				break;
 		}
-	}
-
-	/* ---- 入口注入（按需露脸，不是每个页面都注入）---- */
-
-	/**
-	 * 宿主工具栏候选容器。
-	 *
-	 * 只挑「本来就是页头操作区」的容器 —— 找不到就静默。
-	 * 管理器菜单（Tampermonkey 图标）始终可用，不为此硬凑注入点，
-	 * 更不会做成脱离文档流、跟着页面滚的那种常驻件。
-	 */
-	const ENTRY_SLOTS = [
-		".toolbar",
-		".header-actions",
-		".header-toolbar",
-		".page-actions",
-		"header .actions",
-		"header .toolbar"
-	];
-
-	function entryThemeClass() {
-		const mode = opt.entry === "auto" ? hostTheme() : opt.entry;
-		return mode === "light" ? "jh-entry--light" : mode === "dark" ? "jh-entry--dark" : "";
-	}
-
-	/**
-	 * 本页值不值得注入入口？三条同时成立才露脸：
-	 *
-	 * ① 顶层文档、脚本启用、站点不在「不处理」名单；
-	 * ② **不在网盘分享页** —— 那是终点站。用户都到分享页了，那里既没有中转
-	 *    需要剥、也没有提取码需要补，脚本本就该收手，更不该往人家工具栏塞东西；
-	 * ③ 本页**确实处理过链接**（`pageHits > 0`）—— 一条都没动过就别出声，
-	 *    免得在「脚本什么也没做」的页面上凭空多出一个按钮。
-	 *
-	 * 这是「看情况决定是否注入」：跳转本身是全自动的，入口按钮只是「脚本在
-	 * 这页干了活」的可见凭证 + 顺手打开面板，它不该是每页都有的常驻物。
-	 */
-	function worthEntry() {
-		if (!IS_TOP || !opt.on || isSkippedSite()) return false;
-		if (opt.entry === "off") return false;
-		if (panOf(HOST)) return false;
-		return pageHits > 0;
-	}
-
-	let entryPending = false;
-
-	function injectEntry() {
-		if (entryPending || qs(".jh-entry")) return;
-		entryPending = true;
-		const doc = document;
-		waitFor(ENTRY_SLOTS, (bar) => {
-			entryPending = false;
-			if (document !== doc) return; // 页面已被换掉，本次注入作废
-			// 容器出现可能晚于条件成立，此刻复检一次：期间本页可能已经不值当露脸了
-			if (!worthEntry()) return;
-			if (bar.querySelector(".jh-entry")) return; // 防重复
-			const btn = document.createElement("button");
-			btn.type = "button";
-			btn.className = "jh-entry " + entryThemeClass();
-			btn.innerHTML = ICON.link + "<span>直跳</span>";
-			btn.title = "链接直跳：本页已处理 " + pageHits + " 条链接，点击查看";
-			btn.addEventListener("click", (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				openPanel();
-			}, true);
-			bar.appendChild(btn);
-			log("入口已注入宿主工具栏");
-		}, 6000);
-	}
-
-	/** 扫描之后调用：本页确实干了活才露脸 */
-	function maybeInjectEntry() {
-		if (!worthEntry()) return;
-		injectEntry();
 	}
 
 	function registerMenu() {
@@ -2542,8 +2371,6 @@ html{
 			if (node.closest && node.closest("[" + ATTR + "]") === node) continue;
 			scanRoot(node);
 		}
-		// 异步增量也有可能是本页唯一「干活」的地方（水合后才出链接的站点）
-		maybeInjectEntry();
 	}
 
 	function startObserver() {
@@ -2599,7 +2426,7 @@ html{
 			addStyle("jh-style", CSS);
 			startObserver();
 			scan(document);
-			// deepScan 扫完会自己判断要不要注入入口（见 maybeInjectEntry）
+			// deepScan 扫完全页链接即收工；脚本不往页面注入任何东西
 			deepScan();
 			registerMenu();
 			setTimeout(() => {
@@ -2675,12 +2502,6 @@ html{
 			invalidatePagePwd,
 			navigate,
 			pageText,
-			worthEntry,
-			injectEntry,
-			maybeInjectEntry,
-			get pageHits() {
-				return pageHits;
-			}
 		},
 		ui: {
 			open: openPanel,

@@ -121,14 +121,6 @@ html{
 .jh-pill.jh-warn{color:var(--jh-warn); border-color:var(--jh-warn);}
 .jh-btns{display:flex; gap:8px; flex-wrap:wrap;}
 
-/* 入口：注入宿主既有容器，不悬浮 */
-.jh-entry{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 10px; margin-left:8px;
-  border:1px solid var(--jh-bd); border-radius:6px; background:var(--jh-bg-3); color:var(--jh-fg);
-  font-family:inherit; font-size:12px; cursor:pointer; vertical-align:middle; transition:background .15s, border-color .15s;}
-.jh-entry:hover{background:var(--jh-bd);}
-.jh-entry.jh-entry--light{--jh-bg-3:#ffffff; --jh-bd:#d0d7de; --jh-fg:#1f2328; --jh-fg-2:#59636e;}
-.jh-entry.jh-entry--dark{--jh-bg-3:#21262d; --jh-bd:#30363d; --jh-fg:#e6edf3; --jh-fg-2:#8b949e;}
-
 .jh-toasts-demo{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:2147483004; display:flex;
   flex-direction:column; gap:8px; align-items:center; pointer-events:none;}
 .jh-toast{display:flex; align-items:center; gap:8px; max-width:min(560px, calc(100vw - 32px)); padding:9px 14px;
@@ -152,7 +144,7 @@ html{
 			<div class="jh-head">
 				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"></path></svg>
 				<h2>链接直跳</h2>
-				<span class="jh-ver">v1.3.3</span>
+				<span class="jh-ver">v1.3.4</span>
 				<span class="jh-spacer"></span>
 				<button class="jh-icon-btn" data-act="close" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg></button>
 			</div>
@@ -192,27 +184,27 @@ html{
 			<h3>最近事件</h3>
 			
 				<div class="jh-row">
-					<span class="jh-k">10:04:00</span>
+					<span class="jh-k">12:11:45</span>
 					<span class="jh-pill">带提取码</span>
 					<span class="jh-v jh-mono" title="k9x2">k9x2</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:03:35</span>
+					<span class="jh-k">12:11:20</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://github.com/EFate/js-hub">https://github.com/EFate/js-hub</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:02:46</span>
+					<span class="jh-k">12:10:31</span>
 					<span class="jh-pill">带提取码</span>
 					<span class="jh-v jh-mono" title="7w3q">7w3q</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:01:34</span>
+					<span class="jh-k">12:09:19</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://example.com/post/2026">https://example.com/post/2026</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:00:22</span>
+					<span class="jh-k">12:08:07</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://pan.baidu.com/s/1abcdef?pwd=k9x2">https://pan.baidu.com/s/1abcdef?pwd=k9x2</span>
 				</div>
@@ -280,16 +272,6 @@ html{
 			</div>
 		</div>
 		<div class="jh-card">
-			<h3>入口按钮</h3>
-			<div class="jh-field" style="border:none; padding-top:0;">
-				<span class="jh-name">页面入口按钮</span>
-				<span class="jh-desc">跳转本身全自动，按钮只是查看入口：仅当本页有链接被接管、且找到宿主页头工具栏时才出现，网盘分享页不出现</span>
-				<div class="jh-btns">
-					<button class="jh-btn jh-primary" data-act="entry" data-entry="auto">跟随宿主</button><button class="jh-btn" data-act="entry" data-entry="light">浅色</button><button class="jh-btn" data-act="entry" data-entry="dark">暗色</button><button class="jh-btn" data-act="entry" data-entry="off">不显示</button>
-				</div>
-			</div>
-		</div>
-		<div class="jh-card">
 			<h3>数据</h3>
 			<div class="jh-row"><span class="jh-k">存储键</span><span class="jh-v jh-mono">jh.opt · jh.stat · jh.log</span></div>
 			<div class="jh-row"><span class="jh-k">读取</span><span class="jh-v">提取码从 URL 的 pwd 参数读取，不发任何网络请求</span></div>
@@ -302,12 +284,12 @@ html{
     </div>
     <div class="cell">
       <h2>设置</h2>
-      <p class="cap">10 个功能开关、入口配色三档、49 条站点规则的逐条停用、不处理名单，以及数据清理。</p>
+      <p class="cap">5 个功能开关、49 条站点规则的逐条停用、不处理名单，以及数据清理。</p>
       <div class="stage"><div class="jh-scope jh-open jh-panel-demo" role="dialog" aria-label="链接直跳助手">
 			<div class="jh-head">
 				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"></path></svg>
 				<h2>链接直跳</h2>
-				<span class="jh-ver">v1.3.3</span>
+				<span class="jh-ver">v1.3.4</span>
 				<span class="jh-spacer"></span>
 				<button class="jh-icon-btn" data-act="close" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg></button>
 			</div>
@@ -347,27 +329,27 @@ html{
 			<h3>最近事件</h3>
 			
 				<div class="jh-row">
-					<span class="jh-k">10:04:00</span>
+					<span class="jh-k">12:11:45</span>
 					<span class="jh-pill">带提取码</span>
 					<span class="jh-v jh-mono" title="k9x2">k9x2</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:03:35</span>
+					<span class="jh-k">12:11:20</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://github.com/EFate/js-hub">https://github.com/EFate/js-hub</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:02:46</span>
+					<span class="jh-k">12:10:31</span>
 					<span class="jh-pill">带提取码</span>
 					<span class="jh-v jh-mono" title="7w3q">7w3q</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:01:34</span>
+					<span class="jh-k">12:09:19</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://example.com/post/2026">https://example.com/post/2026</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:00:22</span>
+					<span class="jh-k">12:08:07</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://pan.baidu.com/s/1abcdef?pwd=k9x2">https://pan.baidu.com/s/1abcdef?pwd=k9x2</span>
 				</div>
@@ -435,16 +417,6 @@ html{
 			</div>
 		</div>
 		<div class="jh-card">
-			<h3>入口按钮</h3>
-			<div class="jh-field" style="border:none; padding-top:0;">
-				<span class="jh-name">页面入口按钮</span>
-				<span class="jh-desc">跳转本身全自动，按钮只是查看入口：仅当本页有链接被接管、且找到宿主页头工具栏时才出现，网盘分享页不出现</span>
-				<div class="jh-btns">
-					<button class="jh-btn jh-primary" data-act="entry" data-entry="auto">跟随宿主</button><button class="jh-btn" data-act="entry" data-entry="light">浅色</button><button class="jh-btn" data-act="entry" data-entry="dark">暗色</button><button class="jh-btn" data-act="entry" data-entry="off">不显示</button>
-				</div>
-			</div>
-		</div>
-		<div class="jh-card">
 			<h3>数据</h3>
 			<div class="jh-row"><span class="jh-k">存储键</span><span class="jh-v jh-mono">jh.opt · jh.stat · jh.log</span></div>
 			<div class="jh-row"><span class="jh-k">读取</span><span class="jh-v">提取码从 URL 的 pwd 参数读取，不发任何网络请求</span></div>
@@ -462,7 +434,7 @@ html{
 			<div class="jh-head">
 				<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7.775 3.275a.75.75 0 0 0 1.06 1.06l1.25-1.25a2 2 0 1 1 2.83 2.83l-2.5 2.5a2 2 0 0 1-2.83 0 .75.75 0 0 0-1.06 1.06 3.5 3.5 0 0 0 4.95 0l2.5-2.5a3.5 3.5 0 0 0-4.95-4.95l-1.25 1.25Zm-4.69 9.64a2 2 0 0 1 0-2.83l2.5-2.5a2 2 0 0 1 2.83 0 .75.75 0 0 0 1.06-1.06 3.5 3.5 0 0 0-4.95 0l-2.5 2.5a3.5 3.5 0 0 0 4.95 4.95l1.25-1.25a.75.75 0 0 0-1.06-1.06l-1.25 1.25a2 2 0 0 1-2.83 0Z"></path></svg>
 				<h2>链接直跳</h2>
-				<span class="jh-ver">v1.3.3</span>
+				<span class="jh-ver">v1.3.4</span>
 				<span class="jh-spacer"></span>
 				<button class="jh-icon-btn" data-act="close" title="关闭"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.75.75 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.75.75 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"></path></svg></button>
 			</div>
@@ -502,27 +474,27 @@ html{
 			<h3>最近事件</h3>
 			
 				<div class="jh-row">
-					<span class="jh-k">10:04:00</span>
+					<span class="jh-k">12:11:45</span>
 					<span class="jh-pill">带提取码</span>
 					<span class="jh-v jh-mono" title="k9x2">k9x2</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:03:35</span>
+					<span class="jh-k">12:11:20</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://github.com/EFate/js-hub">https://github.com/EFate/js-hub</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:02:46</span>
+					<span class="jh-k">12:10:31</span>
 					<span class="jh-pill">带提取码</span>
 					<span class="jh-v jh-mono" title="7w3q">7w3q</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:01:34</span>
+					<span class="jh-k">12:09:19</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://example.com/post/2026">https://example.com/post/2026</span>
 				</div>
 				<div class="jh-row">
-					<span class="jh-k">10:00:22</span>
+					<span class="jh-k">12:08:07</span>
 					<span class="jh-pill">免中转</span>
 					<span class="jh-v jh-mono" title="https://pan.baidu.com/s/1abcdef?pwd=k9x2">https://pan.baidu.com/s/1abcdef?pwd=k9x2</span>
 				</div>
@@ -587,16 +559,6 @@ html{
 			<div class="jh-btns" style="margin-top:10px;">
 				<button class="jh-btn" data-act="all-on">全部启用</button>
 				<button class="jh-btn" data-act="reset">恢复默认设置</button>
-			</div>
-		</div>
-		<div class="jh-card">
-			<h3>入口按钮</h3>
-			<div class="jh-field" style="border:none; padding-top:0;">
-				<span class="jh-name">页面入口按钮</span>
-				<span class="jh-desc">跳转本身全自动，按钮只是查看入口：仅当本页有链接被接管、且找到宿主页头工具栏时才出现，网盘分享页不出现</span>
-				<div class="jh-btns">
-					<button class="jh-btn jh-primary" data-act="entry" data-entry="auto">跟随宿主</button><button class="jh-btn" data-act="entry" data-entry="light">浅色</button><button class="jh-btn" data-act="entry" data-entry="dark">暗色</button><button class="jh-btn" data-act="entry" data-entry="off">不显示</button>
-				</div>
 			</div>
 		</div>
 		<div class="jh-card">
