@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.0.0
+// @version      1.0.1
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -11,6 +11,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // @updateURL    https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/zhihu-enhance/zhihu-enhance.user.js
 // @downloadURL  https://raw.githubusercontent.com/EFate/js-hub/refs/heads/main/zhihu-enhance/zhihu-enhance.user.js
 // ==/UserScript==
@@ -22,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.0.0';
+    var VERSION = '1.0.1';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -337,7 +338,7 @@
         .zhx-row-label { font-size:13px; color:var(--zhx-fg); }
         .zhx-row-tip { font-size:11px; color:var(--zhx-fg-2); margin-top:1px; }
         .zhx-switch { position:relative; width:40px; height:22px; flex:none; cursor:pointer; }
-        .zhx-switch input { position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; z-index:1; }
+        .zhx-switch input { position:absolute; top:0; left:0; width:100%; height:100%; margin:0; opacity:0; cursor:pointer; z-index:1; }
         .zhx-switch i { display:block; width:40px; height:22px; border-radius:11px; background:var(--zhx-bd); transition:background .22s; position:relative; }
         .zhx-switch i::after { content:''; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#fff;
             transition:transform .22s cubic-bezier(.4,0,.2,1); }
@@ -354,6 +355,14 @@
     `;
 
     var els = {};   // 懒挂载的 DOM 引用
+
+    // Toast 容器启动即挂载（不可见空容器）：菜单切换开关时无需先打开面板也有反馈
+    function ensureToasts() {
+        if (document.getElementById('zhx-toasts')) return;
+        var toasts = document.createElement('div');
+        toasts.id = 'zhx-toasts';
+        document.body.appendChild(toasts);
+    }
 
     function mountUI() {
         if (els.panel) return;
@@ -396,12 +405,10 @@
             });
         });
 
-        var toasts = document.createElement('div');
-        toasts.id = 'zhx-toasts';
+        ensureToasts();
 
         document.body.appendChild(overlay);
         document.body.appendChild(panel);
-        document.body.appendChild(toasts);
 
         els = { overlay: overlay, panel: panel };
 
@@ -416,6 +423,8 @@
     function closePanel() { els.overlay.classList.remove('zhx-open'); els.panel.classList.remove('zhx-open'); }
 
     function toast(msg, kind) {
+        if (!document.body) return;
+        ensureToasts();   // 自给自足：无论面板/启动时序如何，反馈都可达
         var box = document.getElementById('zhx-toasts');
         if (!box) return;
         var t = document.createElement('div');
@@ -429,11 +438,11 @@
         }, 2200);
     }
 
-    // 开关变更的唯一应用路径：存储 → 对应生效手段
+    // 开关变更的唯一应用路径：存储 → 对应生效手段 → 菜单标签刷新
     function applyOpt(name, value) {
         saveOpt(name, value);
         var def = OPT_DEFS[name];
-        if (name === 'nightMode') { toggleNight(value); return; }
+        if (name === 'nightMode') { toggleNight(value); registerMenu(); return; }
         if (name === 'autoHideHeader') { watchScroll(value); rebuildStyle(); return; }
         if (def) rebuildStyle();
         if (name === 'directLink') applyLink(document);
@@ -448,12 +457,20 @@
         if (el) el.textContent = buildCSS(OPT);
     }
 
+    var menuIds = [];   // 已注册菜单句柄，重注册前先摘除，避免菜单项堆积
+
     function registerMenu() {
-        GM_registerMenuCommand('⚙ 设置面板', openPanel);
-        GM_registerMenuCommand((OPT.nightMode ? '🌙' : '☀️') + ' 夜间模式：' + (OPT.nightMode ? '开' : '关'), function () {
+        if (typeof GM_unregisterMenuCommand === 'function') {
+            for (var i = 0; i < menuIds.length; i++) {
+                try { GM_unregisterMenuCommand(menuIds[i]); } catch (e) { /* 忽略 */ }
+            }
+        }
+        menuIds = [];
+        menuIds.push(GM_registerMenuCommand('⚙ 设置面板', openPanel));
+        menuIds.push(GM_registerMenuCommand((OPT.nightMode ? '🌙' : '☀️') + ' 夜间模式：' + (OPT.nightMode ? '开' : '关'), function () {
             applyOpt('nightMode', !OPT.nightMode);
             toast(OPT.nightMode ? '夜间模式已开启' : '夜间模式已关闭', 'ok');
-        });
+        }));
     }
 
     // ======================================================================
@@ -565,6 +582,7 @@
             watchScroll(OPT.autoHideHeader);
             dynRun();
             watchGifTrigger();
+            ensureToasts();
         }
         if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
         else start();
