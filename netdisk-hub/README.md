@@ -38,7 +38,7 @@
 | 网盘 | 换链接口 | 需要登录 | 直链校验 | 特殊说明 |
 |---|---|---|---|---|
 | **百度网盘（分享页）** | `tplconfig` 取签名 → `sharedownload` 换 dlink | ✅ 必须（Cookie 里的 bdstoken / jsToken） | 下载需 UA `pan.baidu.com` + Referer + Cookie | 超过分享直接下载上限的文件需「保存到网盘」后在内页取 |
-| **百度网盘（内页）** | 静默 OAuth 授权 → `xpan/multimedia?method=filemetas&dlink=1` | ✅ 必须（开放平台 access_token） | 同上 | 首次使用自动完成授权，令牌缓存复用 |
+| **百度网盘（内页）** | 静默 OAuth 授权 → `xpan/multimedia?method=filemetas&dlink=1` | ✅ 必须（开放平台 access_token） | 下载需 UA `pan.baidu.com`+ Referer + Cookie，**且 dlink 必须随链带 `access_token`**（缺失会被判未授权 31326） | 首次使用自动完成授权，令牌缓存复用 |
 | **夸克网盘** | `https://drive-pc.quark.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=ucpro` | 建议登录（未登录有单文件大小上限） | 下载需**夸克客户端 UA** + 页面 Referer + Cookie | 列表页与分享页**共用同一接口**；分享页自动带上分享 ID（`pwd_id`）与 `fids_token` / `stoken`；分批 15、节流 1s |
 | **UC 网盘** | `https://pc-api.uc.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser` | 建议登录（未登录有单文件大小上限） | 下载需 **UC 客户端 UA** + 页面 Referer + Cookie | 同夸克一套协议，但**接口地址与客户端 UA 不同**（混用必然失败），脚本按域名自动分流 |
 

@@ -777,6 +777,19 @@
 		},
 
 		/**
+		 * 开放平台 filemetas 拿到的 dlink 下载时须随链带 access_token，
+		 * 否则被判为未授权（error_code 31326 / user is not authorized）。
+		 * 避免重复拼接：原链已带则原样返回，否则追加 access_token 查询参数。
+		 */
+		baiduDlink(url, token) {
+			const u = String(url || "").trim();
+			if (!/^https?:\/\//i.test(u)) return u;
+			if (!token) return u;
+			if (/([?&])access_token=/.test(u)) return u;
+			return u + (u.indexOf("?") >= 0 ? "&" : "?") + "access_token=" + encodeURIComponent(token);
+		},
+
+		/**
 		 * 百度分享页的运行时参数。字段位置随页面版本不同，逐项兜底：
 		 * uk / shareid / bdstoken 在 locals.dump()，jsToken 挂在 window，
 		 * 带提取码的分享另有 sekey（验证后写入）。
@@ -919,8 +932,10 @@
 				data.list.forEach((it) => {
 					if (!it.dlink) return;
 					const f = byFs[String(it.fs_id)] || {};
+					// 开放平台 filemetas 直链必须随链带 access_token，否则下载被判为
+					// 未授权（31326 / user is not authorized, hitcode:119）
 					out.push({
-						url: it.dlink,
+						url: providerApi.baiduDlink(it.dlink, token),
 						name: f.name || it.server_filename || it.filename || util.nameFromUrl(it.dlink),
 						size: f.size || it.size || 0,
 						headers: providerApi.downloadHeaders(providerApi.byId("baidu"))

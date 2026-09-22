@@ -655,6 +655,7 @@ async function main() {
 		const hit = mod3.links.pool.find((f) => f.url.indexOf("inner?fid=333") >= 0);
 		assert.ok(hit, "直链应入库");
 		assert.strictEqual(hit.name, "模型.onnx", "名字应来自勾选文件（勾选名优先于接口字段）");
+		assert.ok(/access_token=TOK123abc/.test(hit.url), "开放平台直链须随链带 access_token，否则下载被判未授权 31326");
 		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com");
 		assert.ok(/BAIDUID=FFFF111122223333/.test(hit.headers.Cookie || ""), "需页面 Cookie");
 	});
