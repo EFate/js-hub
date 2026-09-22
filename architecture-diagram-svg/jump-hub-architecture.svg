@@ -29,7 +29,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">jump-hub v1.3.1 · 全站链接直跳助手 · 六层架构</text>
+  <text x="24" y="26" class="h1">jump-hub v1.3.3 · 全站链接直跳助手 · 六层架构</text>
   <text x="24" y="45" class="h2">通用识别是主干，站点规则只是加速 —— 没适配过的站点同样能识别；入口按需露脸，网盘终点站收手</text>
 
   <!-- ① 触发层 -->
@@ -73,7 +73,7 @@
 
   <rect x="244" y="250" width="192" height="66" rx="8" class="node"/>
   <text x="340" y="272" class="nt" text-anchor="middle">多层解码 + 幂等回溯</text>
-  <text x="340" y="292" class="nd" text-anchor="middle">base64 / 二次编码 / 3 层套娃</text>
+  <text x="340" y="292" class="nd" text-anchor="middle">base64 / hex / 路径内嵌 / 文本直链</text>
   <text x="340" y="307" class="nd" text-anchor="middle">已是目标地址则原样返回</text>
 
   <rect x="448" y="250" width="192" height="66" rx="8" class="node"/>

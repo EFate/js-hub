@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         链接直跳助手
 // @namespace    js-hub/jump-hub
-// @version      1.3.1
+// @version      1.3.3
 // @description  点一次链接就直接到目标网站：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页，网盘链接自动带上旁边写着的提取码直达并解锁，统一在新标签页打开。全自动、全程零提示，不用选文字、不用点第二次、不用手输提取码。
 // @author       EFate
 // @license      MIT
@@ -65,7 +65,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.3.1";
+	const VERSION = "1.3.3";
 	const ATTR = "data-jh";
 	const KEY = {
 		opt: "jh.opt",
@@ -341,6 +341,20 @@
 		}
 	}
 
+	/**
+	 * 尝试把 hex 串解成 URL（`687474703a2f2f...` = "http://"）。
+	 * 闸门收得很紧：偶数位、纯 hex、≥ 24 位，解出来必须以 http(s):// 开头 ——
+	 * 三者同时成立时，这个串几乎不可能是普通单词或数字串。
+	 */
+	function tryDecodeHex(input) {
+		if (!isString(input)) return "";
+		const s = input.trim();
+		if (s.length < 24 || s.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(s)) return "";
+		let out = "";
+		for (let i = 0; i < s.length; i += 2) out += String.fromCharCode(parseInt(s.slice(i, i + 2), 16));
+		return /^https?:\/\//i.test(out.trim()) ? out.trim() : "";
+	}
+
 	/** 把 `//host/path`、`http:/host` 之类的残缺写法补全成合法 URL */
 	function normalizeCandidate(raw) {
 		let s = String(raw || "").trim();
@@ -456,12 +470,23 @@
 		// ③ 无 key 的裸拼（/transfer?https://...），带 key 时只在跳转路径上采信
 		const raw = rawInnerUrl(url.href, weakOK);
 		if (raw) candidates.push(raw);
+		// ④ 跳转路径里内嵌的编码地址：/go/aHR0cHM6Ly9... /redirect/68747470...
+		//    门控：路径本身就像跳转页（weakOK 已含 isJumpPath）+ 段长 ≥ 12，
+		//    解出来的还必须过 isHttpUrl + shouldJump 的跨站闸门。
+		if (weakOK) {
+			const segs = url.pathname.split("/").filter(Boolean);
+			const last = segs.length ? segs[segs.length - 1] : "";
+			if (last && last.length >= 12 && last.indexOf(".") < 0) candidates.push(last);
+		}
 
 		for (const c of candidates) {
+			const d = decodeLoose(c);
 			const tried = [
 				normToUrl(c),
-				normToUrl(tryDecodeBase64(decodeLoose(c))),
-				normToUrl(tryDecodeBase64(c))
+				normToUrl(tryDecodeBase64(d)),
+				normToUrl(tryDecodeBase64(c)),
+				normToUrl(tryDecodeHex(d)),
+				normToUrl(tryDecodeHex(c))
 			];
 			for (const t of tried) {
 				if (!isHttpUrl(t)) continue;
@@ -973,17 +998,29 @@
 	 *   必须带 `:` 或 `=` 才认 —— 否则 "password below" 会被当成密码 below。
 	 *
 	 * 有意不收 `key`：它的误报率远高于收益（MEGA 的密钥本来也不是 3~8 位）。
+	 *
+	 * **「解压码」单独一档**：它是压缩包密码，不是网盘提取码 —— 拼到 ?pwd= 上只会
+	 * 得到一个错误的码（实例：touchgal 资源列表五行链接只有一行带「提取码 3tfx」、
+	 * 四行带「解压码 Meousck」，照拼全错）。所以它**不参与就近拼码**；但**计入整页
+	 * 码集合** —— 页面上出现它就证明码不止一个，「整页唯一」兜底随之失效，隔壁行
+	 * 的 3tfx 也不会被张冠李戴。
 	 */
-	const PWD_PATTERNS = [
-		/(?:提取码|提取碼|访问码|訪問碼|访问密码|訪問密碼|密码|密碼|解压码|解壓碼|提货码|口令)\s*[:：=]?\s*([A-Za-z0-9]{3,8})/,
+	const PWD_CN_CORE = "提取码|提取碼|访问码|訪問碼|访问密码|訪問密碼|密码|密碼|提货码|口令";
+	const PWD_CN_ARCHIVE = "解压码|解壓碼";
+	const pwdPat = (labels) => [
+		new RegExp("(?:" + labels + ")\\s*[:：=]?\\s*([A-Za-z0-9]{3,8})"),
 		/(?:passcode|password|passwd|pwd)\s*[:：=]\s*([A-Za-z0-9]{3,8})/i,
 		/(?:^|[^A-Za-z0-9])(?:pwd|password)\s*=\s*([A-Za-z0-9]{3,8})/i
 	];
+	// 整页码集合：解压码也计入 —— 证明「页上不止一个码」，锁住整页唯一兜底
+	const PWD_PATTERNS = pwdPat(PWD_CN_CORE + "|" + PWD_CN_ARCHIVE);
+	// 就近拼码：解压码不算 —— 压缩包密码拼给网盘只会得到错误的码
+	const PWD_PATTERNS_NEAR = pwdPat(PWD_CN_CORE);
 
 	function parsePwd(text) {
 		const s = String(text || "").replace(/[\u200b-\u200d\ufeff]/g, "").replace(/[：:]\s*$/, "");
 		if (!s) return "";
-		for (const re of PWD_PATTERNS) {
+		for (const re of PWD_PATTERNS_NEAR) {
 			const m = re.exec(s);
 			if (m && m[1]) return m[1];
 		}
@@ -1364,11 +1401,26 @@
 		if (a.getAttribute(ATTR + "-to")) return false;
 		const href = a.href || "";
 		if (!/^https?:/i.test(href)) return false;
+		const u = safeUrl(href);
+		if (!u) return false;
+		const jumpPage = isJumpPath(u.pathname);
 
 		let to = "";
-		if (href.length >= 24 && href.indexOf("=") >= 0) {
+		// 解析闸门：带参数的（≥24 字符且含 =），或路径本身像跳转页的
+		// （/go/aHR0cHM6... 这类把编码目标内嵌在路径里的，href 里没有 =）
+		if (href.length >= 24 && (href.indexOf("=") >= 0 || jumpPage)) {
 			const real = resolveTarget(href, location.href);
 			if (real && real !== href && shouldJump(href, real, location.href)) to = real;
+		}
+		// 可见文本本身就是完整直链：<a href="/go?x=1">https://target.com/path</a>
+		// 门控收得很紧：href 得是跳转路径 + **整段**可见文本恰好是一个 http URL。
+		// 用户看到什么地址就去什么地址，这正是他们想要的；解析层没剥出壳时兜这条。
+		if (!to && jumpPage) {
+			const txt = String(a.textContent || "").trim();
+			if (txt.length >= 11 && txt.length <= 200 && isHttpUrl(txt)) {
+				const cand = normToUrl(txt);
+				if (isHttpUrl(cand) && shouldJump(href, cand, location.href)) to = cand;
+			}
 		}
 		if (!to && opt.panAuto) {
 			const nd = netdiskTarget(a, href);
