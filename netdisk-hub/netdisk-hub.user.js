@@ -917,7 +917,10 @@
 				const res = await net.text(
 					"https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas&dlink=1"
 					+ "&fsids=" + encodeURIComponent(JSON.stringify(batch))
-					+ "&access_token=" + encodeURIComponent(token)
+					+ "&access_token=" + encodeURIComponent(token),
+					// 参考维护脚本：换链 GET 必须携带 pan.baidu.com UA，
+					// 否则开放平台判为未授权（31326 / hitcode:119）
+					{ "User-Agent": "pan.baidu.com" }
 				);
 				let data = null;
 				try { data = JSON.parse(res.responseText); } catch (e) { data = null; }
