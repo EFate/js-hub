@@ -22,7 +22,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">zhihu-enhance v1.0.1 · 知乎阅读增强助手 · 七层架构</text>
+  <text x="24" y="26" class="h1">zhihu-enhance v1.1.0 · 知乎阅读增强助手 · 七层架构</text>
   <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 11 个开关 / 4 组分类</text>
 
   <!-- L1 配置层 -->
@@ -87,9 +87,9 @@
 
   <rect x="40" y="486" width="192" height="98" rx="8" class="band"/>
   <text x="136" y="507" class="band-t" text-anchor="middle">resolveLink()</text>
-  <text x="136" y="526" class="nd" text-anchor="middle">link.zhihu.com/?target=</text>
-  <text x="136" y="541" class="nd" text-anchor="middle">优先取 target 参数解码</text>
-  <text x="136" y="556" class="nd" text-anchor="middle">编码 URL 片段兜底</text>
+  <text x="136" y="526" class="nd" text-anchor="middle">target= / next= 参数</text>
+  <text x="136" y="541" class="nd" text-anchor="middle">优先取编码 URL 解码</text>
+  <text x="136" y="556" class="nd" text-anchor="middle">编码片段兜底</text>
   <text x="136" y="571" class="nd" text-anchor="middle">仅放行 http(s) 外链</text>
 
   <rect x="244" y="486" width="192" height="98" rx="8" class="node"/>

@@ -11,6 +11,7 @@
 // @match        *://yun.baidu.com/*
 // @match        *://pan.quark.cn/*
 // @match        *://drive.uc.cn/*
+// @match        *://openapi.baidu.com/*
 // @connect      *
 // @connect      localhost
 // @connect      127.0.0.1
@@ -20,6 +21,8 @@
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_openInTab
+// @grant        window.close
 // @run-at       document-start
 // @noframes
 // ==/UserScript==
@@ -896,33 +899,51 @@
 		},
 
 		/**
-		 * 百度静默授权：访问开放平台授权页拿 access_token。与参考脚本同源同流：
-		 * 已授权过 → authorize 直接重定向到 oob（finalUrl 含 access_token），直接取；
-		 * 未授权 → finalUrl 仍停在 authorize，抓表单参数自动提交确认后再取。
-		 * 令牌缓存复用；finalUrl 的 #fragment 个别脚本管理器会剥掉，故兜底再从
-		 * responseText 取一次，二者皆空才算失败。
+		 * 百度授权拿 access_token。流程借鉴参考脚本：
+		 * 1) 缓存命中直接复用；
+		 * 2) 静默 XHR 尝试（个别管理器/授权态下能直接拿到，快但有局限——Baidu 把
+		 *    token 放 #fragment，XHR finalUrl 会剥掉，常拿不到）；
+		 * 3) 失败则开真实标签页走 OAuth：Baidu 授权后 token 出现在落地页
+		 *    location.href 片段里，脚本在 openapi.baidu.com 页捕获并写入缓存，
+		 *    这里轮询等它即可。这正是参考脚本能成功、纯 XHR 反复 31326 的分水岭。
 		 */
 		async baiduGetToken() {
 			const saved = store.get(KEY.baidu).token;
 			if (saved) return saved;
 			const AUTH = "https://openapi.baidu.com/oauth/2.0/authorize?response_type=token&scope=basic,netdisk&client_id=omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO&redirect_uri=oob&confirm_login=0";
-			const fromUrl = (u) => (String(u || "").match(/access_token=([^&]+)/) || [])[1] || "";
-			const pick = (res) => fromUrl(res && res.finalUrl) || fromUrl(res && res.responseText) || "";
-			const first = await net.text(AUTH, { Origin: "", Referer: "" });
-			let token = pick(first);
-			// 与参考脚本一致：finalUrl 还在 authorize，说明未授权，抓表单自动确认
-			if (!token && (first.finalUrl || "").includes("authorize")) {
-				const bdstoken = ((first.responseText || "").match(/name="bdstoken"\s+value="([^"]+)"/) || [])[1] || "";
-				const clientId = ((first.responseText || "").match(/name="client_id"\s+value="([^"]+)"/) || [])[1] || "";
-				const body = "grant_permissions_arr=netdisk&bdstoken=" + encodeURIComponent(bdstoken)
-					+ "&client_id=" + encodeURIComponent(clientId)
-					+ "&response_type=token&display=page&grant_permissions=" + encodeURIComponent("basic,netdisk");
-				// authorize 提交返回的是 HTML 跳转页而非 JSON，走 postFormRaw 原样接收
-				await net.postFormRaw(AUTH, body, { Origin: "", Referer: "" });
-				token = pick(await net.text(AUTH, { Origin: "", Referer: "" }));
+			let token = "";
+			// 快速路径：静默 XHR（拿不到也不阻塞，无碍走标签页授权）
+			try {
+				const fromUrl = (u) => (String(u || "").match(/access_token=([^&]+)/) || [])[1] || "";
+				const pick = (res) => fromUrl(res && res.finalUrl) || fromUrl(res && res.responseText) || "";
+				let first = await net.text(AUTH, { Origin: "", Referer: "" });
+				token = pick(first);
+				if (!token && (first.finalUrl || "").includes("authorize")) {
+					const bdstoken = ((first.responseText || "").match(/name="bdstoken"\s+value="([^"]+)"/) || [])[1] || "";
+					const clientId = ((first.responseText || "").match(/name="client_id"\s+value="([^"]+)"/) || [])[1] || "";
+					const body = "grant_permissions_arr=netdisk&bdstoken=" + encodeURIComponent(bdstoken)
+						+ "&client_id=" + encodeURIComponent(clientId)
+						+ "&response_type=token&display=page&grant_permissions=" + encodeURIComponent("basic,netdisk");
+					await net.postFormRaw(AUTH, body, { Origin: "", Referer: "" });
+					token = pick(await net.text(AUTH, { Origin: "", Referer: "" }));
+				}
+			} catch (e) { token = ""; }
+			if (token) { store.patch(KEY.baidu, { token }); return token; }
+
+			// 真实标签页授权：netdisk-hub 在 openapi.baidu.com 落地页捕获 token 入库
+			if (typeof GM_openInTab === "function") {
+				try { GM_openInTab(AUTH, { active: true, insert: true, setParent: true }); }
+				catch (e) { try { window.open(AUTH, "_blank"); } catch (e2) { /* 忽略 */ } }
+			} else {
+				try { window.open(AUTH, "_blank"); } catch (e) { /* 忽略 */ }
 			}
-			if (token) store.patch(KEY.baidu, { token });
-			return token;
+			const t0 = Date.now();
+			while (Date.now() - t0 < 120000) {
+				const tok = store.get(KEY.baidu).token;
+				if (tok) return tok;
+				await util.sleep(1000);
+			}
+			return "";
 		},
 
 		/**
@@ -1799,19 +1820,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 
       <div class="nd-card">
         <div class="nd-card-head">
-          <h3>百度网盘授权</h3>
-        </div>
-        <div class="nd-card-body">
-          <div class="nd-field">
-            <button class="nd-btn nd-primary" data-act="baidu-auth">重新授权</button>
-            <span class="nd-field-hint" data-el="baidu-auth-status"></span>
-          </div>
-          <div class="nd-field-hint">网盘内页换直链需要一次百度开放平台授权：首次换链时自动完成，无需手动操作；此处仅用于授权异常时手动重试。</div>
-        </div>
-      </div>
-
-      <div class="nd-card">
-        <div class="nd-card-head">
           <h3>偏好设置</h3>
         </div>
         <div class="nd-card-body">
@@ -1887,7 +1895,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 				case "caught-idm": return ui.caughtIdm(id, act);
 				case "test-aria": return ui.testAria(act);
 				case "save-aria": return ui.saveAria(act);
-				case "baidu-auth": return ui.baiduAuth(act);
 				case "copy-report": return ui.copyReport();
 				default: return undefined;
 			}
@@ -2221,7 +2228,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			ui.root.querySelectorAll("[data-opt]").forEach((el) => {
 				el.checked = !!opt[el.getAttribute("data-opt")];
 			});
-			ui.syncBaiduAuthStatus(store.get(KEY.baidu).token ? "已授权（令牌已缓存）" : "未授权（首次换链时自动完成）");
 			ui.syncEntrySeg();
 		},
 
@@ -2267,25 +2273,6 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			setTimeout(() => ui.busy(btn, false), 1200);
 		},
 
-		/** 百度手动重授权（正常情况下首次换链会自动完成，无需动这里） */
-		async baiduAuth(btn) {
-			store.patch(KEY.baidu, { token: "" });
-			ui.syncBaiduAuthStatus("授权中…");
-			ui.busy(btn, true, "授权中…");
-			try {
-				const token = await providerApi.baiduGetToken();
-				ui.syncBaiduAuthStatus(token ? "已授权（令牌已缓存）" : "授权未成功：请确认浏览器已登录百度账号");
-			} catch (e) {
-				ui.syncBaiduAuthStatus("授权失败：" + e.message);
-			}
-			ui.busy(btn, false);
-		},
-
-		syncBaiduAuthStatus(text) {
-			const el = ui.root && ui.root.querySelector('[data-el="baidu-auth-status"]');
-			if (el) el.textContent = text;
-		},
-
 		async testAria(btn) {
 			const cfg = Object.assign({}, store.aria(), ui.readConfigForm());
 			const status = ui.root.querySelector('[data-el="aria-status"]');
@@ -2312,6 +2299,34 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 	function boot() {
 		if (typeof document === "undefined" || typeof window === "undefined") return;
 		if (document.getElementById("nd-style")) return; // 重复注入保护
+
+		// --- 百度 OAuth 落地页（@match openapi.baidu.com 时脚本也在此运行）---
+		// 借鉴参考脚本：Baidu 授权后把 access_token 拼进 location.href 的片段
+		// （#access_token=…）。片段在真实标签页里可见，而 XHR 的 finalUrl 会剥掉
+		// 它 —— 这正是静默授权反复拿不到 token 的原因。此处捕获并写入缓存。
+		if (/^https:\/\/openapi\.baidu\.com\//.test(location.href)) {
+			try {
+				const href = location.href;
+				const m = href.match(/[?#&_]access_token=([^&]+)/);
+				if (m && /(basic[+,]netdisk|netdisk)/.test(href)) {
+					store.patch(KEY.baidu, { token: decodeURIComponent(m[1]) });
+					try { setTimeout(() => { try { window.close(); } catch (e) { /* 忽略 */ } }, 2500); } catch (e) { /* 忽略 */ }
+				} else if (/\/oauth\/2\.0\/authorize/.test(href)
+					&& href.indexOf("omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO") >= 0
+					&& /response_type=token/.test(href)) {
+					// 授权确认页：符合本脚本应用即自动点「授权」，和参考脚本一致
+					let tried = 0;
+					const poll = setInterval(() => {
+						try {
+							const allow = document.getElementById("auth-allow");
+							if (allow) { allow.click(); clearInterval(poll); return; }
+						} catch (e) { /* 忽略 */ }
+						if (++tried > 50) clearInterval(poll);
+					}, 300);
+				}
+			} catch (e) { /* 忽略 */ }
+			return; // openapi 页只做授权捕获，不注入面板
+		}
 
 
 		// 其余工作等 DOM 就绪再跑（@run-at document-start 时 body 还不存在）
