@@ -48,7 +48,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.5.7";
+	const VERSION = "1.5.8";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -1241,6 +1241,23 @@
 		},
 
 		/**
+		 * SPA 守护心跳：定时驱动一次「入口还在不在」的检查。
+		 * 网盘页面是单页应用，进入文件夹等路由切换会把工具栏整块重渲染，
+		 * 注入的按钮随之被拆走 —— waitFor 命中一次就收工，覆盖不了这种场景。
+		 * 不用 MutationObserver 常驻监听（长期持有观察器代价高），
+		 * 用低频轮询：真实浏览器 1.5s 一拍，无布局环境（测试）300ms 一拍。
+		 */
+		watch(tick) {
+			if (typeof document === "undefined" || typeof setInterval !== "function") return;
+			if (inject.guardTimer) return;   // 守护只需一个，重复 mount 不叠加
+			const timer = setInterval(() => {
+				try { tick(); } catch (e) { /* 单拍异常不得中断守护 */ }
+			}, inject.hasLayout() ? 1500 : 300);
+			if (timer && typeof timer.unref === "function") timer.unref();   // 不阻塞测试进程退出
+			inject.guardTimer = timer;
+		},
+
+		/**
 		 * 确保入口样式已就位。
 		 * 入口按钮在页面加载期就创建，而面板样式是懒挂载的 —— 若两者共用一份样式，
 		 * 按钮会有一整段时间处于「无样式」状态（图标撑成巨块、没有边框与底色）。
@@ -1409,44 +1426,70 @@
 				note: ""
 			};
 
-			let settled = false;
-			const place = (host, via, anchor) => {
-				if (settled || !host) return;
-				settled = true;
-				inject.report.via = via;
-				inject.report.done = true;
-				try {
-					inject.report.host = host.tagName + (host.className ? "." + String(host.className).trim().split(/\s+/).slice(0, 2).join(".") : "");
-				} catch (e) { /* 忽略 */ }
-				if (host.querySelector("." + inject.FLAG)) return;   // 防重复注入
-				const btn = inject.entry(provider);
-				/**
-				 * 位置：优先 append 到容器末尾 —— 入口落在工具栏最右侧，
-				 * 与「保存到网盘 / 下载」等主操作同一排、且不打断原生排列。
-				 * 仅当容器本身就是那个按钮时才插在它之后。
-				 */
-				if (anchor && host === anchor) {
-					anchor.insertAdjacentElement("afterend", btn);
-				} else {
-					host.append(btn);
-				}
-			};
+		let settled = false;
+		let placedBtn = null;   // 已放置的入口：SPA 重渲染拆走按钮后靠它发现
+		const place = (host, via, anchor) => {
+			if (settled || !host) return;
+			settled = true;
+			inject.report.via = via;
+			inject.report.done = true;
+			try {
+				inject.report.host = host.tagName + (host.className ? "." + String(host.className).trim().split(/\s+/).slice(0, 2).join(".") : "");
+			} catch (e) { /* 忽略 */ }
+			const exist = host.querySelector("." + inject.FLAG);
+			if (exist) { placedBtn = exist; return; }   // 防重复注入
+			const btn = inject.entry(provider);
+			placedBtn = btn;
+			/**
+			 * 位置：优先 append 到容器末尾 —— 入口落在工具栏最右侧，
+			 * 与「保存到网盘 / 下载」等主操作同一排、且不打断原生排列。
+			 * 仅当容器本身就是那个按钮时才插在它之后。
+			 */
+			if (anchor && host === anchor) {
+				anchor.insertAdjacentElement("afterend", btn);
+			} else {
+				host.append(btn);
+			}
+		};
 
-			selectors.forEach((selector) => {
-				inject.waitFor(selector, (host) => place(host, "精确选择器 " + selector, null));
-			});
+		selectors.forEach((selector) => {
+			inject.waitFor(selector, (host) => place(host, "精确选择器 " + selector, null));
+		});
 
-			// ② 文案匹配兜底：精确选择器没能命中时，用页面上的动作按钮定位
-			setTimeout(() => {
-				if (settled) return;
+		// ② 文案匹配兜底：精确选择器没能命中时，用页面上的动作按钮定位
+		setTimeout(() => {
+			if (settled) return;
+			const hit = inject.actionHost();
+			if (hit) {
+				place(hit.host, "文案匹配「" + (hit.anchor.textContent || "").trim().slice(0, 8) + "」", hit.anchor);
+			} else {
+				inject.report.note = "精确选择器与文案匹配均未命中 —— 可用脚本管理器菜单打开面板";
+			}
+		}, inject.fallbackDelay);
+
+		// ③ SPA 守护：进入文件夹等路由切换会把工具栏整块重渲染，按钮随之被拆走。
+		// 定期检查入口是否还连在文档里；被拆走（或始终没挂上）就重新走一遍放置逻辑。
+		const mountDoc = (typeof document !== "undefined") ? document : null;
+		inject.watch(() => {
+			if (!mountDoc) return;
+			if (placedBtn && placedBtn.isConnected === false) {
+				placedBtn = null;
+				settled = false;
+				inject.report.done = false;
+			}
+			if (settled) return;
+			const sels = inject.selectorsFor(provider);
+			for (let i = 0; i < sels.length; i++) {
+				let host = null;
+				try { host = mountDoc.querySelector(sels[i]); } catch (e) { continue; }
+				if (host) { place(host, "精确选择器 " + sels[i], null); break; }
+			}
+			if (!settled) {
 				const hit = inject.actionHost();
-				if (hit) {
-					place(hit.host, "文案匹配「" + (hit.anchor.textContent || "").trim().slice(0, 8) + "」", hit.anchor);
-				} else {
-					inject.report.note = "精确选择器与文案匹配均未命中 —— 可用脚本管理器菜单打开面板";
-				}
-			}, inject.fallbackDelay);
-		},
+				if (hit) place(hit.host, "文案匹配「" + (hit.anchor.textContent || "").trim().slice(0, 8) + "」", hit.anchor);
+			}
+		});
+	},
 
 		/** 启动注入：仅在识别到网盘且其配置了挂载点时执行 */
 		start() {

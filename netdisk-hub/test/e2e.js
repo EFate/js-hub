@@ -828,6 +828,47 @@ async function main() {
 		const direct = Array.prototype.indexOf.call(document.body.children, entry) >= 0;
 		assert.ok(!direct, "入口不应直挂 body");
 	});
+
+	console.log("\n[SPA 路由切换：进入文件夹后入口自愈]");
+	// 复现用户报障：进入文件夹时 SPA 把工具栏整块重渲染，按钮随之被拆走。
+	// 旧实现 waitFor 命中一次即收工，此处应当永久失联；新实现靠守护心跳自愈。
+	{
+		const oldRow = document.querySelector(".toolbar-row");
+		const oldEntry = oldRow.querySelector(".nd-entry");
+		oldRow.remove();
+		const pageMain = document.querySelector(".page-main");
+		const newRow = document.createElement("div");
+		newRow.className = "toolbar-row";
+		const up = document.createElement("button"); up.textContent = "上传";
+		const down = document.createElement("button"); down.textContent = "下载";
+		newRow.appendChild(up); newRow.appendChild(down);
+		pageMain.insertBefore(newRow, pageMain.firstChild);
+		assert.ok(oldEntry.isConnected === false, "前置：旧入口已随旧工具栏被移除");
+		await tick(800);   // 守护心跳 300ms 一拍，留足两拍
+		t("进入文件夹（工具栏整块重渲染）后入口自动重新挂载", () => {
+			const entry = newRow.querySelector(".nd-entry");
+			assert.ok(entry, "新工具栏内应重新出现入口");
+			assert.strictEqual(document.querySelectorAll(".nd-entry").length, 1, "全页只应有一个入口");
+			assert.strictEqual(newRow.lastElementChild, entry, "入口应在新按钮排末尾（最右侧）");
+			assert.ok(entry.isConnected, "入口应连在文档里");
+		});
+		t("重挂后注入现场记录同步更新（可诊断）", () => {
+			assert.strictEqual(mod5.inject.report.done, true, "report.done 应恢复为已注入");
+			assert.ok(newRow.contains(document.querySelector(".nd-entry")), "现场记录与实际位置一致");
+		});
+		t("再次拆掉仍能再次自愈（守护不熄火）", async () => {
+			newRow.remove();
+			const row3 = document.createElement("div");
+			row3.className = "toolbar-row";
+			const up3 = document.createElement("button"); up3.textContent = "上传";
+			row3.appendChild(up3);
+			pageMain.insertBefore(row3, pageMain.firstChild);
+			await tick(800);
+			const entry = row3.querySelector(".nd-entry");
+			assert.ok(entry, "第三次渲染的工具栏内应仍有入口");
+			assert.strictEqual(document.querySelectorAll(".nd-entry").length, 1);
+		});
+	}
 	await Promise.all(pending);   // 等齐所有异步断言，避免假绿
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);
