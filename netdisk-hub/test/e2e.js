@@ -648,6 +648,7 @@ async function main() {
 		assert.ok(req.url.includes("access_token=TOK123abc"), "应携带授权令牌");
 		assert.ok(req.url.includes("dlink=1"), "应声明需要 dlink");
 		assert.strictEqual((req.headers || {})["User-Agent"], "pan.baidu.com", "filemetas 请求须带 pan.baidu.com UA，否则被判未授权");
+		assert.strictEqual(req.withCredentials, true, "跨域换链须随行登录 Cookie（withCredentials），否则 31326 未授权");
 	});
 	t("令牌已缓存（下次换链不再重复授权）", () => {
 		assert.strictEqual(storeMap3.get("nd.baidu").token, "TOK123abc");

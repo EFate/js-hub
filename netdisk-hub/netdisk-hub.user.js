@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.5.9
+// @version      1.5.10
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -244,7 +244,10 @@
 				? GM_xmlhttpRequest
 				: (typeof GM !== "undefined" && GM && util.isFn(GM.xmlHttpRequest) ? GM.xmlHttpRequest.bind(GM) : null);
 			if (!gm) throw new Error("当前脚本管理器不提供 GM_xmlhttpRequest，无法发起跨域请求。");
-			return gm(Object.assign({ timeout: 30000 }, opt));
+			// withCredentials: 跨域取登录 Cookie。百度开放平台 filemetas 校验
+			// access_token 对应账号的登录态，请求不带 Cookie 会被判未授权
+			// （31326 / user is not authorized, hitcode:119）。参考维护脚本亦开启此项。
+			return gm(Object.assign({ timeout: 30000, withCredentials: true }, opt));
 		},
 
 		/** POST JSON，用于 Aria2 JSON-RPC */
@@ -924,9 +927,13 @@
 				);
 				let data = null;
 				try { data = JSON.parse(res.responseText); } catch (e) { data = null; }
-				if (data && data.errno === 9019) {
+				// 开放平台可能返回两种错误形态：errno（旧）或 error_code（OAuth 层）。
+				// 9019 / 31326 都表示令牌不可用，清缓存触发重新静默授权。
+				if (data && (data.errno === 9019 || data.error_code === 31326)) {
 					store.patch(KEY.baidu, { token: "" });
-					throw new Error("百度访问令牌已过期，已自动清除授权 —— 请重新打开面板再取一次。");
+					throw new Error(data.error_code === 31326
+						? "百度授权已失效（31326 未授权），已自动清除 —— 请重新打开面板再取一次。"
+						: "百度访问令牌已过期，已自动清除授权 —— 请重新打开面板再取一次。");
 				}
 				if (data && data.errno === 112) throw new Error("页面已过期，刷新后重试。（errno 112）");
 				if (!data || data.errno !== 0 || !Array.isArray(data.list)) {
