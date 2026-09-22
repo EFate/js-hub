@@ -2,7 +2,6 @@
 
 一个油猴脚本（Tampermonkey / Violentmonkey / ScriptCat）：**点一次链接就直接到目标网站**，中间那些「安全提示 / 即将离开 / 确认跳转」的中转页统统跳过；网盘链接顺带把提取码也办了，统一在新标签页打开。
 
-> 当前版本 **v1.3.3** · 变更记录见 `update.md` · 界面预览见 `preview.html`
 
 ---
 
@@ -215,3 +214,9 @@ mkdir -p ../.tmp && cd ../.tmp && npm i jsdom
 | `jh.installed` | 首次安装提示标记 |
 
 想清空：「设置 → 数据 → 重置统计与日志」，或在菜单里点「已免中转 N 次」。
+
+---
+
+## Author
+
+**EFate**
