@@ -37,16 +37,18 @@
 
 | 网盘 | 换链接口 | 需要登录 | 直链校验 | 特殊说明 |
 |---|---|---|---|---|
-| **百度网盘（分享页）** | `tplconfig` 取签名 → `sharedownload` 换 dlink | ✅ 必须（Cookie 里的 bdstoken / jsToken） | 下载需 UA `pan.baidu.com` + Referer + Cookie | 超过分享直接下载上限的文件需「保存到网盘」后在内页取 |
-| **百度网盘（内页）** | 静默 OAuth 授权 → `xpan/multimedia?method=filemetas&dlink=1` | ✅ 必须（开放平台 access_token） | 下载需 UA `pan.baidu.com`+ Referer + Cookie，**且 dlink 必须随链带 `access_token`**（缺失会被判未授权 31326） | 首次使用自动完成授权，令牌缓存复用 |
+| **百度网盘（分享页）** | `tplconfig` 取签名 → `sharedownload` 换 dlink | ✅ 必须（Cookie 里的 bdstoken / jsToken） | 下载需 UA `pan.baidu.com`；**不带 Referer / Cookie** | 超过分享直接下载上限的文件需「保存到网盘」后在内页取 |
+| **百度网盘（内页）** | OAuth 授权（30x 追踪 + 落地页捕获）→ `xpan/multimedia?method=filemetas&dlink=1` | ✅ 必须（开放平台 access_token） | 下载需 UA `pan.baidu.com`；**不带 Referer / Cookie**，且 dlink 必须随链带 `access_token`（否则判未授权 31326） | 首次使用自动完成授权（含自动确认表单），令牌缓存复用；令牌失效自动续期重试一次 |
 | **夸克网盘** | `https://drive-pc.quark.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=ucpro` | 建议登录（未登录有单文件大小上限） | 下载需**夸克客户端 UA** + 页面 Referer + Cookie | 列表页与分享页**共用同一接口**；分享页自动带上分享 ID（`pwd_id`）与 `fids_token` / `stoken`；分批 15、节流 1s |
 | **UC 网盘** | `https://pc-api.uc.cn/1/clouddrive/file/download?entry=ft&fr=pc&pr=UCBrowser` | 建议登录（未登录有单文件大小上限） | 下载需 **UC 客户端 UA** + 页面 Referer + Cookie | 同夸克一套协议，但**接口地址与客户端 UA 不同**（混用必然失败），脚本按域名自动分流 |
+
+> **为什么百度不能带 Referer / Cookie？** 百度开放平台（xpan）直链校验的是「UA + `access_token`」这一对。一旦随行 `pan.baidu.com` 的 Referer 与登录 Cookie，服务器会把它当成**网页端会话**去校验，与开放平台令牌口径冲突，直接回 `31326 / user is not authorized`。夸克与 UC 相反，它们的直链**必须**带页面 Referer 与 Cookie。脚本按网盘分别处理（内部 `credential` 开关只对夸克 / UC 生效）。
 
 ### 直链的时效与使用要点
 
 - **直链带签名，有时效**（几分钟到几小时不等）—— 换到后尽快推送，过期了重新获取
-- **请求头必须随行**：直链不是裸地址，网盘会校验 UA / Referer / Cookie，脚本已自动随直链保存并带入 Aria2 推送
-- **错误提示直达根因**：未登录 → 提示登录；游客超限 → 提示登录后获取；分享页过期 → 提示刷新页面
+- **请求头必须随行**：直链不是裸地址，网盘会校验请求头，脚本已按网盘自动随链保存并带入 Aria2 推送
+- **错误提示直达根因**：未登录 → 提示登录；游客超限 → 提示登录后获取；分享页过期 → 提示刷新页面；令牌失效 → 自动续期重试
 - **换链走网盘自己的账号身份**：脚本用的是浏览器里的登录态（Cookie），所以在哪台机器、哪个账号登录，换出的就是那个账号的直链
 
 ---
@@ -146,11 +148,11 @@ netdisk-hub/
 ```bash
 node --check netdisk-hub.user.js   # 语法校验
 node test/smoke.js                 # 冒烟测试（64 项）
-node test/e2e.js                   # 端到端（66 项，需先装 jsdom）
+node test/e2e.js                   # 端到端（72 项，需先装 jsdom）
 node test/preview.js               # 重新生成界面预览
 ```
 
-端到端测试覆盖五个场景：**夸克全链路**（注入 → 识别 → 换链 → 推送 Aria2）、**百度分享页**（签名换链）、**百度网盘内页**（静默授权 → filemetas）、**UC 分享页**（独立接口与 UA）、**网盘改版兜底**（精确选择器全部落空时按文案注入）。jsdom 依赖装在仓库根的 `.tmp`：
+端到端测试覆盖六个场景：**夸克全链路**（注入 → 识别 → 换链 → 推送 Aria2）、**百度分享页**（签名换链）、**百度网盘内页**（授权 → filemetas）、**UC 分享页**（独立接口与 UA）、**网盘改版兜底**（精确选择器全部落空时按文案注入）、**百度 31326 专项回归**（30x 重定向追踪 / 缓存令牌失效自动续期 / dlink 覆盖写令牌 / 下载头不带 Referer·Cookie）。另有 **SPA 路由切换自愈**（进入文件夹后入口自动重挂）。jsdom 依赖装在仓库根的 `.tmp`：
 
 ```bash
 mkdir -p ../.tmp && cd ../.tmp && npm i jsdom

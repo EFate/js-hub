@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.5.12
+// @version      1.5.13
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -51,7 +51,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.5.8";
+	const VERSION = "1.5.13";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -247,9 +247,10 @@
 				? GM_xmlhttpRequest
 				: (typeof GM !== "undefined" && GM && util.isFn(GM.xmlHttpRequest) ? GM.xmlHttpRequest.bind(GM) : null);
 			if (!gm) throw new Error("当前脚本管理器不提供 GM_xmlhttpRequest，无法发起跨域请求。");
-			// withCredentials: 跨域取登录 Cookie。百度开放平台 filemetas 校验
-			// access_token 对应账号的登录态，请求不带 Cookie 会被判未授权
-			// （31326 / user is not authorized, hitcode:119）。参考维护脚本亦开启此项。
+			// withCredentials: 跨域随行登录 Cookie。**换链接口**（如百度 filemetas）
+			// 需借此确认令牌对应账号的登录态，参考实现同样开启。
+			// ⚠️ 注意区分：这里是「取链请求」，必须带 Cookie；
+			// 而百度**直链的下载请求**恰恰相反 —— 不能带 Cookie/Referer（见 downloadHeaders）。
 			return gm(Object.assign({ timeout: 30000, withCredentials: true }, opt));
 		},
 
@@ -355,6 +356,30 @@
 					ontimeout: () => reject(new Error("请求超时：" + url))
 				});
 			});
+		},
+
+		/**
+		 * 追踪 30x 拿最终 URL。百度 OAuth 的令牌藏在重定向链末端：
+		 * authorize → login → login_success#access_token=...，一次 XHR 只拿到中间跳转，
+		 * 必须顺着 30x 逐跳递归（参考实现 getFinal 同款做法）。
+		 * 最多 6 跳，防止重定向环把请求拖死。
+		 */
+		async getFinal(url, headers, depth) {
+			const MAX = depth || 6;
+			let current = url;
+			const hdrs = util.standHeaders(headers);
+			for (let i = 0; i < MAX; i++) {
+				let res;
+				try { res = await net.text(current, hdrs); } catch (e) { return current; }
+				// GM_xmlhttpRequest 的 finalUrl 已经跟完了重定向链，多数情况下一次即终点
+				const next = (res && res.finalUrl) || current;
+				const status = res && res.status;
+				if (next && next !== current) { current = next; continue; }   // 还有下一跳
+				// finalUrl 与请求地址相同：仅在明确是 30x 时才值得再试一次
+				if (typeof status === "number" && status >= 300 && status < 400 && i + 1 < MAX) continue;
+				break;
+			}
+			return current;
 		}
 	};
 
@@ -652,9 +677,10 @@
 				home: [".wp-s-agile-tool-bar__header"],
 				share: [".module-share-top-bar .x-button-box"]
 			},
-			header: { "User-Agent": "pan.baidu.com", "Referer": "https://pan.baidu.com/" },
-			/** 直链下载校验页面 Referer 与 Cookie，缺失会被判为盗链（与夸克同款 403） */
-			credential: true,
+			// 百度直链要求 UA 为 pan.baidu.com；**不带 Referer** ——
+			// 开放平台口径下 Referer/Cookie 会把请求降级成网页端会话校验，
+			// 与 access_token 冲突并回 31326。故此处只给 UA，credential 保持关闭。
+			header: { "User-Agent": "pan.baidu.com" },
 			hint: "百度网盘：请在文件列表中勾选目标文件，再点「获取直链」。",
 
 			/** 读取勾选文件：取数自 Vue 实例（新旧两版页面各有一条通道） */
@@ -698,7 +724,7 @@
 				let token = store.get(KEY.baidu).token;
 				if (!token) token = await providerApi.baiduGetToken();
 				if (!token) {
-					throw new Error("百度自动授权未成功：请确认浏览器已登录百度账号，然后重新打开面板。");
+					throw new Error("百度授权未完成：请在弹出的百度授权页确认授权（若未弹出请检查是否被浏览器拦截），然后重新打开面板。");
 				}
 				return providerApi.baiduHomeResolve(files, token);
 			}
@@ -757,9 +783,14 @@
 		/**
 		 * 直链下载所需的请求头。
 		 * provider.header 里的静态头（百度是 UA pan.baidu.com）先铺开，
-		 * provider.ua 覆盖 User-Agent（夸克要求客户端 UA）；对标记了 credential
-		 * 的网盘再补上页面级 Referer 与 Cookie —— 两家直链都校验这两项，
-		 * 只带 UA 会被判为盗链（403）。
+		 * provider.ua 覆盖 User-Agent（夸克要求客户端 UA）……
+		 *
+		 * ⚠️ 百度**不能**带页面 Referer / Cookie：
+		 * 开放平台（xpan）直链校验的是 UA + access_token 这一对，
+		 * 一旦随行 pan.baidu.com 的 Referer 与登录 Cookie，服务器会把它当成
+		 * 「网页端会话」去校验，与开放平台令牌口径冲突，直接回 31326 未授权。
+		 * 参考实现下载百度直链时显式传 `{ Origin: "", Referer: "" }`（UA 仍是
+		 * pan.baidu.com），正是这个原因。所以 credential 只对夸克 / UC 生效。
 		 */
 		downloadHeaders(provider) {
 			const p = provider || providerApi.current();
@@ -803,16 +834,25 @@
 		},
 
 		/**
-		 * 开放平台 filemetas 拿到的 dlink 下载时须随链带 access_token，
-		 * 否则被判为未授权（error_code 31326 / user is not authorized）。
-		 * 避免重复拼接：原链已带则原样返回，否则追加 access_token 查询参数。
+		 * 给 dlink 挂上 access_token。
+		 * 参考实现的做法是 `new URL(dlink)` 后 `searchParams.set("access_token", tok)`
+		 * —— **覆盖式写入**，而不是「没有才追加」。这一点很关键：
+		 * filemetas 返回的 dlink 有时自带一个过期/无效的 access_token，
+		 * 只做「不存在才追加」会把这个坏值原样带到下载请求里，
+		 * 服务器照样回 31326。这里与参考实现对齐：只要拿到有效令牌就覆盖写。
+		 * 无令牌时保持原链（分享页 dlink 不依赖开放平台令牌）。
 		 */
 		baiduDlink(url, token) {
 			const u = String(url || "").trim();
 			if (!/^https?:\/\//i.test(u)) return u;
 			if (!token) return u;
-			if (/([?&])access_token=/.test(u)) return u;
-			return u + (u.indexOf("?") >= 0 ? "&" : "?") + "access_token=" + encodeURIComponent(token);
+			try {
+				const parsed = new URL(u);
+				parsed.searchParams.set("access_token", token);
+				return parsed.href;
+			} catch (e) {
+				return u;
+			}
 		},
 
 		/**
@@ -842,8 +882,8 @@
 		/**
 		 * 百度分享页换链：tplconfig 取签名 → sharedownload 逐个换 dlink。
 		 * 错误码直达文案：112 页面过期、9019 令牌过期；list 为字符串表示文件
-		 * 超出分享直接下载的大小上限。换出的 dlink 下载时需 UA pan.baidu.com +
-		 * 页面 Referer + Cookie，统一由 downloadHeaders 随行带出。
+		 * 超出分享直接下载的大小上限。换出的 dlink 下载时只需 UA pan.baidu.com
+		 * （**不带 Referer / Cookie**，否则与开放平台令牌口径冲突回 31326）。
 		 */
 		async baiduResolve(files, info) {
 			const enc = (v) => encodeURIComponent(String(v === undefined || v === null ? "" : v));
@@ -887,8 +927,11 @@
 				}
 				const it = res.list[0] || {};
 				if (!it.dlink) throw new Error("接口未返回直链，请刷新页面重试。");
+				// 对齐参考实现：分享页 dlink 同样经 searchParams.set("access_token")
+				// 覆盖写入。分享链接在部分页面形态下会带一个失效的令牌，
+				// 传下去会被判未授权（31326）；有有效令牌时统一覆盖最稳。
 				out.push({
-					url: it.dlink,
+					url: providerApi.baiduDlink(it.dlink, store.get(KEY.baidu).token),
 					name: f.name || it.server_filename || util.nameFromUrl(it.dlink),
 					size: f.size || it.size || 0,
 					headers: providerApi.downloadHeaders(providerApi.byId("baidu"))
@@ -899,38 +942,58 @@
 		},
 
 		/**
-		 * 百度授权拿 access_token。流程借鉴参考脚本：
-		 * 1) 缓存命中直接复用；
-		 * 2) 静默 XHR 尝试（个别管理器/授权态下能直接拿到，快但有局限——Baidu 把
-		 *    token 放 #fragment，XHR finalUrl 会剥掉，常拿不到）；
-		 * 3) 失败则开真实标签页走 OAuth：Baidu 授权后 token 出现在落地页
-		 *    location.href 片段里，脚本在 openapi.baidu.com 页捕获并写入缓存，
-		 *    这里轮询等它即可。这正是参考脚本能成功、纯 XHR 反复 31326 的分水岭。
+		 * 百度授权拿 access_token。流程逐项对齐参考实现（ref/提取网盘直链.js getToken）：
+		 *
+		 *   ① getFinal 追踪 authorize 的重定向链：
+		 *      · 落地 URL 含 access_token → 已是授权态，直接取用（**且会顺路刷新过期令牌**，
+		 *        这一步是 31326 的头号克星：修复前只读单次 finalUrl，重定向链没跟完就判定
+		 *        「没拿到」，于是每次换链都带着空/旧令牌去请求，服务器一律回 31326）；
+		 *      · 落地 URL 含 authorize → 尚未授权，进 ②；
+		 *   ② GET authorize 页取 HTML 里的 bdstoken / client_id，POST 表单自动确认授权；
+		 *   ③ 再 getFinal 一次取回 access_token；
+		 *   ④ 都不成 → 开真实标签页走人工授权，由本篇的登录成功页捕获分支写缓存，
+		 *      这里轮询等它（120 秒）。
+		 *
+		 * 取到即写入缓存；9019 / 31326 时由调用方清缓存触发重走本流程。
 		 */
 		async baiduGetToken() {
-			const saved = store.get(KEY.baidu).token;
-			if (saved) return saved;
 			const AUTH = "https://openapi.baidu.com/oauth/2.0/authorize?response_type=token&scope=basic,netdisk&client_id=omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO&redirect_uri=oob&confirm_login=0";
+			// 与参考脚本一致：授权请求带浏览器真实 UA（参考 standHeaders 默认注入
+			// User-Agent: navigator.userAgent），Origin/Referer 留空避免被校验来源。
+			const authHdr = () => {
+				const h = { Origin: "", Referer: "" };
+				try { if (typeof navigator !== "undefined" && navigator.userAgent) h["User-Agent"] = navigator.userAgent; } catch (e) { /* 忽略 */ }
+				return h;
+			};
+			const pickToken = (u) => {
+				const m = String(u || "").match(/access_token=([^&#]+)/);
+				return m ? decodeURIComponent(m[1]) : "";
+			};
+
 			let token = "";
-			// 快速路径：静默 XHR（拿不到也不阻塞，无碍走标签页授权）
+			// 静默路径：token 式授权会把令牌挂到重定向链末端，必须跟完 30x 才拿得到
 			try {
-				const fromUrl = (u) => (String(u || "").match(/access_token=([^&]+)/) || [])[1] || "";
-				const pick = (res) => fromUrl(res && res.finalUrl) || fromUrl(res && res.responseText) || "";
-				let first = await net.text(AUTH, { Origin: "", Referer: "" });
-				token = pick(first);
-				if (!token && (first.finalUrl || "").includes("authorize")) {
-					const bdstoken = ((first.responseText || "").match(/name="bdstoken"\s+value="([^"]+)"/) || [])[1] || "";
-					const clientId = ((first.responseText || "").match(/name="client_id"\s+value="([^"]+)"/) || [])[1] || "";
-					const body = "grant_permissions_arr=netdisk&bdstoken=" + encodeURIComponent(bdstoken)
-						+ "&client_id=" + encodeURIComponent(clientId)
-						+ "&response_type=token&display=page&grant_permissions=" + encodeURIComponent("basic,netdisk");
-					await net.postFormRaw(AUTH, body, { Origin: "", Referer: "" });
-					token = pick(await net.text(AUTH, { Origin: "", Referer: "" }));
+				const authorize = await net.getFinal(AUTH, authHdr());
+				if (authorize.includes("access_token=")) {
+					token = pickToken(authorize);
+				} else if (authorize.includes("authorize")) {
+					// 尚未授权：从授权页表单里取自动确认所需参数
+					const page = await net.text(AUTH, authHdr());
+					const html = String((page && page.responseText) || "");
+					const bdstoken = (html.match(/name="bdstoken"\s+value="([^"]+)"/) || [])[1] || "";
+					const clientId = (html.match(/name="client_id"\s+value="([^"]+)"/) || [])[1] || "";
+					if (bdstoken && clientId) {
+						const body = "grant_permissions_arr=netdisk&bdstoken=" + encodeURIComponent(bdstoken)
+							+ "&client_id=" + encodeURIComponent(clientId)
+							+ "&response_type=token&display=page&grant_permissions=" + encodeURIComponent("basic,netdisk");
+						await net.postFormRaw(AUTH, body, authHdr());
+						token = pickToken(await net.getFinal(AUTH, authHdr()));
+					}
 				}
 			} catch (e) { token = ""; }
 			if (token) { store.patch(KEY.baidu, { token }); return token; }
 
-			// 真实标签页授权：netdisk-hub 在 openapi.baidu.com 落地页捕获 token 入库
+			// 真实标签页授权：登录成功页由本脚本捕获令牌入库，这里轮询等它
 			if (typeof GM_openInTab === "function") {
 				try { GM_openInTab(AUTH, { active: true, insert: true, setParent: true }); }
 				catch (e) { try { window.open(AUTH, "_blank"); } catch (e2) { /* 忽略 */ } }
@@ -950,7 +1013,36 @@
 		 * 百度网盘内页换链：xpan/filemetas 按勾选的 fs_id 批量取 dlink（分批 50）。
 		 * 9019 = 令牌过期，自动清缓存（下次换链会重新静默授权）；112 = 页面过期。
 		 */
+		/**
+		 * 百度网盘内页换链：xpan/filemetas 按勾选的 fs_id 批量取 dlink（分批 50）。
+		 *
+		 * 令牌失效（9019 / 31326）时**自动重授权一次再重试**，而不是直接抛错让用户
+		 * 手动刷新 —— 这是面板「点一次就成功」的关键。重试仍失败才清缓存并报错，
+		 * 避免拿空令牌反复打接口。
+		 */
 		async baiduHomeResolve(files, token) {
+			try {
+				return await providerApi.baiduHomeMetas(files, token);
+			} catch (e) {
+				if (!e || !e.baiduAuthStale) throw e;
+				// 缓存令牌已失效：清掉后走一次完整授权（含 30x 追踪 + 落地页兜底）
+				store.patch(KEY.baidu, { token: "" });
+				const fresh = await providerApi.baiduGetToken();
+				if (!fresh) throw new Error("百度授权已失效且未能自动续期 —— 请在弹出的授权页确认授权后重试。");
+				try {
+					return await providerApi.baiduHomeMetas(files, fresh);
+				} catch (e2) {
+					if (e2 && e2.baiduAuthStale) {
+						store.patch(KEY.baidu, { token: "" });
+						throw new Error("百度授权已失效（31326 未授权），自动续期后仍被拒绝 —— 请重新打开面板再取一次。");
+					}
+					throw e2;
+				}
+			}
+		},
+
+		/** filemetas 实际请求（令牌失效时抛带 baiduAuthStale 标记的错误，交由上层续期重试） */
+		async baiduHomeMetas(files, token) {
 			const fsids = files.filter((f) => !f.dir).map((f) => f.fid);
 			if (!fsids.length) throw new Error("没有可换链的文件。");
 			// filemetas 按 fs_id 返回，对回勾选文件拿名字 ——
@@ -965,20 +1057,26 @@
 				const res = await net.text(
 					"https://pan.baidu.com/rest/2.0/xpan/multimedia?method=filemetas&dlink=1"
 					+ "&fsids=" + encodeURIComponent(JSON.stringify(batch))
-					+ "&access_token=" + encodeURIComponent(token),
-					// 参考维护脚本：换链 GET 必须携带 pan.baidu.com UA，
-					// 否则开放平台判为未授权（31326 / hitcode:119）
-					{ "User-Agent": "pan.baidu.com" }
+					+ "&access_token=" + token,
+					// 参考脚本：filemetas 须带 pan.baidu.com UA，且开放平台校验来源，
+					// 补上 Origin / Referer（与参考 standHeaders 默认头一致）。
+					Object.assign({ "User-Agent": "pan.baidu.com" },
+						(() => {
+							const h = {};
+							try { if (location.origin && location.origin !== "null") { h.Origin = location.origin; h.Referer = location.origin + "/"; } } catch (e) { /* 忽略 */ }
+							return h;
+						})()
+					)
 				);
 				let data = null;
 				try { data = JSON.parse(res.responseText); } catch (e) { data = null; }
-				// 开放平台可能返回两种错误形态：errno（旧）或 error_code（OAuth 层）。
-				// 9019 / 31326 都表示令牌不可用，清缓存触发重新静默授权。
-				if (data && (data.errno === 9019 || data.error_code === 31326)) {
-					store.patch(KEY.baidu, { token: "" });
-					throw new Error(data.error_code === 31326
-						? "百度授权已失效（31326 未授权），已自动清除 —— 请重新打开面板再取一次。"
-						: "百度访问令牌已过期，已自动清除授权 —— 请重新打开面板再取一次。");
+				// 未授权的三种形态：9019（令牌失效）、31326（OAuth 层未授权）、
+				// -6（开放平台 errmsg "no permission"）。统一抛标记错误触发自动续期。
+				const stale = data && (data.errno === 9019 || data.error_code === 31326 || data.errno === -6);
+				if (stale) {
+					const err = new Error("百度令牌失效，正在自动续期…");
+					err.baiduAuthStale = true;
+					throw err;
 				}
 				if (data && data.errno === 112) throw new Error("页面已过期，刷新后重试。（errno 112）");
 				if (!data || data.errno !== 0 || !Array.isArray(data.list)) {
@@ -2170,7 +2268,9 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 				await engine.resolveSelected(provider);
 				ui.state.phase = "done";
 			} catch (e) {
-				// 失败原因写进卡片的提示位，一直可见，不用弹窗
+				// 失败原因写进卡片的提示位，一直可见，不用弹窗。
+				// 同时清掉已解析标记，让用户重新打开面板即可重试（31326 清 token 后尤其需要）。
+				ui._resolvedSig = "";
 				ui.state.error = e.message;
 				ui.state.phase = "done";
 			}
@@ -2301,20 +2401,17 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 		if (document.getElementById("nd-style")) return; // 重复注入保护
 
 		// --- 百度 OAuth 落地页（@match openapi.baidu.com 时脚本也在此运行）---
-		// 借鉴参考脚本：Baidu 授权后把 access_token 拼进 location.href 的片段
-		// （#access_token=…）。片段在真实标签页里可见，而 XHR 的 finalUrl 会剥掉
-		// 它 —— 这正是静默授权反复拿不到 token 的原因。此处捕获并写入缓存。
+		// 授权成功后 Baidu 把 access_token 放进 location.href 的片段（#access_token=…）。
+		// 片段只存在于真实标签页，XHR 的 finalUrl 会剥掉它 —— 所以**必须开真实标签页**
+		// 才能可靠拿到令牌，这也是纯静默 XHR 反复 31326 的根因之一。
 		if (/^https:\/\/openapi\.baidu\.com\//.test(location.href)) {
 			try {
 				const href = location.href;
-				const m = href.match(/[?#&_]access_token=([^&]+)/);
-				if (m && /(basic[+,]netdisk|netdisk)/.test(href)) {
-					store.patch(KEY.baidu, { token: decodeURIComponent(m[1]) });
-					try { setTimeout(() => { try { window.close(); } catch (e) { /* 忽略 */ } }, 2500); } catch (e) { /* 忽略 */ }
-				} else if (/\/oauth\/2\.0\/authorize/.test(href)
-					&& href.indexOf("omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO") >= 0
+				const AUTH_APP = "omiOnr2tYnN9vSyDErcVFWpPU2mZA7YO";
+				// 1) 授权确认页：自动点「授权」按钮（与参考脚本一致）
+				if (/\/oauth\/2\.0\/authorize/.test(href)
+					&& href.indexOf(AUTH_APP) >= 0
 					&& /response_type=token/.test(href)) {
-					// 授权确认页：符合本脚本应用即自动点「授权」，和参考脚本一致
 					let tried = 0;
 					const poll = setInterval(() => {
 						try {
@@ -2323,6 +2420,23 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 						} catch (e) { /* 忽略 */ }
 						if (++tried > 50) clearInterval(poll);
 					}, 300);
+				}
+				// 2) 授权落地页：轮询 location.href 直到拿到 access_token 再入库。
+				//    参考脚本只认 login_success 页，但 Baidu 各版本落地路径不一
+				//    （login_success / oob / 带 fragment 的任意路径），因此这里放宽到
+				//    「任意 openapi 页出现 access_token 即捕获」，覆盖老新版行为。
+				const grab = () => {
+					const m = location.href.match(/[?#&_]access_token=([^&#]+)/);
+					if (!m) return false;
+					store.patch(KEY.baidu, { token: decodeURIComponent(m[1]) });
+					try { setTimeout(() => { try { window.close(); } catch (e) { /* 忽略 */ } }, 2000); } catch (e) { /* 忽略 */ }
+					return true;
+				};
+				if (!grab()) {
+					let cnt = 0;
+					const iv = setInterval(() => {
+						if (grab() || ++cnt > 120) clearInterval(iv);
+					}, 500);
 				}
 			} catch (e) { /* 忽略 */ }
 			return; // openapi 页只做授权捕获，不注入面板

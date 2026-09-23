@@ -525,10 +525,13 @@ async function main() {
 		assert.strictEqual(hit.name, "视频.mkv");
 		assert.ok(hit.headers, "应随行保存请求头");
 		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com", "直链下载需专属 UA");
-		assert.ok(/BAIDUID=ABCDEF0123456789/.test(hit.headers.Cookie || ""), "需页面 Cookie");
-		assert.strictEqual(hit.headers.Referer, "https://pan.baidu.com/");
+		// 回归 31326：百度开放平台直链**不得**随行页面 Referer / Cookie。
+		// 带了会被当成网页端会话去校验，与 access_token 口径冲突 → 31326 未授权。
+		// 参考实现下载百度直链时显式传 { Origin: "", Referer: "" }。
+		assert.strictEqual(hit.headers.Referer, undefined, "百度直链不应带页面 Referer（否则 31326）");
+		assert.strictEqual(hit.headers.Cookie, undefined, "百度直链不应带页面 Cookie（否则 31326）");
 	});
-	t("推送 Aria2 时请求头原样带出（否则直链 403）", async () => {
+	t("推送 Aria2 时请求头原样带出（百度只带 UA，不带 Referer/Cookie）", async () => {
 		requests2.length = 0;
 		const btn = document.querySelector('[data-act="caught-aria"]');
 		btn.dispatchEvent(new w2.MouseEvent("click", { bubbles: true }));
@@ -538,7 +541,8 @@ async function main() {
 		const payload = JSON.parse(req.data);
 		const headerArr = payload.params[1].header || [];
 		assert.ok(headerArr.some((h) => /^User-Agent: pan\.baidu\.com$/.test(h)), "应带 UA：pan.baidu.com");
-		assert.ok(headerArr.some((h) => /^Cookie:.*BAIDUID/.test(h)), "应带 Cookie");
+		assert.ok(!headerArr.some((h) => /^Cookie:/i.test(h)), "不应带 Cookie（否则 31326）");
+		assert.ok(!headerArr.some((h) => /^Referer:/i.test(h)), "不应带 Referer（否则 31326）");
 	});
 
 	t("入口按钮被宿主重渲染替换后，点击仍能打开面板（capture 委托兜底）", () => {
@@ -653,13 +657,14 @@ async function main() {
 	t("令牌已缓存（下次换链不再重复授权）", () => {
 		assert.strictEqual(storeMap3.get("nd.baidu").token, "TOK123abc");
 	});
-	t("内页 dlink 入库且随行 UA + Cookie", () => {
+	t("内页 dlink 入库且随行 UA（不带页面 Referer/Cookie）", () => {
 		const hit = mod3.links.pool.find((f) => f.url.indexOf("inner?fid=333") >= 0);
 		assert.ok(hit, "直链应入库");
 		assert.strictEqual(hit.name, "模型.onnx", "名字应来自勾选文件（勾选名优先于接口字段）");
 		assert.ok(/access_token=TOK123abc/.test(hit.url), "开放平台直链须随链带 access_token，否则下载被判未授权 31326");
 		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com");
-		assert.ok(/BAIDUID=FFFF111122223333/.test(hit.headers.Cookie || ""), "需页面 Cookie");
+		assert.strictEqual(hit.headers.Referer, undefined, "百度直链不应带页面 Referer（否则 31326）");
+		assert.strictEqual(hit.headers.Cookie, undefined, "百度直链不应带页面 Cookie（否则 31326）");
 	});
 
 	/* ==================== 场景四：UC 网盘分享页（与夸克同协议、接入信息各一套） ==================== */
@@ -873,6 +878,109 @@ async function main() {
 		});
 	}
 	await Promise.all(pending);   // 等齐所有异步断言，避免假绿
+
+	/* ==================== 场景六：百度 31326 未授权专项回归 ==================== */
+	// 用户实测：内页与分享页换链后面板有点击项，但「下载 / 复制」都回
+	// error_code 31326 / user is not authorized, hitcode:119。
+	// 本场景锁死三处根因：① 令牌须跟完 30x 重定向链；② 缓存令牌失效须自动续期重试；
+	// ③ dlink 的 access_token 须覆盖写（不是「没有才追加」）。
+
+	console.log("\n[百度 31326 专项回归]");
+	const AUTH_RE = /oauth\/2\.0\/authorize/;
+	const BA_PAGE = `<!DOCTYPE html><html><body>
+<div class="wp-s-agile-tool-bar__header" id="nd6Bar"></div>
+<div class="file-list" id="nd6List"></div>
+</body></html>`;
+	const dom6 = new JSDOM(BA_PAGE, {
+		url: "https://pan.baidu.com/disk/main",
+		runScripts: "outside-only",
+		pretendToBeVisual: true
+	});
+	const w6 = dom6.window;
+	g.window = w6;
+	g.document = w6.document;
+	g.location = w6.location;
+	g.Blob = w6.Blob;
+	g.URL = w6.URL;
+	g.requestAnimationFrame = w6.requestAnimationFrame.bind(w6);
+
+	const storeMap6 = new Map();
+	const requests6 = [];
+	let metasCall = 0;          // filemetas 被调用次数（用于断言「续期后重试」）
+	storeMap6.set("nd.opt", { showIdm: false, firstTip: false });
+	g.GM_getValue = (k, d) => (storeMap6.has(k) ? storeMap6.get(k) : d);
+	g.GM_setValue = (k, v) => { storeMap6.set(k, v); };
+	g.GM_deleteValue = (k) => { storeMap6.delete(k); };
+	g.GM_setClipboard = () => { /* 本场景不关注剪贴板 */ };
+	g.GM_registerMenuCommand = () => { /* 本场景不关注菜单 */ };
+	g.GM_xmlhttpRequest = (opt) => {
+		requests6.push(opt);
+		setTimeout(() => {
+			const url = String(opt.url || "");
+			let res;
+			if (AUTH_RE.test(url)) {
+				// 关键回归点：一次请求返回 302，令牌在**下一跳**才出现。
+				// 修复前只读单次 finalUrl，判定「没拿到」→ 带着空令牌换链 → 31326。
+				if (url.indexOf("carry=1") < 0) {
+					res = { status: 302, finalUrl: url + "&carry=1", responseText: "", responseHeaders: "" };
+				} else {
+					res = { status: 200, finalUrl: "https://openapi.baidu.com/oauth/2.0/login_success#access_token=FRESH9x", responseText: "", responseHeaders: "" };
+				}
+			} else if (/filemetas/.test(url)) {
+				metasCall++;
+				// 第一次：模拟缓存里的旧令牌已失效 → 回 31326，逼出「自动续期重试」；
+				// 第二次：用续期后的新令牌 → 正常返回 dlink。
+				if (metasCall === 1) {
+					res = { status: 200, finalUrl: url, responseText: JSON.stringify({ error_code: 31326, error_msg: "user is not authorized, hitcode:119" }), responseHeaders: "" };
+				} else {
+					res = { status: 200, finalUrl: url, responseText: JSON.stringify({ errno: 0, list: [{ fs_id: 88, filename: "带坏令牌.bin", size: 1024, dlink: "https://d.pcs.baidu.com/file/x?fid=88&access_token=STALE_BAD" }] }), responseHeaders: "" };
+				}
+			} else {
+				res = { status: 200, finalUrl: url, responseText: JSON.stringify({ id: 1, jsonrpc: "2.0", result: "ok" }), responseHeaders: "" };
+			}
+			if (opt.onload) opt.onload(res);
+		}, 0);
+		return { abort() { /* noop */ } };
+	};
+
+	w6.document.cookie = "BAIDUID=DEADBEEF00001111:FG=1";
+	w6.document.getElementById("nd6List").__vue__ = {
+		allFileList: [{ fs_id: 88, server_filename: "带坏令牌.bin", size: 1024, isdir: 0, selected: true }]
+	};
+
+	delete require.cache[require.resolve(SCRIPT)];
+	const mod6 = require(SCRIPT);
+	await tick(60);
+
+	// 预置一个「已过期」的缓存令牌，逼出续期分支
+	storeMap6.set("nd.baidu", { token: "STALE_OLD_TOKEN" });
+	requests6.length = 0;
+	metasCall = 0;
+	mod6.ui.open();
+	await tick(400);   // 授权续期 + filemetas 重试两跳
+
+	t("令牌须跟完 30x 重定向链才拿得到（单次读 finalUrl 会落空）", () => {
+		const auths = requests6.filter((r) => AUTH_RE.test(String(r.url)));
+		assert.ok(auths.length >= 2, "应发生重定向追踪（至少两跳），实际 " + auths.length);
+		assert.ok(String(auths[auths.length - 1].url).includes("carry=1"), "第二跳应带上重定向标记");
+	});
+	t("缓存令牌失效（31326）时自动续期并重试，而非直接报错", () => {
+		assert.ok(metasCall >= 2, "filemetas 应被重试（首次 31326 → 续期 → 二次成功），实际 " + metasCall);
+		assert.strictEqual(storeMap6.get("nd.baidu").token, "FRESH9x", "续期后的新令牌应写入缓存");
+	});
+	t("dlink 的 access_token 覆盖式写入（接口给的坏令牌必须被替换）", () => {
+		const hit = mod6.links.pool.find((f) => f.url.indexOf("fid=88") >= 0);
+		assert.ok(hit, "直链应入库");
+		assert.ok(/access_token=FRESH9x/.test(hit.url), "应覆盖为新令牌，实际：" + hit.url);
+		assert.ok(hit.url.indexOf("STALE_BAD") < 0, "接口返回的坏令牌不得残留（否则下载仍回 31326）");
+	});
+	t("入库的下载头不带页面 Referer / Cookie（百度开放平台口径）", () => {
+		const hit = mod6.links.pool.find((f) => f.url.indexOf("fid=88") >= 0);
+		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com");
+		assert.strictEqual(hit.headers.Referer, undefined, "不得带 Referer");
+		assert.strictEqual(hit.headers.Cookie, undefined, "不得带 Cookie");
+	});
+
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);
 	console.log("========================================");
