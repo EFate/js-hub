@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.3.1
+// @version      1.3.2
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.3.1';
+    var VERSION = '1.3.2';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -161,13 +161,17 @@
             .Modal-enter, .Modal-enter-active, .Modal-enter-done { display: none !important; }
         `;
         if (opt.hideSidebar) css += `
-            /* 侧栏隐藏：三轨选取，先稳后兜。
+            /* 侧栏隐藏：四轨选取，先稳后兜。
                ① 知乎埋点语义属性（data-za-detail-view-path-module 标记右侧栏）—— 跨改版最稳定；
                ② 语义类名（GlobalSideBar / *-sideColumn / Card.*）—— 长期沿用；
-               ③ 结构特征（sticky 容器内的推荐卡等）—— 兜住无类名的内联布局。 */
+               ③ 目录面板 .Catalog —— 知乎「文章目录」模块的根判据。ref/知乎优化1.js:10303
+                  正是用 .Catalog.isCatalogV2 隐藏目录；其内部 .CatalogModule-title-<hash>
+                  的后缀是构建哈希（ref 里 sggN4 / 9caZz 两个版本并存即证），每发版必变，
+                  因此只能认 .Catalog 这一层，不能写到模块名；
+               ④ 结构特征（sticky 容器内的推荐卡等）—— 兜住无类名的内联布局。 */
             div[data-za-detail-view-path-module="RightSideBar"],
             .GlobalSideBar, .Question-sideColumn, .Search-sideColumn, .Topstory-sideColumn,
-            .Post-SideActions, .Post-Sub, .Post-Row-Content-right,
+            .Post-SideActions, .Post-Sub, .Post-Row-Content-right, .Catalog,
             .Card.AnswerAuthor, .Card.AuthorCard, .HotSearchCard, .Question-sideColumnAdContainer,
             .Recommendations-Main, .Question-mainColumnLogin, .Pc-card.Card,
             div[style*="position: sticky"] .Card, div[style*="position:sticky"] .Card,
@@ -186,36 +190,54 @@
             .Question-mainColumn { width: 694px !important; margin: 0 auto !important; float: none !important; }
             .QuestionPage .ListShortcut { width: 694px !important; margin: 0 auto !important; }
 
-            /* —— 专栏文章页：隐藏左侧目录 + 让正文真正水平居中并放宽 ——
-               知乎文章页有两代结构，此处两代都覆盖：
-                 新代（当前线上）：外层 .Post-content > .Post-NormalMain（正文宿主）/ .Post-NormalSub，
-                                   左侧目录面板挂在 .Post-SideActions，外层 wrapper 无稳定类名；
-                 旧代：.Post-Row-Content > .Post-Row-Content-left（正文列）+ .Post-Row-Content-right（侧栏）。
+            /* —— 专栏文章页：隐藏左侧目录 + 让正文真正居中放宽 ——
+               知乎文章页的布局容器类名「三代演进」，写死任何一代都迟早过时：
+                 第一代（纯哈希类名）：行容器 .css-kjzwqj / 正文列 .css-c0fani / 侧栏 .css-1ni4jcm
+                     —— ref/知乎优化1.js:997-1001，且它的「放宽」是运行时取宽：
+                        $(".css-c0fani").width($(".css-kjzwqj").width())；
+                 第二代（旧语义名）：.Post-Row-Content > .Post-Row-Content-left + .Post-Row-Content-right
+                     —— ref/知乎优化4.js:108-125；
+                 第三代（新语义名）：.Post-NormalMain / .Post-NormalSub
+                     —— ref/知乎优化3.js:385，且只在 zhuanlan 域生效（location.hostname 含 zhuanlan）。
 
-               关键修正（v1.3.1）：
-               ① 旧写法只认 .Post-content / .Post-Row-Content-left，**漏掉了 .Post-NormalMain**，
-                  于是新代文章页的正文列既没被居中、也没被放宽 —— 这就是「右侧大片留白」的根因；
-               ② 旧写法把正文列 flex 压到 max-width:694px，属于「收窄」，与「放宽」诉求相反，
-                  现改为跟随知乎自身内容列宽度（不再写死），只在超宽屏时限制一个较宽上限；
-               ③ 目录面板的判据从 a[aria-label="边栏锚点"] 改为结构上溯（该 aria-label 属旧代
-                  结构，新代目录已不再使用）—— 见执行层 cleanSticky()。 */
-            .Post-content, .Post-Row-Content { display: flex !important; justify-content: center !important; width: 100% !important; }
+               「侧栏都隐藏了为什么还靠左」——这是本轮的核心问题：
+               正文列宽度被**写死**（通常 690px），而它的父级是 display:flex 的整行（正文列 + 目录 + 右侧栏）。
+               把侧栏 display:none 之后，行里只剩正文列，而行的默认 justify-content:flex-start
+               让它**贴在左侧**，右侧腾出的空间全成了空白。所以光「隐藏」不够，必须
+               ① 让正文列本身变宽（放宽）或 ② 让行容器居中 —— ref 的做法是两者都做。
 
-            /* 新代正文宿主：白名单式放行，只居中不压宽 */
-            .Post-NormalMain, .Post-NormalSub { margin: 0 auto !important; flex: 0 1 auto !important; }
+               本轮修正（v1.3.2）：
+               ① 阅读宽度 850px → 1000px；
+               ② 居中改用「双 auto 外边距」写法 —— 对 block 父级（需自身有确定宽度）与 flex 父级
+                  （auto 外边距优先吸收剩余空间）**都成立**。上一版用 flex:0 1 auto + 父级
+                  justify-content，一旦父级不是 flex 就整体失效，这是上一版在真实页面不生效的关键；
+               ③ 每个可能充当「行容器」的层都先解除宽度约束（width/max-width 双 100%），
+                  避免上溯链上出现「窄墙」把正文困在左侧；
+               ④ 目录面板改用 .Catalog 判据（见上方隐藏列表），执行层另有上溯兜底。 */
+            .Post-content, .Post-Row-Content, .Post-NormalMain, .Post-NormalSub {
+                width: 100% !important; max-width: 100% !important; margin: 0 auto !important;
+            }
 
-            /* 旧代正文列：不再写死 694px（那是「收窄」，会造成右留白） */
-            .Post-Row-Content-left { margin: 0 auto !important; flex: 0 1 auto !important; }
-            .Post-Main { margin: 0 auto !important; width: 100% !important; }
-
-            /* 正文内容列与评论区的阅读宽度（放宽到 850px，仍保持长文可读性） */
+            /* 正文列：撑满可用宽度（上限 1000px）并居中。
+               margin-left/right:auto 是唯一同时适配 block 与 flex 两种父级的居中手段。 */
+            .Post-NormalMain > div, .Post-NormalSub > div,
+            .Post-Row-Content-left, .Post-Main,
             .Post-NormalMain .Post-Header,
-            .Post-NormalMain .Post-RichTextContainer,
-            .Post-NormalMain > div,
-            .Post-NormalSub > div,
-            .Comment-container { margin: 0 auto !important; max-width: 850px !important; width: 100% !important; }
-            .Comment-container { padding-left: 0 !important; padding-right: 0 !important; }
-            .ColumnPageHeader-content { margin: 0 auto !important; max-width: 850px !important; }
+            .Post-NormalMain .Post-RichTextContainer {
+                width: 100% !important;
+                max-width: 1000px !important;
+                margin-left: auto !important;
+                margin-right: auto !important;
+            }
+            .Comment-container {
+                width: 100% !important; max-width: 1000px !important;
+                margin-left: auto !important; margin-right: auto !important;
+                padding-left: 0 !important; padding-right: 0 !important;
+            }
+            .ColumnPageHeader-content {
+                max-width: 1000px !important;
+                margin-left: auto !important; margin-right: auto !important;
+            }
 
             .Topstory-container, .Topstory-mainColumn, .Question-mainColumn, .Question-main,
             .Post-content, .Post-Row-Content, .Post-Row-Content-left, .Post-NormalMain, .Post-NormalSub, .Post-Main {
@@ -386,17 +408,62 @@
             }
         }
 
-        // ② 专栏目录/侧栏面板：容器本身无稳定类名，靠内部标记上溯。
-        //    判据优先级：新代 .Post-SideActions → 旧代 a[aria-label="边栏锚点"]。
-        //    （CSS 无父选择器，且这两个标记元素本身可能是 inline 的 <a>/<button>，
-        //     隐藏它们不够，必须把整块容器一起藏掉。）
-        var marks = doc.querySelectorAll(
-            '.Post-SideActions:not([' + MARK + '-toc]), a[aria-label="边栏锚点"]:not([' + MARK + '-toc])'
-        );
-        for (var j = 0; j < marks.length; j++) {
-            var a = marks[j];
+        // ② 目录面板 .Catalog：它本身就是面板根（ref/知乎优化1.js:10303 正是
+        //    `.Catalog.isCatalogV2 { display:none }` 直接隐藏），**只藏自己、绝不上溯** ——
+        //    上溯会命中含正文的行容器，把整页内容一起藏掉。
+        //    其内部 .CatalogModule-title-<hash> 的后缀是构建哈希、每发版必变，只能认 .Catalog 这层。
+        var cats = doc.querySelectorAll('.Catalog:not([' + MARK + '-toc])');
+        for (var c = 0; c < cats.length; c++) {
+            var cat = cats[c];
+            cat.setAttribute(MARK + '-toc', '1');
+            if (cat.style.display !== 'none') { cat.style.display = 'none'; n++; }
+        }
+
+        // ③ 旧代侧栏锚点：a[aria-label="边栏锚点"] 是 inline <a>，藏它本身不生效，
+        //    须上溯到块级容器 —— 即 ref/知乎优化1.js 的 `.closest('div').hide()` 等价做法。
+        //    注意：.Post-SideActions（左侧悬浮操作栏）只在 CSS 里整块 display:none，
+        //    此处不做上溯 —— 它是定位元素，占不到文档流，上溯只会误伤行容器。
+        var anchors = doc.querySelectorAll('a[aria-label="边栏锚点"]:not([' + MARK + '-toc])');
+        for (var j = 0; j < anchors.length; j++) {
+            var a = anchors[j];
             a.setAttribute(MARK + '-toc', '1');
             if (hideAncestor(a)) n++;
+        }
+        return n;
+    }
+
+    // 文章页宽度自适应（v1.3.2）：专栏页正文列被「写死宽度」这件事由外层容器决定，
+    // 而承载它的类名三代演进（哈希 → .Post-Row-Content* → .Post-NormalMain*），
+    // 写死任何一代都迟早过时。故运行时自正文根（.ztext 系列，跨代长期稳定）上溯，
+    // 把沿途「明显窄于阅读宽度」的 max-width 上限逐级解除 ——
+    // 这是 ref/知乎优化1.js:1001 `$(".css-c0fani").width($(".css-kjzwqj").width())`
+    // （取外层可用宽度回写正文列）的结构化等价做法，但不依赖任何行容器类名。
+    // 布局判据只能运行时取：jsdom 无布局引擎时 getComputedStyle 返回空值，本函数自然空转。
+    function fixPostLayout(doc) {
+        if (!OPT.hideSidebar) return 0;
+        var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
+        if (!root) return 0;                      // 非文章页：直接退出
+        var win = doc.defaultView;
+        if (!win || typeof win.getComputedStyle !== 'function') return 0;
+        var n = 0, el = root, i, cs, mw, px;
+        for (i = 0; i < 5 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
+            try { cs = win.getComputedStyle(el); } catch (e) { break; }
+            mw = cs && cs.maxWidth;
+            // 只解除「明显窄于阅读宽度」的上限：正文列通常是 690px，侧栏更窄；
+            // 视口级的宽约束（一般 >=1100px）保持不动，避免把页头/页脚也拉变形。
+            if (mw && mw !== 'none' && /px$/.test(mw)) {
+                px = parseFloat(mw);
+                if (px > 0 && px < 1100) {
+                    el.style.setProperty('max-width', 'none', 'important');
+                    n++;
+                }
+            }
+            // 内联写死的宽度（第一代脚本面对的情形：style="width:690px"）
+            if (el.style && /^\d+(\.\d+)?px$/.test(el.style.width || '')) {
+                el.style.setProperty('width', '100%', 'important');
+                n++;
+            }
+            el = el.parentNode;
         }
         return n;
     }
@@ -556,6 +623,7 @@
         if (name === 'gifPlay' && value) playGifs(document);
         if (name === 'hideSidebar') {
             cleanSticky(document);
+            fixPostLayout(document);
             // 关闭净化时若启动标记还在（极早期切换），立即解除，避免页脚被长期遮挡
             if (!value) document.documentElement.removeAttribute('data-zhx-booting');
         }
@@ -599,6 +667,7 @@
         applyTime(document);
         applyImg(document);
         cleanSticky(document);
+        fixPostLayout(document);
     }
 
     var observer = null;
@@ -737,6 +806,7 @@
         buildCSS: buildCSS, resolveLink: resolveLink, safeDecode: safeDecode, isForeign: isForeign,
         normalizeImg: normalizeImg, pickOriginal: pickOriginal, pickTime: pickTime,
         applyLink: applyLink, applyTime: applyTime, applyImg: applyImg, cleanSticky: cleanSticky,
+        fixPostLayout: fixPostLayout,
         __setOpt: function (name, value) { OPT[name] = value; }   // 测试注入开关用
     };
 

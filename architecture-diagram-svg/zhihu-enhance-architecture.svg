@@ -22,7 +22,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">zhihu-enhance v1.3.1 · 知乎阅读增强助手 · 七层架构</text>
+  <text x="24" y="26" class="h1">zhihu-enhance v1.3.2 · 知乎阅读增强助手 · 七层架构</text>
   <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 11 个开关 / 4 组分类</text>
 
   <!-- L1 配置层 -->
@@ -138,7 +138,7 @@
   <text x="571" y="700" class="nd" text-anchor="middle">翻写 html data-theme</text>
   <text x="571" y="715" class="nd" text-anchor="middle">即时生效免刷新</text>
   <text x="571" y="730" class="nd" text-anchor="middle">playGifs 点击播放</text>
-  <text x="571" y="745" class="nd" text-anchor="middle">cleanSticky 侧栏上溯</text>
+  <text x="571" y="745" class="nd" text-anchor="middle">cleanSticky 目录/上溯</text>
 
   <line x1="340" y1="776" x2="340" y2="796" class="arrow" marker-end="url(#ar)"/>
 

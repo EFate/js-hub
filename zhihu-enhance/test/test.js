@@ -46,27 +46,33 @@ ok(cssOn('hideSidebar').indexOf('GlobalSideBar') > -1, 'hideSidebar → 侧边�
 ok(cssOn('hideSidebar').indexOf('justify-content: center') > -1, 'hideSidebar → 内容居中');
 ok(/div\[data-za-detail-view-path-module="RightSideBar"\][^{]*\{/.test(cssOn('hideSidebar')),
     'hideSidebar → 侧栏用知乎埋点语义属性隐藏（跨改版稳定）');
-ok(/\.Post-Row-Content-left \{[^}]*\}/.test(cssOn('hideSidebar')) &&
-    !/width: 690px/.test(cssOn('hideSidebar').match(/\.Post-Row-Content-left \{[^}]*\}/)[0]),
-    'hideSidebar → 文章页正文列不再硬压 690px（改为自适应居中）');
+ok(/\.Post-Row-Content-left[^{]*\{[^}]*margin-left:\s*auto[^}]*margin-right:\s*auto/.test(cssOn('hideSidebar')),
+    'hideSidebar → 文章页正文列用双 auto 外边距居中（block/flex 父级都成立）');
+ok(!/\.Post-Row-Content-left[^{]*\{[^}]*width:\s*690px/.test(cssOn('hideSidebar')),
+    'hideSidebar → 文章页正文列不再硬压 690px');
 ok(cssOn('hideSidebar').indexOf('data-zhx-booting') > -1 &&
     /html\[data-zhx-booting\] footer/.test(cssOn('hideSidebar')) &&
     cssOn('hideSidebar').indexOf('.zh-footer') > -1,
     'hideSidebar → 首屏页脚防闪现规则（覆盖 footer 与 .zh-footer）');
 
-// —— v1.3.1 文章页「真正居中 + 放宽」修复 ——
+// —— v1.3.1 / v1.3.2 文章页「真正居中 + 放宽」修复 ——
 // 新代文章页正文宿主是 .Post-NormalMain（ref/知乎优化3.js 的宽屏样式即此写法）。
-// 断言必须匹配真实选择器形态，不能只匹配注释文字（历史上注释含相同串曾造成假绿）。
+// 断言必须匹配真实选择器形态，不能只匹配注释文字（历史上注释含相同串曾造成假绿；
+// 本轮注释里同样写有 .Catalog / .Post-NormalMain，故断言一律锚定「选择器 + 声明块」）。
 ok(/\.Post-NormalMain[^{]*\{[^}]*margin:[^;}]*auto/.test(cssOn('hideSidebar')),
     'hideSidebar → 新代文章页正文宿主 .Post-NormalMain 参与居中');
-ok(/\.Post-NormalMain[^{]*\{[^}]*flex:\s*0 1 auto/.test(cssOn('hideSidebar')),
-    'hideSidebar → 新代正文宿主自适应宽度（不写死）');
+ok(/\.Post-NormalMain[^{]*\{[^}]*width:\s*100%[^}]*max-width:\s*100%/.test(cssOn('hideSidebar')),
+    'hideSidebar → 新代正文宿主解除宽度约束（避免上溯链上的窄墙）');
 ok(/\.Post-NormalSub[^{]*\{/.test(cssOn('hideSidebar')),
     'hideSidebar → 覆盖 .Post-NormalSub（新代副栏）');
-ok(/\.Comment-container\s*\{[^}]*max-width:\s*850px/.test(cssOn('hideSidebar')),
-    'hideSidebar → 评论区阅读宽度一并放宽到 850px');
-ok(/\.Post-NormalMain \.Post-RichTextContainer[^{]*\{[^}]*max-width:\s*850px/.test(cssOn('hideSidebar')),
-    'hideSidebar → 正文内容列阅读宽度放宽到 850px');
+// 目录面板判据：.Catalog（ref/知乎优化1.js:10303 用 .Catalog.isCatalogV2 隐藏目录；
+// 其内部 .CatalogModule-title-<hash> 后缀是构建哈希，不能写进选择器）
+ok(/\.Post-Row-Content-right, \.Catalog,/.test(cssOn('hideSidebar')),
+    'hideSidebar → 目录面板用 .Catalog 判据隐藏（不写哈希后缀）');
+ok(/\.Comment-container\s*\{[^}]*max-width:\s*1000px/.test(cssOn('hideSidebar')),
+    'hideSidebar → 评论区阅读宽度一并放宽到 1000px');
+ok(/\.Post-NormalMain \.Post-RichTextContainer[^{]*\{[^}]*max-width:\s*1000px/.test(cssOn('hideSidebar')),
+    'hideSidebar → 正文内容列阅读宽度放宽到 1000px');
 // 旧代正文列不得再被写死 694px（那是「收窄」，与放宽诉求相反）
 ok(!/\.Post-Row-Content-left \{[^}]*max-width:\s*694px/.test(cssOn('hideSidebar')),
     'hideSidebar → 旧代正文列不再被压到 694px');
@@ -253,29 +259,51 @@ if (JSDOM) {
     var n6 = api.cleanSticky(d6);
     ok(n6 >= 1, 'cleanSticky 处理了目录面板');
     eq(d6.getElementById('tocbox').style.display, 'none', '目录面板容器被隐藏');
-    ok(d6.querySelector('.Post-SideActions').getAttribute('data-zhx-toc') === '1', '侧栏标记落幂等标记');
+    ok(d6.querySelector('a[aria-label="边栏锚点"]').getAttribute('data-zhx-toc') === '1', '侧栏锚点落幂等标记');
     api.cleanSticky(d6);   // 幂等复跑
     eq(d6.getElementById('tocbox').style.display, 'none', '幂等：重复调用不改变结果');
 
-    // 场景 6b：新代文章页 —— 目录面板无 a[aria-label]，只有 .Post-SideActions，
-    // 且它包在无类名 wrapper 里（必须上溯才藏得住整块）。这是用户截图反馈的主场景。
+    // 场景 6b：新代文章页 —— 目录面板是 .Catalog（其内部 .CatalogModule-title-<hash>
+    // 的后缀是构建哈希、每发版必变，只能认 .Catalog 这一层）。
+    // 它本身即面板根，因此必须「只藏自己、绝不上溯」——上溯会命中含正文的行容器，
+    // 把整页内容一起藏掉（本轮从 .Post-SideActions 上溯改为 .Catalog 自身隐藏的原因）。
     var d6b = dom(
-        '<div class="Post-content">' +
-        '  <div><div><div class="Post-SideActions" id="toc2"><span>目录</span><div>一、讯飞星火</div></div></div></div>' +
+        '<div class="Post-content" id="row2">' +
+        '  <div class="Catalog isCatalogV2 css-2hy5iv" id="cat2"><div class="CatalogModule-title-sggN4">目录</div></div>' +
         '  <div class="Post-NormalMain"><div class="Post-Header"><h1>标题</h1></div></div>' +
         '</div>');
     ok(d6b.querySelector('a[aria-label="边栏锚点"]') === null, '新代结构确实没有旧 aria-label 锚点');
     var n6b = api.cleanSticky(d6b);
     ok(n6b >= 1, '新代结构下 cleanSticky 仍能定位目录面板（不依赖 aria-label）');
-    // 上溯应藏掉包住目录的那个无类名 wrapper（hideAncestor 从标记的直接父级开始）
-    var wrapper = d6b.getElementById('toc2').parentNode;
-    eq(wrapper.style.display, 'none', '新代目录面板的外层无类名容器被上溯隐藏');
-    eq(d6b.getElementById('toc2').style.display, '', '标记元素自身未被改样式（幂等标记独立）');
+    eq(d6b.getElementById('cat2').style.display, 'none', '目录面板 .Catalog 自身被隐藏');
+    eq(d6b.getElementById('cat2').getAttribute('data-zhx-toc'), '1', '.Catalog 落幂等标记');
+    eq(d6b.getElementById('row2').style.display, '', '目录根不上溯：行容器（含正文）未被误藏');
+    api.cleanSticky(d6b);   // 幂等复跑
+    eq(d6b.getElementById('cat2').style.display, 'none', '幂等：重复调用不改变结果');
 
     var css6 = api.buildCSS({ hideSidebar: true });
     ok(/div\[data-za-detail-view-path-module="RightSideBar"\][^{]*\{/.test(css6), 'CSS 内含侧栏语义属性规则');
     ok(/\.Post-NormalMain[^{]*\{[^}]*margin:[^;}]*auto/.test(css6), 'CSS 含新代正文宿主居中规则');
     ok(!/\.Post-Row-Content-left[^}]*width:\s*690px/.test(css6), '正文列不再被写死 690px');
+
+    // ---- 场景 7：文章页宽度自适应（上溯解限，不依赖行容器类名）----
+    // 知乎专栏页正文列宽度是被祖先「限」出来的，而承载它的类名三代演进
+    // （哈希 .css-* → .Post-Row-Content* → .Post-NormalMain*）。fixPostLayout
+    // 自正文根（.ztext 系列，跨代长期稳定）上溯，解除沿途窄于阅读宽度的 max-width
+    // —— ref/知乎优化1.js:1001 取外层宽度回写正文列的等价做法，但不依赖类名。
+    group('e2e · 文章页宽度自适应');
+    var d7 = dom(
+        '<div class="Post-content">' +
+        '  <div id="w7" style="max-width:690px"><div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div>' +
+        '  <div class="Catalog" id="cat7">目录</div>' +
+        '</div>');
+    ok(api.fixPostLayout(d7) >= 1, 'fixPostLayout 上溯解除了被限宽的祖先');
+    eq(d7.getElementById('w7').style.maxWidth, 'none', '祖先 max-width:690px 被解除（正文得以撑满）');
+    eq(d7.querySelector('.ztext').style.maxWidth, '', '正文根自身未被改动（只处理窄约束）');
+    // 非文章页（无 .ztext 系列）→ 空转，不误伤首页容器
+    var d7b = dom('<div class="Topstory-container"><div id="x7" style="max-width:400px">首页</div></div>');
+    eq(api.fixPostLayout(d7b), 0, '非文章页空转（不误伤首页容器）');
+    eq(d7b.getElementById('x7').style.maxWidth, '400px', '非文章页的内联 max-width 保持原样');
 } else {
     console.log('（未找到 jsdom，跳过 e2e 场景）');
 }
