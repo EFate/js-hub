@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.5.14
+// @version      1.5.15
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -51,7 +51,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.5.14";
+	const VERSION = "1.5.15";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -1196,7 +1196,7 @@
 			const resolved = await p.resolve(files, providerApi.pageType(p));
 			let added = 0;
 			resolved.forEach((l) => {
-				if (links.put(l.url, l.name, l.size, l.headers)) added++;
+				if (links.put(l.url, l.name, l.size, l.headers, p.id)) added++;
 			});
 			return { total: resolved.length, added, skipped: files.length - real.length };
 		},
@@ -1254,7 +1254,7 @@
 		 * 同名即同一文件：覆盖为最新一条（签名与请求头随之更新）并置顶。
 		 * 实在拿不到名字时退回按 URL 去重，避免所有无名条目挤成一条。
 		 */
-		put(url, name, size, headers) {
+		put(url, name, size, headers, providerId) {
 			const u = String(url || "").trim();
 			if (!/^https?:\/\//i.test(u)) return false;
 			const rawName = String(name || "").trim() || util.nameFromUrl(u);
@@ -1267,6 +1267,8 @@
 				it.url = u;
 				it.size = Number(size) || it.size;
 				if (headers) it.headers = headers;
+				// 换来路不同的直链时同步更新来源，否则条目会挂着旧来源被判错出口
+				if (providerId) it.provider = providerId;
 				it.time = Date.now();
 				links.pool.splice(i, 1);
 				links.pool.unshift(it);                    // 最新一条置顶
@@ -1279,6 +1281,7 @@
 				name: label,
 				size: Number(size) || 0,
 				headers: headers || null,
+				provider: providerId || "",
 				time: Date.now()
 			});
 			if (links.pool.length > links.MAX) links.pool.length = links.MAX;
@@ -1799,7 +1802,7 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
   flex-direction:column;gap:8px;align-items:center;pointer-events:none;}
 .nd-toast{display:flex;align-items:center;gap:8px;max-width:min(560px,calc(100vw - 32px));padding:9px 14px;
   border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;font-size:13px;color:#fff;
-  box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;transform:translateY(12px);transition:opacity .22s,transform .22s;}
+  line-height:1.6;text-align:left;box-shadow:0 6px 20px rgba(0,0,0,.35);opacity:0;transform:translateY(12px);transition:opacity .22s,transform .22s;}
 .nd-toast.nd-show{opacity:1;transform:none;}
 .nd-toast.nd-info{background:#1f6feb;}
 .nd-toast.nd-ok{background:#2da44e;}
@@ -2127,6 +2130,28 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 		/* ---------- 可用直链 ---------- */
 
 		/**
+		 * 百度直链的浏览器出口限制（官方文档判据，非本脚本故障）：
+		 * dlink 下载要求 `User-Agent: pan.baidu.com`，31326 的含义就是
+		 * 「命中防盗链，需检查 User-Agent 请求头是否正常」。浏览器打开时
+		 * UA 由浏览器自己决定、页面无法改写，因此这两个出口对百度的大文件
+		 * 必然失败。这里给出**能走通**的替代出口，而不是让用户空转。
+		 */
+		BAIDU_COPY_TIP: "百度直链已复制。注意：粘到地址栏直接打开会报 31326 —— 百度要求下载时 UA 为 pan.baidu.com，浏览器无法改写。请改用「Aria2」推送或「复制命令行」，两者都会带上正确 UA。",
+		BAIDU_DIRECT_TIP: "百度大文件无法用浏览器直接下载（UA 被浏览器固定，会报 31326）。请改用「Aria2」推送，或「复制命令行」到本地工具里执行。",
+
+		/** 这条直链是否来自百度（优先用换链时记录的 provider，不靠猜域名） */
+		isBaiduLink(f) {
+			if (!f) return false;
+			if (f.provider) return String(f.provider) === "baidu";
+			// 兜底：老条目没记 provider 时按域名判——百度 dlink 落在 *.baidu.com
+			// （官方示例为 d.pcs.baidu.com），排除 openapi / pan 这类非下载域
+			try {
+				const h = new URL(String(f.url || "")).hostname.toLowerCase();
+				return /\.baidu\.com$/.test(h) && !/^(openapi|pan|yun)\.baidu\.com$/.test(h);
+			} catch (e) { return false; }
+		},
+
+		/**
 		 * 没有直链时的一句提示。
 		 * 只说「现在该做什么」—— 勾选了几项、几个文件几个文件夹这类统计一律不展示。
 		 * 换链失败的原因也写在这里（比弹窗好：一直可见，直到下一次操作）。
@@ -2207,6 +2232,8 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			// 剪贴板内容看不见，需要确认
 			if (outlet.copy(text)) ui.toast(`已复制 ${pool.length} 条${label}。`, "ok");
 			else ui.toast("复制失败，请手动选择文本复制。", "err", 4600);
+			// 批量复制直链时若含百度条目，同样要提醒浏览器打不开（命令行出口无此限制）
+			if (kind === "link" && pool.some((f) => ui.isBaiduLink(f))) ui.toast(ui.BAIDU_COPY_TIP, "warn", 7000);
 		},
 
 		clearCaught() {
@@ -2234,14 +2261,31 @@ html[data-color-mode="light"]{--nd-accent:#1a7f37;--nd-accent-2:#116329;}
 			const f = ui.findCaught(id);
 			if (!f) return;
 			outlet.direct(f.url);
+			// iframe 里的请求 UA 同样是浏览器自身的，百度大文件照样 31326；
+			// 小文件能过是因为百度只对大文件做防盗链，此处如实说明。
+			if (ui.isBaiduLink(f)) ui.toast(ui.BAIDU_DIRECT_TIP, "warn", 7000);
 		},
 
+		/**
+		 * 复制单条直链。
+		 *
+		 * 百度的直链**不能用浏览器直接打开** —— 官方文档写得很直白：
+		 * `31326 = 命中防盗链，需检查 User-Agent 请求头是否正常`，且 dlink 下载
+		 * 的 UA 必须为 `pan.baidu.com`。浏览器打开时 UA 被固定成浏览器自身，
+		 * 无法改写，所以复制出去再粘贴到地址栏必定 31326 —— 这不是脚本故障，
+		 * 是百度的防盗链设计（参考实现同样如此，它只能提示用户自行改 UA）。
+		 *
+		 * 因此这里对百度给出**可执行的替代出口**，而不是复制完就静默收工，
+		 * 让用户拿着一条注定失败的链接反复碰壁、还把故障误判到别处。
+		 */
 		caughtCopy(id, btn) {
 			const f = ui.findCaught(id);
 			if (!f) return;
 			if (!outlet.copy(f.url)) ui.toast("复制失败。", "err", 4600);
 			ui.busy(btn, true, "已复制");
 			setTimeout(() => ui.busy(btn, false), 1200);
+			// 百度直链粘进地址栏必 31326，复制后立刻把真实原因与出路讲清楚
+			if (ui.isBaiduLink(f)) ui.toast(ui.BAIDU_COPY_TIP, "warn", 7000);
 		},
 
 		/* ---------- 下载页 ---------- */

@@ -994,6 +994,30 @@ async function main() {
 		assert.strictEqual(hit.headers.Referer, undefined, "不得带 Referer");
 		assert.strictEqual(hit.headers.Cookie, undefined, "不得带 Cookie");
 	});
+	t("百度条目记录了来源 provider（出口判定靠它，不猜域名）", () => {
+		const hit = mod6.links.pool.find((f) => f.url.indexOf("fid=88") >= 0);
+		assert.strictEqual(hit.provider, "baidu", "换链时应把 provider 一并落库");
+		assert.strictEqual(mod6.ui.isBaiduLink(hit), true);
+	});
+	t("复制百度直链时提示真实原因与替代出口（浏览器打开必 31326）", () => {
+		const hit = mod6.links.pool.find((f) => f.url.indexOf("fid=88") >= 0);
+		const toasts = mod6.ui.toasts;
+		const before = toasts.children.length;
+		mod6.ui.caughtCopy(hit.id, null);
+		const added = Array.from(toasts.children).slice(before);
+		const tips = added.map((el) => el.textContent).join(" ");
+		assert.ok(/31326/.test(tips), "应点明 31326 这个具体错误码，实际提示：" + tips);
+		assert.ok(/pan\.baidu\.com/.test(tips), "应说明 UA 必须是 pan.baidu.com，实际提示：" + tips);
+		assert.ok(/Aria2|命令行/.test(tips), "应给出能走通的替代出口，实际提示：" + tips);
+	});
+	t("直接下载百度直链同样给出提示（iframe 的 UA 也是浏览器自身的）", () => {
+		const hit = mod6.links.pool.find((f) => f.url.indexOf("fid=88") >= 0);
+		const toasts = mod6.ui.toasts;
+		const before = toasts.children.length;
+		mod6.ui.caughtDirect(hit.id);
+		const tips = Array.from(toasts.children).slice(before).map((el) => el.textContent).join(" ");
+		assert.ok(/31326/.test(tips) && /Aria2|命令行/.test(tips), "应提示替代出口，实际提示：" + tips);
+	});
 
 	console.log("\n========================================");
 	console.log("端到端    通过: " + pass + "    失败: " + fail);

@@ -5,7 +5,7 @@
 const assert = require("assert");
 const mod = require("../netdisk-hub.user.js");
 
-const { VERSION, KEY, util, store, aria, providers, providerApi, engine, links, inject, pageState } = mod;
+const { VERSION, KEY, util, store, aria, providers, providerApi, engine, links, inject, pageState, ui } = mod;
 
 let pass = 0;
 let fail = 0;
@@ -362,6 +362,32 @@ t("clear 可重置", () => {
 	links.put("https://cdn.quark.cn/dl/x?sign=1", "x", 1);
 	links.clear();
 	assert.strictEqual(links.pool.length, 0);
+});
+
+t("结果池记录直链来源（百度出口判定依赖它）", () => {
+	links.clear();
+	links.put("https://d.pcs.baidu.com/file/x?fid=1", "a.mkv", 9, {}, "baidu");
+	links.put("https://cdn.quark.cn/dl/y?sign=1", "b.mp4", 8, {}, "quark");
+	assert.strictEqual(links.pool.find((f) => /baidu/.test(f.url)).provider, "baidu");
+	assert.strictEqual(links.pool.find((f) => /quark/.test(f.url)).provider, "quark");
+	// 同一条目换来源时必须同步更新，否则会挂着旧来源判错出口
+	links.put("https://d.pcs.baidu.com/file/x?fid=2", "a.mkv", 9, {}, "quark");
+	assert.strictEqual(links.pool.find((f) => /fid=2/.test(f.url)).provider, "quark");
+	links.clear();
+});
+
+t("isBaiduLink 优先看 provider，缺失时按域名兜底", () => {
+	// provider 明确时以它为准
+	assert.strictEqual(ui.isBaiduLink({ provider: "baidu", url: "https://cdn.quark.cn/x" }), true);
+	assert.strictEqual(ui.isBaiduLink({ provider: "quark", url: "https://d.pcs.baidu.com/x" }), false);
+	// provider 缺失（老条目）：百度 dlink 域兜底
+	assert.strictEqual(ui.isBaiduLink({ url: "https://d.pcs.baidu.com/file/x?fid=1" }), true);
+	// 非下载域不能被误判成百度直链
+	assert.strictEqual(ui.isBaiduLink({ url: "https://pan.baidu.com/s/abc" }), false);
+	assert.strictEqual(ui.isBaiduLink({ url: "https://openapi.baidu.com/oauth/2.0/authorize" }), false);
+	assert.strictEqual(ui.isBaiduLink({ url: "https://cdn.quark.cn/dl/x" }), false);
+	assert.strictEqual(ui.isBaiduLink(null), false);
+	assert.strictEqual(ui.isBaiduLink({ url: "not-a-url" }), false);
 });
 t("结果池只接受换链结果：脚本不再包装页面原生 API", () => {
 	// 这条是行为契约 —— 池子的唯一写入方是 provider 的换链结果，
