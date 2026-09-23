@@ -4,6 +4,40 @@
 
 ---
 
+## v1.3.1 — 2026-09-22
+
+一句话：**修正文章页「居中 + 放宽」——补上被漏掉的新代正文宿主，并让侧栏掩盖不再依赖已过时的锚点判据。**
+
+前版 v1.3.0 的居中修复在线上文章页（`zhuanlan.zhihu.com/p/...`）未生效：左侧「目录」面板仍在，正文仍是窄列靠左，右侧大片留白。经对照 `ref/` 参考脚本与第三方长期维护脚本，定位到两处判据失配：
+
+### 根因
+
+1. **正文宿主选择器漏了新代结构。** 知乎文章页有两代 DOM：
+   - 新代（当前线上）：`.Post-content` > **`.Post-NormalMain`**（正文宿主）/ `.Post-NormalSub`
+   - 旧代：`.Post-Row-Content` > `.Post-Row-Content-left`（正文列）
+
+   v1.3.0 只写了 `.Post-content` / `.Post-Row-Content-left`，**完全没有 `.Post-NormalMain`** —— 新代页面上这两条规则一条都没命中，所以既没居中、也没放宽。（佐证：`ref/知乎优化3.js` 的文章页宽屏样式正文只写 `.Post-NormalMain .Post-Header, .Post-NormalMain > div, .Post-NormalSub > div`。）
+2. **目录面板的锚点判据已过时。** v1.3.0 靠 `a[aria-label="边栏锚点"]` 上溯——该 aria-label 属知乎 2021 年前后的旧代结构（`ref/知乎优化1.js` 即此写法），新代目录面板已不再使用，于是上溯逻辑整条落空，目录一直留在页面上。
+3. **宽度方向写反了。** v1.3.0 给正文列加了 `max-width: 694px`，这是「收窄」；用户诉求是「居中**放宽**」。
+
+### 修复
+
+- **补全新代宿主**：新增 `.Post-NormalMain` / `.Post-NormalSub` 的居中规则（`margin: 0 auto` + `flex: 0 1 auto` 自适应宽度）；
+- **正文阅读宽度放宽**：`.Post-NormalMain .Post-Header` / `.Post-RichTextContainer` / `.Post-NormalMain > div` / `.Post-NormalSub > div` / `.Comment-container` 统一到 `max-width: 850px`（原 690px，长文可读性上限内明显放宽），并去掉 `.Comment-container` 的左右内边距干扰；
+- **去掉旧代正文列的写死宽度**（原 `max-width: 694px` → 自适应），居中交由外层 `flex` 完成；
+- **侧栏/目录判据改为结构上溯**：`cleanSticky` 的标记集合从「仅旧代锚点」扩为 **`.Post-SideActions` ∪ `a[aria-label="边栏锚点"]`**，两者都走统一的上溯隐藏（隐藏标记元素的最近块级祖先，而非标记本身——目录面板容器常是无类名的内联布局 DIV）；
+- 抽出 `hideAncestor(el)` helper，消除上溯逻辑重复，并保证幂等（容器已是 `display:none` 时不重复计数）。
+
+### 验证
+
+- 全量回归 **149/149**（新增 6 条：新代宿主参与居中 / 新代宿主自适应宽度 / 覆盖 `.Post-NormalSub` / 阅读宽度放宽至 850px / 旧代列不再压 694px / 新代无 aria-label 场景下仍能命中目录面板）；
+- e2e 新增场景 **6b · 新代文章页**：构造「目录面板无 `a[aria-label]`、只挂 `.Post-SideActions` 且包在无类名 wrapper 里」的真实结构，断言上溯确实藏掉了外层容器；
+- 深度验证 `.tmp/verify-zhihu.js` **88/88**（新增 A3b 组：整脚本真实启动后动态插入新代文章页 DOM，等 Watcher debounce 完成，断言目录容器被隐藏 + 常驻 CSS 含新代规则）；
+- 变异测试 5/5 全部捕获；死代码 0；`node --check` 通过；架构图标题升 1.3.1。
+
+---
+
+
 ## v1.3.0 — 2026-09-23
 
 一句话：**修复两处实际使用问题——专栏文章页正文未真正居中、打开知乎时首屏页脚闪现。**

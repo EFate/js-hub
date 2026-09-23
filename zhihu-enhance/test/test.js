@@ -53,6 +53,23 @@ ok(cssOn('hideSidebar').indexOf('data-zhx-booting') > -1 &&
     /html\[data-zhx-booting\] footer/.test(cssOn('hideSidebar')) &&
     cssOn('hideSidebar').indexOf('.zh-footer') > -1,
     'hideSidebar → 首屏页脚防闪现规则（覆盖 footer 与 .zh-footer）');
+
+// —— v1.3.1 文章页「真正居中 + 放宽」修复 ——
+// 新代文章页正文宿主是 .Post-NormalMain（ref/知乎优化3.js 的宽屏样式即此写法）。
+// 断言必须匹配真实选择器形态，不能只匹配注释文字（历史上注释含相同串曾造成假绿）。
+ok(/\.Post-NormalMain[^{]*\{[^}]*margin:[^;}]*auto/.test(cssOn('hideSidebar')),
+    'hideSidebar → 新代文章页正文宿主 .Post-NormalMain 参与居中');
+ok(/\.Post-NormalMain[^{]*\{[^}]*flex:\s*0 1 auto/.test(cssOn('hideSidebar')),
+    'hideSidebar → 新代正文宿主自适应宽度（不写死）');
+ok(/\.Post-NormalSub[^{]*\{/.test(cssOn('hideSidebar')),
+    'hideSidebar → 覆盖 .Post-NormalSub（新代副栏）');
+ok(/\.Comment-container\s*\{[^}]*max-width:\s*850px/.test(cssOn('hideSidebar')),
+    'hideSidebar → 评论区阅读宽度一并放宽到 850px');
+ok(/\.Post-NormalMain \.Post-RichTextContainer[^{]*\{[^}]*max-width:\s*850px/.test(cssOn('hideSidebar')),
+    'hideSidebar → 正文内容列阅读宽度放宽到 850px');
+// 旧代正文列不得再被写死 694px（那是「收窄」，与放宽诉求相反）
+ok(!/\.Post-Row-Content-left \{[^}]*max-width:\s*694px/.test(cssOn('hideSidebar')),
+    'hideSidebar → 旧代正文列不再被压到 694px');
 ok(cssOn('autoHideHeader').indexOf('is-hidden') > -1, 'autoHideHeader → 顶栏隐藏类');
 ok(cssOn('picMaxHeight').indexOf('max-height: 500px') > -1, 'picMaxHeight → 限高');
 ok(cssOn('hoverFocus').indexOf('outline') > -1, 'hoverFocus → 聚焦框');
@@ -224,23 +241,40 @@ if (JSDOM) {
     eq(d5.getElementById('s1').style.display, 'none', '含 Card 的 sticky 容器隐藏');
     ok(d5.getElementById('s2').style.display !== 'none', '无关 sticky 容器不动');
 
-    // ---- 场景 6：专栏文章页目录（锚点语义定位 + 容器上溯隐藏）----
+    // ---- 场景 6：专栏文章页目录（结构上溯隐藏 + 两代结构覆盖）----
     group('e2e · 文章页目录');
     var d6 = dom(
         '<div class="Post-content">' +
         '  <div class="Post-SideActions" id="tocbox"><a aria-label="边栏锚点" href="#"><span>目录</span></a><div>一、讯飞星火</div></div>' +
         '  <div class="Post-Row-Content-left"><h1>正文标题</h1></div>' +
         '</div>');
-    ok(d6.querySelector('a[aria-label="边栏锚点"]') !== null, '目录锚点可被语义选择器定位');
+    ok(d6.querySelector('a[aria-label="边栏锚点"]') !== null, '旧代目录锚点可被语义选择器定位');
     api.__setOpt('hideSidebar', true);
     var n6 = api.cleanSticky(d6);
-    ok(n6 >= 1, 'cleanSticky 处理了目录锚点');
-    eq(d6.getElementById('tocbox').style.display, 'none', '锚点容器（目录面板）被隐藏');
-    ok(d6.querySelector('a[aria-label="边栏锚点"]').getAttribute('data-zhx-toc') === '1', '锚点落幂等标记');
+    ok(n6 >= 1, 'cleanSticky 处理了目录面板');
+    eq(d6.getElementById('tocbox').style.display, 'none', '目录面板容器被隐藏');
+    ok(d6.querySelector('.Post-SideActions').getAttribute('data-zhx-toc') === '1', '侧栏标记落幂等标记');
     api.cleanSticky(d6);   // 幂等复跑
     eq(d6.getElementById('tocbox').style.display, 'none', '幂等：重复调用不改变结果');
+
+    // 场景 6b：新代文章页 —— 目录面板无 a[aria-label]，只有 .Post-SideActions，
+    // 且它包在无类名 wrapper 里（必须上溯才藏得住整块）。这是用户截图反馈的主场景。
+    var d6b = dom(
+        '<div class="Post-content">' +
+        '  <div><div><div class="Post-SideActions" id="toc2"><span>目录</span><div>一、讯飞星火</div></div></div></div>' +
+        '  <div class="Post-NormalMain"><div class="Post-Header"><h1>标题</h1></div></div>' +
+        '</div>');
+    ok(d6b.querySelector('a[aria-label="边栏锚点"]') === null, '新代结构确实没有旧 aria-label 锚点');
+    var n6b = api.cleanSticky(d6b);
+    ok(n6b >= 1, '新代结构下 cleanSticky 仍能定位目录面板（不依赖 aria-label）');
+    // 上溯应藏掉包住目录的那个无类名 wrapper（hideAncestor 从标记的直接父级开始）
+    var wrapper = d6b.getElementById('toc2').parentNode;
+    eq(wrapper.style.display, 'none', '新代目录面板的外层无类名容器被上溯隐藏');
+    eq(d6b.getElementById('toc2').style.display, '', '标记元素自身未被改样式（幂等标记独立）');
+
     var css6 = api.buildCSS({ hideSidebar: true });
     ok(/div\[data-za-detail-view-path-module="RightSideBar"\][^{]*\{/.test(css6), 'CSS 内含侧栏语义属性规则');
+    ok(/\.Post-NormalMain[^{]*\{[^}]*margin:[^;}]*auto/.test(css6), 'CSS 含新代正文宿主居中规则');
     ok(!/\.Post-Row-Content-left[^}]*width:\s*690px/.test(css6), '正文列不再被写死 690px');
 } else {
     console.log('（未找到 jsdom，跳过 e2e 场景）');

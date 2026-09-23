@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.3.0
+// @version      1.3.1
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.3.0';
+    var VERSION = '1.3.1';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -186,16 +186,39 @@
             .Question-mainColumn { width: 694px !important; margin: 0 auto !important; float: none !important; }
             .QuestionPage .ListShortcut { width: 694px !important; margin: 0 auto !important; }
 
-            /* —— 专栏文章页：隐藏目录后让正文真正水平居中 ——
-               旧写法把正文硬压 690px 并靠左，右留白明显；现改为
-               「外层 flex 居中 + 正文列自适应宽度」，宽度跟随知乎自身内容列，不再写死。 */
+            /* —— 专栏文章页：隐藏左侧目录 + 让正文真正水平居中并放宽 ——
+               知乎文章页有两代结构，此处两代都覆盖：
+                 新代（当前线上）：外层 .Post-content > .Post-NormalMain（正文宿主）/ .Post-NormalSub，
+                                   左侧目录面板挂在 .Post-SideActions，外层 wrapper 无稳定类名；
+                 旧代：.Post-Row-Content > .Post-Row-Content-left（正文列）+ .Post-Row-Content-right（侧栏）。
+
+               关键修正（v1.3.1）：
+               ① 旧写法只认 .Post-content / .Post-Row-Content-left，**漏掉了 .Post-NormalMain**，
+                  于是新代文章页的正文列既没被居中、也没被放宽 —— 这就是「右侧大片留白」的根因；
+               ② 旧写法把正文列 flex 压到 max-width:694px，属于「收窄」，与「放宽」诉求相反，
+                  现改为跟随知乎自身内容列宽度（不再写死），只在超宽屏时限制一个较宽上限；
+               ③ 目录面板的判据从 a[aria-label="边栏锚点"] 改为结构上溯（该 aria-label 属旧代
+                  结构，新代目录已不再使用）—— 见执行层 cleanSticky()。 */
             .Post-content, .Post-Row-Content { display: flex !important; justify-content: center !important; width: 100% !important; }
-            .Post-Row-Content-left { margin: 0 auto !important; flex: 0 1 auto !important; max-width: 694px !important; }
+
+            /* 新代正文宿主：白名单式放行，只居中不压宽 */
+            .Post-NormalMain, .Post-NormalSub { margin: 0 auto !important; flex: 0 1 auto !important; }
+
+            /* 旧代正文列：不再写死 694px（那是「收窄」，会造成右留白） */
+            .Post-Row-Content-left { margin: 0 auto !important; flex: 0 1 auto !important; }
             .Post-Main { margin: 0 auto !important; width: 100% !important; }
-            .Comment-container { margin: 0 auto !important; max-width: 690px !important; }
-            .ColumnPageHeader-content { margin: 0 auto !important; width: 690px !important; max-width: 1000px !important; }
+
+            /* 正文内容列与评论区的阅读宽度（放宽到 850px，仍保持长文可读性） */
+            .Post-NormalMain .Post-Header,
+            .Post-NormalMain .Post-RichTextContainer,
+            .Post-NormalMain > div,
+            .Post-NormalSub > div,
+            .Comment-container { margin: 0 auto !important; max-width: 850px !important; width: 100% !important; }
+            .Comment-container { padding-left: 0 !important; padding-right: 0 !important; }
+            .ColumnPageHeader-content { margin: 0 auto !important; max-width: 850px !important; }
+
             .Topstory-container, .Topstory-mainColumn, .Question-mainColumn, .Question-main,
-            .Post-Row-Content, .Post-Row-Content-left, .Post-Main {
+            .Post-content, .Post-Row-Content, .Post-Row-Content-left, .Post-NormalMain, .Post-NormalSub, .Post-Main {
                 transition: none !important; animation: none !important; transform: none !important;
             }
             /* 首屏页脚防闪现：知乎 SPA 在正文水合前会先把页脚（帮助/举报/备案）渲染出来，
@@ -334,10 +357,24 @@
         }
     }
 
-    // 侧栏兜底清理（内联样式容器里的推荐卡、无类名的目录面板 —— CSS 选择器够不到，
-    // 需按结构特征上溯定位，这是 ref 脚本 'a[aria-label="边栏锚点"]'.closest('div') 的等价做法）
+    // 侧栏兜底清理（内联样式容器里的推荐卡、无类名的侧栏容器 —— CSS 选择器够不到，
+    // 需按结构特征上溯定位。这是 ref 脚本 'a[aria-label="边栏锚点"]'.closest('div') 的等价做法，
+    // 但 aria-label 判据属知乎旧代结构，新代目录已不再使用，故改为「结构上溯」为主。）
+    function hideAncestor(el, skipTags) {
+        // 从 el 向上找到首个可挂样式的块级容器并隐藏；返回是否成功
+        var box = el.parentNode;
+        for (var k = 0; k < 5 && box && box.tagName !== 'BODY'; k++) {
+            if (/^(DIV|SECTION|ASIDE|NAV)$/.test(box.tagName)) break;
+            box = box.parentNode;
+        }
+        if (box && box.tagName !== 'BODY' && box.style) {
+            if (box.style.display !== 'none') { box.style.display = 'none'; return true; }
+        }
+        return false;
+    }
+
     function cleanSticky(doc) {
-        if (!OPT.hideSidebar) return;
+        if (!OPT.hideSidebar) return 0;
         var n = 0;
         // ① sticky 容器内的推荐卡
         var divs = doc.querySelectorAll('div[style*="position: sticky"], div[style*="position:sticky"]');
@@ -348,19 +385,18 @@
                 n++;
             }
         }
-        // ② 专栏目录面板：锚点本身在 CSS 里已隐藏，其容器需上溯隐藏（CSS 无父选择器）
-        var anchors = doc.querySelectorAll('a[aria-label="边栏锚点"]:not([' + MARK + '-toc])');
-        for (var j = 0; j < anchors.length; j++) {
-            var a = anchors[j];
+
+        // ② 专栏目录/侧栏面板：容器本身无稳定类名，靠内部标记上溯。
+        //    判据优先级：新代 .Post-SideActions → 旧代 a[aria-label="边栏锚点"]。
+        //    （CSS 无父选择器，且这两个标记元素本身可能是 inline 的 <a>/<button>，
+        //     隐藏它们不够，必须把整块容器一起藏掉。）
+        var marks = doc.querySelectorAll(
+            '.Post-SideActions:not([' + MARK + '-toc]), a[aria-label="边栏锚点"]:not([' + MARK + '-toc])'
+        );
+        for (var j = 0; j < marks.length; j++) {
+            var a = marks[j];
             a.setAttribute(MARK + '-toc', '1');
-            // 上溯到最近的块级容器（div/section/aside/nav），最多 4 层；
-            // 不用宽度判据（jsdom 无布局引擎，getBoundingClientRect 恒 0）
-            var box = a.parentNode;
-            for (var k = 0; k < 4 && box && box.tagName !== 'BODY'; k++) {
-                if (/^(DIV|SECTION|ASIDE|NAV)$/.test(box.tagName)) break;
-                box = box.parentNode;
-            }
-            if (box && box.style && box.tagName !== 'BODY') { box.style.display = 'none'; n++; }
+            if (hideAncestor(a)) n++;
         }
         return n;
     }
