@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.3.2
+// @version      1.4.0
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.3.2';
+    var VERSION = '1.4.0';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -395,6 +395,30 @@
         return false;
     }
 
+    // 正文根的候选选择器（知乎渲染器产物，跨代长期稳定）。
+    // 唯一用途是充当「安全红线」：一旦上溯到的容器包含它，就绝不再往上藏 ——
+    // 这条红线在 v1.3.2 里被做过头了（当时直接禁止上溯、只藏 .Catalog 自己），
+    // 结果目录的**外层占位列**（常无类名）留在 flex 行里继续占位，把正文挤向一侧。
+    var POST_ROOT_SEL = '.ztext, .RichText, .Post-RichTextContainer, article,' +
+        ' .Post-NormalMain, .Post-NormalSub, .Post-Row-Content-left, .Post-content';
+
+    // 从 el 起向上扩张，隐藏「仍不包含正文根」的最外层块级容器。
+    // 若 el 的直接父级就已含正文，则退让为只处理 el 自身（绝不波及正文）。
+    function hideColumn(el, doc) {
+        var box = el;
+        var node = el.parentNode;
+        for (var k = 0; k < 4 && node && node.tagName !== 'BODY' && node.tagName !== 'HTML'; k++) {
+            if (!/^(DIV|SECTION|ASIDE|NAV|MAIN)$/.test(node.tagName)) break;
+            if (node.querySelector && node.querySelector(POST_ROOT_SEL)) break;   // 安全红线：含正文即停
+            box = node;
+            node = node.parentNode;
+        }
+        if (!box || !box.style) return false;
+        if (box.tagName === 'BODY' || box.tagName === 'HTML') return false;
+        if (box.style.display !== 'none') { box.style.setProperty('display', 'none', 'important'); return true; }
+        return false;
+    }
+
     function cleanSticky(doc) {
         if (!OPT.hideSidebar) return 0;
         var n = 0;
@@ -409,17 +433,33 @@
         }
 
         // ② 目录面板 .Catalog：它本身就是面板根（ref/知乎优化1.js:10303 正是
-        //    `.Catalog.isCatalogV2 { display:none }` 直接隐藏），**只藏自己、绝不上溯** ——
-        //    上溯会命中含正文的行容器，把整页内容一起藏掉。
-        //    其内部 .CatalogModule-title-<hash> 的后缀是构建哈希、每发版必变，只能认 .Catalog 这层。
+        //    `.Catalog.isCatalogV2 { display:none }` 直接隐藏），内层 .CatalogModule-title-<hash>
+        //    的后缀是构建哈希（ref 里 sggN4 / 9caZz 两版并存即证），每发版必变，只能认 .Catalog 这层。
+        //    v1.3.2 曾「只藏自己、禁止上溯」，结果外层无类名的占位列留在 flex 行里，
+        //    正文被挤到一侧 —— 这正是「隐藏了侧栏为什么还靠左」的直接成因。
+        //    现改为：保底藏面板自身 + hideColumn() 安全上溯，把占位列一并收掉。
         var cats = doc.querySelectorAll('.Catalog:not([' + MARK + '-toc])');
         for (var c = 0; c < cats.length; c++) {
             var cat = cats[c];
             cat.setAttribute(MARK + '-toc', '1');
-            if (cat.style.display !== 'none') { cat.style.display = 'none'; n++; }
+            var chid = false;
+            if (cat.style.display !== 'none') { cat.style.setProperty('display', 'none', 'important'); chid = true; }
+            if (hideColumn(cat, doc)) chid = true;                       // 上溯：外层占位列一并收掉
+            if (chid) n++;
         }
 
-        // ③ 旧代侧栏锚点：a[aria-label="边栏锚点"] 是 inline <a>，藏它本身不生效，
+        // ③ 左侧面板（目录 / 操作栏）：.Post-SideActions 是它的可靠标记。
+        //    关键认知：CSS 里已给它 display:none，但**它的外层容器**（常无类名）仍留在
+        //    flex 行里占位，把正文挤向一侧 —— 这正是「侧栏都隐藏了为什么还靠左」的成因。
+        //    故必须上溯收掉占位容器（hideColumn 自带「含正文即停」的安全红线）。
+        var sides = doc.querySelectorAll('.Post-SideActions:not([' + MARK + '-side])');
+        for (var s = 0; s < sides.length; s++) {
+            var sd = sides[s];
+            sd.setAttribute(MARK + '-side', '1');
+            if (hideColumn(sd, doc)) n++;
+        }
+
+        // ④ 旧代侧栏锚点：a[aria-label="边栏锚点"] 是 inline <a>，藏它本身不生效，
         //    须上溯到块级容器 —— 即 ref/知乎优化1.js 的 `.closest('div').hide()` 等价做法。
         //    注意：.Post-SideActions（左侧悬浮操作栏）只在 CSS 里整块 display:none，
         //    此处不做上溯 —— 它是定位元素，占不到文档流，上溯只会误伤行容器。
@@ -432,40 +472,173 @@
         return n;
     }
 
-    // 文章页宽度自适应（v1.3.2）：专栏页正文列被「写死宽度」这件事由外层容器决定，
-    // 而承载它的类名三代演进（哈希 → .Post-Row-Content* → .Post-NormalMain*），
-    // 写死任何一代都迟早过时。故运行时自正文根（.ztext 系列，跨代长期稳定）上溯，
-    // 把沿途「明显窄于阅读宽度」的 max-width 上限逐级解除 ——
-    // 这是 ref/知乎优化1.js:1001 `$(".css-c0fani").width($(".css-kjzwqj").width())`
-    // （取外层可用宽度回写正文列）的结构化等价做法，但不依赖任何行容器类名。
-    // 布局判据只能运行时取：jsdom 无布局引擎时 getComputedStyle 返回空值，本函数自然空转。
+    // 文章页阅读宽度上限：解除写死宽度后，给正文一个舒适上限，超出部分在两侧留白。
+    var READ_W = 1000;
+
+    // 文章页布局自适应（v1.4.0）：不依赖任何类名，纯几何驱动。
+    //
+    // 为什么改成几何驱动：专栏页布局容器的类名「三代演进」（哈希 .css-* → .Post-Row-Content*
+    // → .Post-NormalMain*），写死任何一代都会在别的代上整条落空 —— 这正是此前几版
+    // 在真实页面「一条规则都没命中」的原因。故改为自正文根出发，沿祖先链逐级修正。
+    //
+    // 四件事：
+    //   ① 解除窄宽度上限（正文列常写死 690px 上下；视口级约束保持不动）；
+    //   ② 双 auto 外边距居中 —— 对 block 父级与 flex 父级都成立（flex 下 auto 外边距
+    //      优先吸收剩余空间），这是唯一不关心父级 display 的居中写法。
+    //      v1.3.2 只解宽度、从不设 margin，等于「放开了却没搬动」，是本轮修复的重点；
+    //   ③ 清掉为侧栏留位的不对称内边距（一侧内距远大于另一侧时）；
+    //   ④ 隐藏行内「窄且几乎没有文字」的兄弟列 —— 目录 / 侧栏的占位列。
+    //
+    // 布局判据只能在运行时取。jsdom 无布局引擎（getBoundingClientRect 恒 0），
+    // 此时本函数自动降级为「只按计算样式做规则式修正」，仍然安全且可测。
     function fixPostLayout(doc) {
         if (!OPT.hideSidebar) return 0;
-        var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
-        if (!root) return 0;                      // 非文章页：直接退出
         var win = doc.defaultView;
         if (!win || typeof win.getComputedStyle !== 'function') return 0;
-        var n = 0, el = root, i, cs, mw, px;
-        for (i = 0; i < 5 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
-            try { cs = win.getComputedStyle(el); } catch (e) { break; }
-            mw = cs && cs.maxWidth;
-            // 只解除「明显窄于阅读宽度」的上限：正文列通常是 690px，侧栏更窄；
-            // 视口级的宽约束（一般 >=1100px）保持不动，避免把页头/页脚也拉变形。
-            if (mw && mw !== 'none' && /px$/.test(mw)) {
-                px = parseFloat(mw);
-                if (px > 0 && px < 1100) {
-                    el.style.setProperty('max-width', 'none', 'important');
+        // 限定文章页：/p/<id> 路径，或页面里确实存在文章正文容器
+        var path = (win.location && win.location.pathname) || '';
+        if (!/^\/p\/\d+/.test(path) && !doc.querySelector('.Post-RichTextContainer')) return 0;
+        var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
+        if (!root) return 0;
+
+        var n = 0, el = root, chain = [], i, cs, mw;
+        for (i = 0; i < 8 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
+            chain.push(el);
+            el = el.parentNode;
+        }
+        for (i = 0; i < chain.length; i++) {
+            el = chain[i];
+            try { cs = win.getComputedStyle(el); } catch (e) { cs = null; }
+            // ① 解除窄宽度上限：正文列通常 690px 上下，侧栏更窄；
+            //    视口级宽约束（一般 >=1100px）保持不动，避免把页头/页脚拉变形。
+            if (cs && cs.maxWidth && cs.maxWidth !== 'none' && /px$/.test(cs.maxWidth)) {
+                mw = parseFloat(cs.maxWidth);
+                if (mw > 0 && mw < 1100) { el.style.setProperty('max-width', 'none', 'important'); n++; }
+            }
+            // ② 内联写死的宽度改自适应（第一代脚本面对的情形：style="width:690px"）
+            if (el.style && /^\d+(\.\d+)?px$/.test(el.style.width || '')) {
+                el.style.setProperty('width', 'auto', 'important'); n++;
+            }
+            // ③ 居中：双 auto 外边距（block / flex 父级通吃）
+            el.style.setProperty('margin-left', 'auto', 'important');
+            el.style.setProperty('margin-right', 'auto', 'important');
+            // ④ 清掉为侧栏留位的不对称内边距
+            if (cs) {
+                var pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
+                if (pl > pr + 40) { el.style.setProperty('padding-left', '0', 'important'); n++; }
+                if (pr > pl + 40) { el.style.setProperty('padding-right', '0', 'important'); n++; }
+            }
+        }
+        // ⑤ 链上最外层（最接近 body 的那层）收一个阅读上限，避免解除后撑满超宽屏
+        var outer = chain[chain.length - 1];
+        if (outer && outer.style) {
+            outer.style.setProperty('max-width', READ_W + 'px', 'important');
+            outer.style.setProperty('margin-left', 'auto', 'important');
+            outer.style.setProperty('margin-right', 'auto', 'important');
+            n++;
+        }
+        // ⑥ 隐藏行内占位列
+        n += hideNarrowCols(win, chain);
+        return n;
+    }
+
+    // 行走行列清理：以「元素实测宽度 > 0」作为「环境有布局引擎」的开关 ——
+    // jsdom 无布局引擎、宽度恒 0，若只判 w < 320 会把所有兄弟列误判成窄列。
+    function hideNarrowCols(win, chain) {
+        var n = 0, i, k;
+        for (i = 0; i < chain.length; i++) {
+            var p = chain[i].parentNode;
+            if (!p || !p.children || p.children.length < 2) continue;
+            var pcs;
+            try { pcs = win.getComputedStyle(p); } catch (e) { continue; }
+            if (!pcs || (pcs.display !== 'flex' && pcs.display !== 'grid' && pcs.display !== 'inline-flex')) continue;
+            for (k = 0; k < p.children.length; k++) {
+                var sib = p.children[k];
+                if (sib === chain[i] || !sib.getBoundingClientRect) continue;
+                if (sib.getAttribute(MARK + '-col')) continue;
+                var w = sib.getBoundingClientRect().width;
+                var txt = (sib.textContent || '').replace(/\s+/g, '').length;
+                // 「窄」+「几乎没有正文文字」两条同时成立才动手，避免误伤正文列
+                if (w > 0 && w < 320 && txt < 100) {
+                    sib.setAttribute(MARK + '-col', '1');
+                    sib.style.setProperty('display', 'none', 'important');
                     n++;
                 }
             }
-            // 内联写死的宽度（第一代脚本面对的情形：style="width:690px"）
-            if (el.style && /^\d+(\.\d+)?px$/.test(el.style.width || '')) {
-                el.style.setProperty('width', '100%', 'important');
-                n++;
-            }
-            el = el.parentNode;
         }
         return n;
+    }
+
+    // ======================================================================
+    // 文章页布局诊断（临时，v1.4.0 引入，定位完成后移除）
+    //
+    // 知乎对未登录的自动化浏览器返回反爬空壳（文章页 body 仅 173 字节，
+    // zhuanlan 直连亦 403），真实 DOM 取不到，只能靠推断 —— 这是此前几轮
+    // 「改了却不生效」的根本障碍。故本版在「自愈后仍判定未居中」时，把关键
+    // 几何与结构信息以细横幅暴露在页顶，让真实 DOM 结构能随截图回传。
+    //
+    // 横幅自带验收信号：页面没有横幅 = 布局已判定正常。
+    // ======================================================================
+
+    // 纯函数（可测）：正文列是否明显偏离居中位置。null = 正常或无法判定。
+    function layoutVerdict(w, left, viewport) {
+        if (!w || !viewport || w >= viewport) return null;
+        return Math.abs(left - (viewport - w) / 2) > 40 ? 1 : null;
+    }
+
+    var DIAG_ID = 'zhx-diag';
+
+    function dropDiag(doc) {
+        var d = doc.getElementById(DIAG_ID);
+        if (d && d.parentNode) d.parentNode.removeChild(d);
+    }
+
+    function runDiag(doc) {
+        if (!OPT.hideSidebar) { dropDiag(doc); return; }
+        var win = doc.defaultView;
+        var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
+        if (!win || !root || !root.getBoundingClientRect) { dropDiag(doc); return; }
+        var r = root.getBoundingClientRect();
+        if (!layoutVerdict(r.width, r.left, win.innerWidth)) { dropDiag(doc); return; }
+        var f = function (s) { return doc.querySelector(s) ? '1' : '0'; };
+        var marks = 'Cat' + f('.Catalog') + ' PNM' + f('.Post-NormalMain') +
+            ' PC' + f('.Post-content') + ' PRC' + f('.Post-Row-Content') +
+            ' SAct' + f('.Post-SideActions') + ' ztext' + f('.ztext');
+        var chain = [], el = root, i;
+        for (i = 0; i < 6 && el && el.tagName !== 'BODY'; i++) {
+            var w = Math.round(el.getBoundingClientRect().width);
+            var cls = String(el.className || '').split(/\s+/)[0] || '-';
+            chain.push(el.tagName.toLowerCase() + '.' + cls + '[' + w + ']');
+            el = el.parentNode;
+        }
+        var line1 = 'zhx ' + VERSION + ' | 视口' + win.innerWidth +
+            ' 正文宽' + Math.round(r.width) + ' 左' + Math.round(r.left) +
+            ' 应为' + Math.round((win.innerWidth - r.width) / 2) + ' | ' + marks;
+        var line2 = '祖先: ' + chain.join(' > ');
+        var d = doc.getElementById(DIAG_ID);
+        if (!d) {
+            d = doc.createElement('div');
+            d.id = DIAG_ID;
+            d.setAttribute('style', 'position:fixed;left:0;right:0;top:0;z-index:2147483003;' +
+                'background:rgba(13,17,23,.94);color:#e6edf3;border-bottom:1px solid #30363d;' +
+                'font:11px/16px ui-monospace,Consolas,monospace;padding:3px 8px;' +
+                'white-space:nowrap;overflow-x:auto;');
+            var la = doc.createElement('div'); la.textContent = line1;
+            var lb = doc.createElement('div'); lb.textContent = line2;
+            d.appendChild(la); d.appendChild(lb);
+            (doc.body || doc.documentElement).appendChild(d);
+        } else {
+            if (d.children[0]) d.children[0].textContent = line1;
+            if (d.children[1]) d.children[1].textContent = line2;
+        }
+    }
+
+    // 节流：Watcher 每次心跳都会触发 dynRun，诊断只需在布局稳定后判定一次
+    var diagPending = false;
+    function scheduleDiag(doc) {
+        if (diagPending) return;
+        diagPending = true;
+        setTimeout(function () { diagPending = false; runDiag(doc); }, 1500);
     }
 
     function toggleNight(on) {
@@ -624,6 +797,7 @@
         if (name === 'hideSidebar') {
             cleanSticky(document);
             fixPostLayout(document);
+            scheduleDiag(document);
             // 关闭净化时若启动标记还在（极早期切换），立即解除，避免页脚被长期遮挡
             if (!value) document.documentElement.removeAttribute('data-zhx-booting');
         }
@@ -668,6 +842,7 @@
         applyImg(document);
         cleanSticky(document);
         fixPostLayout(document);
+        scheduleDiag(document);
     }
 
     var observer = null;
@@ -806,7 +981,9 @@
         buildCSS: buildCSS, resolveLink: resolveLink, safeDecode: safeDecode, isForeign: isForeign,
         normalizeImg: normalizeImg, pickOriginal: pickOriginal, pickTime: pickTime,
         applyLink: applyLink, applyTime: applyTime, applyImg: applyImg, cleanSticky: cleanSticky,
-        fixPostLayout: fixPostLayout,
+        fixPostLayout: fixPostLayout, hideColumn: hideColumn, hideNarrowCols: hideNarrowCols,
+        layoutVerdict: layoutVerdict, runDiag: runDiag, scheduleDiag: scheduleDiag,
+        DIAG_ID: DIAG_ID, READ_W: READ_W,
         __setOpt: function (name, value) { OPT[name] = value; }   // 测试注入开关用
     };
 

@@ -265,8 +265,8 @@ if (JSDOM) {
 
     // 场景 6b：新代文章页 —— 目录面板是 .Catalog（其内部 .CatalogModule-title-<hash>
     // 的后缀是构建哈希、每发版必变，只能认 .Catalog 这一层）。
-    // 它本身即面板根，因此必须「只藏自己、绝不上溯」——上溯会命中含正文的行容器，
-    // 把整页内容一起藏掉（本轮从 .Post-SideActions 上溯改为 .Catalog 自身隐藏的原因）。
+    // v1.4.0 起改为「保底藏自身 + 安全上溯外层占位列」：上溯只到「不含正文根」的容器为止，
+    // 一遇到含正文的层立即停手 —— 既不把占位列留在 flex 行里，也绝不波及正文。
     var d6b = dom(
         '<div class="Post-content" id="row2">' +
         '  <div class="Catalog isCatalogV2 css-2hy5iv" id="cat2"><div class="CatalogModule-title-sggN4">目录</div></div>' +
@@ -277,9 +277,26 @@ if (JSDOM) {
     ok(n6b >= 1, '新代结构下 cleanSticky 仍能定位目录面板（不依赖 aria-label）');
     eq(d6b.getElementById('cat2').style.display, 'none', '目录面板 .Catalog 自身被隐藏');
     eq(d6b.getElementById('cat2').getAttribute('data-zhx-toc'), '1', '.Catalog 落幂等标记');
-    eq(d6b.getElementById('row2').style.display, '', '目录根不上溯：行容器（含正文）未被误藏');
+    eq(d6b.getElementById('row2').style.display, '', '安全红线：含正文的行容器未被误藏');
     api.cleanSticky(d6b);   // 幂等复跑
     eq(d6b.getElementById('cat2').style.display, 'none', '幂等：重复调用不改变结果');
+
+    // ---- 场景 6c：目录面板外层「占位列」必须在 flex 行里被收掉 ----
+    // CSS 已把 .Post-SideActions display:none，但它的外层无类名容器仍留在行里占位，
+    // 正文因此被挤向一侧 —— 这是「侧栏都隐藏了为什么还靠左」的直接成因。
+    group('e2e · 文章页占位列安全上溯');
+    var d6c = dom(
+        '<div class="Post-content" id="rowc">' +
+        '  <div id="colc"><div id="sidewrap"><div class="Post-SideActions" id="toc3">目录</div></div></div>' +
+        '  <div class="Post-NormalMain" id="mainc"><div class="ztext">正文</div></div>' +
+        '</div>');
+    var n6c = api.cleanSticky(d6c);
+    ok(n6c >= 1, '占位列场景：cleanSticky 有处理动作');
+    eq(d6c.getElementById('colc').style.display, 'none',
+        '外层无类名占位列被安全上溯隐藏（正文不再被挤向一侧）');
+    eq(d6c.getElementById('mainc').style.display, '', '安全红线：正文容器未被误藏');
+    eq(d6c.getElementById('rowc').style.display, '', '安全红线：行容器未被误藏');
+    eq(d6c.getElementById('toc3').getAttribute('data-zhx-side'), '1', '侧栏标记落幂等标记');
 
     var css6 = api.buildCSS({ hideSidebar: true });
     ok(/div\[data-za-detail-view-path-module="RightSideBar"\][^{]*\{/.test(css6), 'CSS 内含侧栏语义属性规则');
@@ -300,10 +317,42 @@ if (JSDOM) {
     ok(api.fixPostLayout(d7) >= 1, 'fixPostLayout 上溯解除了被限宽的祖先');
     eq(d7.getElementById('w7').style.maxWidth, 'none', '祖先 max-width:690px 被解除（正文得以撑满）');
     eq(d7.querySelector('.ztext').style.maxWidth, '', '正文根自身未被改动（只处理窄约束）');
+    eq(d7.getElementById('w7').style.marginLeft, 'auto', '双 auto 外边距居中（左）—— v1.4.0 前完全缺失');
+    eq(d7.getElementById('w7').style.marginRight, 'auto', '双 auto 外边距居中（右）');
+    eq(d7.querySelector('.Post-content').style.maxWidth, api.READ_W + 'px',
+        '链上最外层收一个阅读上限（避免解除后撑满超宽屏）');
+    // 为侧栏留位的不对称内边距须清零（左内距远大于右内距时）
+    var d7c = dom(
+        '<div class="Post-RichTextContainer" id="rt7c" style="padding-left:200px; padding-right:20px">' +
+        '<div class="ztext">正文</div></div>');
+    api.fixPostLayout(d7c);
+    eq(d7c.getElementById('rt7c').style.paddingLeft, '0px', '清掉为侧栏留位的不对称左内边距');
+    eq(d7c.getElementById('rt7c').style.paddingRight, '20px', '较小的右内边距保持原样（不被误清）');
     // 非文章页（无 .ztext 系列）→ 空转，不误伤首页容器
     var d7b = dom('<div class="Topstory-container"><div id="x7" style="max-width:400px">首页</div></div>');
     eq(api.fixPostLayout(d7b), 0, '非文章页空转（不误伤首页容器）');
     eq(d7b.getElementById('x7').style.maxWidth, '400px', '非文章页的内联 max-width 保持原样');
+
+    // ---- 场景 8：布局诊断（纯函数判据 + 无布局引擎时不误报）----
+    group('e2e · 布局诊断');
+    eq(api.layoutVerdict(508, 182, 1080), 1, 'layoutVerdict：508px 列偏左到 182（应为 286）判为异常');
+    eq(api.layoutVerdict(694, 193, 1080), null, 'layoutVerdict：694px 列居中于 193 判为正常');
+    eq(api.layoutVerdict(0, 0, 1080), null, 'layoutVerdict：无布局引擎（宽 0）不判定');
+    eq(api.layoutVerdict(1080, 0, 1080), null, 'layoutVerdict：满宽不判定');
+    var d8 = dom('<div class="Post-RichTextContainer"><div class="ztext">正文</div></div>');
+    api.__setOpt('hideSidebar', true);
+    api.runDiag(d8);
+    eq(d8.getElementById(api.DIAG_ID), null, '无布局引擎时不注入诊断横幅（jsdom 下不误报）');
+
+    // 无布局引擎时不得误藏兄弟列：hideNarrowCols 以「实测宽度 > 0」作为有布局引擎的开关，
+    // jsdom 下宽度恒 0，若只看 txt<100 会把兄弟列全部误藏。
+    var d6d = dom(
+        '<div style="display:flex">' +
+        '  <div id="colreal7"><span>目录</span></div>' +
+        '  <div class="Post-RichTextContainer" id="maind"><div class="ztext">正文</div></div>' +
+        '</div>');
+    api.fixPostLayout(d6d);
+    eq(d6d.getElementById('colreal7').style.display, '', '无布局引擎时不误藏兄弟列（宽度恒 0 不构成判据）');
 } else {
     console.log('（未找到 jsdom，跳过 e2e 场景）');
 }
