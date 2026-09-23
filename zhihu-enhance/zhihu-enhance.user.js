@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.5.0
+// @version      1.5.1
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF/阅读宽度自定）、链接直链化、夜间模式 —— 11 个开关 + 1 项数值调节，4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
