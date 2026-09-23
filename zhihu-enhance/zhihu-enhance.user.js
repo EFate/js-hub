@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.1.0
+// @version      1.2.0
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.1.0';
+    var VERSION = '1.2.0';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -121,6 +121,18 @@
             out = out.replace(m[0], '.' + m[2] + (m[3] || ''));
         }
         return out === src ? null : out;
+    }
+
+    // 原图目标解析：优先信任知乎原生 data-actualsrc 懒加载原图（最准确，
+    // 带 hash 的新尺寸参数也不会被误剥），该属性缺失时才回退到 normalizeImg 剥尺寸后缀。
+    // 返回 null 表示无需替换（保持现状）。
+    function pickOriginal(img) {
+        var src = img.getAttribute('src') || '';
+        var actual = img.hasAttribute ? img.getAttribute('data-actualsrc') : null;
+        // data-actualsrc 是知乎官方提供的原图地址，且与当前 src 不同 → 直接信任
+        if (actual && actual !== src && actual.indexOf('zhimg.com') > -1) return actual;
+        // 无原生原图信息，回退到尺寸后缀剥离
+        return normalizeImg(src);
     }
 
     // 从「发布于 …」「编辑于 …」文本中提取绝对时间；取不到返回 null，不硬造
@@ -280,9 +292,10 @@
         for (var i = 0; i < imgs.length; i++) {
             var img = imgs[i];
             img.setAttribute(MARK + '-img', '1');
-            var to = normalizeImg(img.getAttribute('src'));
+            var to = pickOriginal(img);
             if (to) {
                 img.setAttribute('src', to);
+                // 同步 data-actualsrc，避免懒加载框架回填占位图
                 if (img.hasAttribute('data-actualsrc')) img.setAttribute('data-actualsrc', to);
                 n++;
             }
@@ -612,7 +625,7 @@
     var API = {
         VERSION: VERSION, GROUPS: GROUPS, OPT_DEFS: OPT_DEFS,
         buildCSS: buildCSS, resolveLink: resolveLink, safeDecode: safeDecode, isForeign: isForeign,
-        normalizeImg: normalizeImg, pickTime: pickTime,
+        normalizeImg: normalizeImg, pickOriginal: pickOriginal, pickTime: pickTime,
         applyLink: applyLink, applyTime: applyTime, applyImg: applyImg, cleanSticky: cleanSticky,
         __setOpt: function (name, value) { OPT[name] = value; }   // 测试注入开关用
     };

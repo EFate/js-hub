@@ -22,7 +22,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">zhihu-enhance v1.1.0 · 知乎阅读增强助手 · 七层架构</text>
+  <text x="24" y="26" class="h1">zhihu-enhance v1.2.0 · 知乎阅读增强助手 · 七层架构</text>
   <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 11 个开关 / 4 组分类</text>
 
   <!-- L1 配置层 -->
