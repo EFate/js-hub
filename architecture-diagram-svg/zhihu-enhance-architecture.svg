@@ -22,8 +22,8 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">zhihu-enhance v1.4.1 · 知乎阅读增强助手 · 七层架构</text>
-  <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 11 个开关 / 4 组分类</text>
+  <text x="24" y="26" class="h1">zhihu-enhance v1.5.0 · 知乎阅读增强助手 · 七层架构</text>
+  <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 11 开关 + 1 数值项 / 4 组</text>
 
   <!-- L1 配置层 -->
   <rect x="24" y="60" width="632" height="112" rx="12" class="layer"/>
@@ -36,12 +36,12 @@
 
   <rect x="238" y="94" width="186" height="62" rx="8" class="band"/>
   <text x="331" y="115" class="band-t" text-anchor="middle">OPT_DEFS 选项定义表</text>
-  <text x="331" y="133" class="band-d" text-anchor="middle">11 开关 · 四组分类</text>
+  <text x="331" y="133" class="band-d" text-anchor="middle">11 开关 + 1 数值项</text>
   <text x="331" y="148" class="band-d" text-anchor="middle">label/默认值/分组</text>
 
   <rect x="436" y="94" width="204" height="62" rx="8" class="node"/>
   <text x="538" y="115" class="nt" text-anchor="middle">存储键约定 zh.*</text>
-  <text x="538" y="133" class="nd" text-anchor="middle">zh.&lt;开关名&gt; 布尔值</text>
+  <text x="538" y="133" class="nd" text-anchor="middle">zh.&lt;开关名&gt; 布尔值 / 数值</text>
   <text x="538" y="148" class="nd" text-anchor="middle">GM_getValue / GM_setValue</text>
 
   <line x1="340" y1="172" x2="340" y2="192" class="arrow" marker-end="url(#ar)"/>
@@ -55,8 +55,8 @@
   <text x="183" y="268" class="band-d" text-anchor="middle">loadOpts() → OPT → saveOpt()</text>
 
   <rect x="338" y="230" width="302" height="46" rx="8" class="node"/>
-  <text x="489" y="250" class="nt" text-anchor="middle">缺失键自动补默认值</text>
-  <text x="489" y="268" class="nd" text-anchor="middle">新增开关零迁移成本；无旧键兼容负担</text>
+  <text x="489" y="250" class="nt" text-anchor="middle">缺失键补默认值 · 越界值归一</text>
+  <text x="489" y="268" class="nd" text-anchor="middle">新增选项零迁移成本；坏值不落盘</text>
 
   <line x1="340" y1="292" x2="340" y2="312" class="arrow" marker-end="url(#ar)"/>
 
@@ -66,7 +66,7 @@
 
   <rect x="40" y="350" width="186" height="62" rx="8" class="node"/>
   <text x="133" y="371" class="nt" text-anchor="middle">净化 CSS</text>
-  <text x="133" y="389" class="nd" text-anchor="middle">登录弹窗 / 自适应加宽居中</text>
+  <text x="133" y="389" class="nd" text-anchor="middle">登录弹窗 / 加宽可调 + 居中</text>
   <text x="133" y="404" class="nd" text-anchor="middle">顶栏隐藏 / 页脚防闪现</text>
 
   <rect x="238" y="350" width="186" height="62" rx="8" class="node"/>
@@ -148,7 +148,7 @@
 
   <rect x="40" y="834" width="192" height="70" rx="8" class="band"/>
   <text x="136" y="855" class="band-t" text-anchor="middle">设置面板</text>
-  <text x="136" y="873" class="band-d" text-anchor="middle">4 组分区 + 开关行</text>
+  <text x="136" y="873" class="band-d" text-anchor="middle">4 组分区 + 开关与滑块</text>
   <text x="136" y="888" class="band-d" text-anchor="middle">首次挂载 · Esc/遮罩</text>
 
   <rect x="244" y="834" width="192" height="70" rx="8" class="warn"/>
@@ -158,7 +158,7 @@
 
   <rect x="448" y="834" width="192" height="70" rx="8" class="node"/>
   <text x="544" y="855" class="nt" text-anchor="middle">Toast 反馈</text>
-  <text x="544" y="873" class="nd" text-anchor="middle">仅在菜单切换开关时弹出</text>
+  <text x="544" y="873" class="nd" text-anchor="middle">菜单切换 / 滑块松手时弹出</text>
   <text x="544" y="888" class="nd" text-anchor="middle">改动即时生效</text>
 
   <line x1="340" y1="920" x2="340" y2="940" class="arrow" marker-end="url(#ar)"/>
@@ -186,5 +186,5 @@
   <text x="544" y="1047" class="warn-d" text-anchor="middle">零轮询，仅属性过滤</text>
 
   <text x="24" y="1102" class="note">注：零注入判据 —— 全部功能自动生效或经菜单触发，页面上没有任何需要用户点一下的动作，故不注入任何入口器件；</text>
-  <text x="24" y="1120" class="note">夜间主题 CSS 常驻但由 data-theme 属性门控，不注入任何可见 UI。设置与开关的唯一入口是脚本管理器菜单。</text>
+  <text x="24" y="1120" class="note">夜间主题 CSS 常驻但由 data-theme 属性门控，不注入任何可见 UI。设置（含阅读宽度滑块）的唯一入口是脚本管理器菜单。</text>
 </svg>

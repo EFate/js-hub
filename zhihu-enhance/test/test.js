@@ -24,14 +24,54 @@ function group(name) { console.log('== ' + name + ' =='); }
 // ======================================================================
 group('配置定义表');
 var defs = api.OPT_DEFS, keys = Object.keys(defs);
-eq(keys.length, 11, '开关总数 = 11');
+// 选项自 v1.5.0 起分两类：布尔开关（面板渲染成开关）与数值项（面板渲染成滑块）。
+// 「开关总数 = 11」的口径只数布尔项，避免把宽度滑块混进来冒充开关。
+var boolKeys = keys.filter(function (k) { return defs[k].type !== 'range'; });
+var rangeKeys = keys.filter(function (k) { return defs[k].type === 'range'; });
+eq(boolKeys.length, 11, '开关总数 = 11');
+eq(rangeKeys.length, 1, '数值项 = 1（文章页阅读宽度）');
+eq(keys.length, 12, '选项总数 = 12（11 开关 + 1 数值项）');
 eq(api.GROUPS.length, 4, '分组数 = 4');
 eq(api.GROUPS.join(','), '净化,阅读,链接,外观', '分组顺序');
 keys.forEach(function (k) {
     var d = defs[k];
     ok(d && d.group && api.GROUPS.indexOf(d.group) > -1, k + ' 分组合法');
-    ok(d && d.label && d.tip && typeof d.def === 'boolean', k + ' 含 label/tip/def');
+    ok(d && d.label && d.tip, k + ' 含 label/tip');
+    if (d.type === 'range') {
+        ok(typeof d.def === 'number' && d.min < d.max && d.def >= d.min && d.def <= d.max && d.step > 0,
+            k + ' 数值项区间合法（' + d.min + '~' + d.max + ' step ' + d.step + '，默认 ' + d.def + '）');
+        ok(defs[d.dep] !== undefined, k + ' 依赖的开关存在（dep=' + d.dep + '）');
+    } else {
+        ok(typeof d.def === 'boolean', k + ' 含布尔默认值');
+    }
 });
+
+// ======================================================================
+// 第 1b 组 · 数值项「阅读宽度」——归一 / 取值入口 / 视口自适应
+// ======================================================================
+group('数值项 · 阅读宽度');
+var RWD = defs.readWidth;
+eq(RWD.def, api.READ_W, '数值项默认值 = READ_W 常量（默认宽度只有一个来源）');
+// clampRange：唯一的合法值判据 —— 存储里被手改过的越界值也不会拉坏版面
+eq(api.clampRange(1900, RWD), 1900, 'clampRange：区间内的值原样保留');
+eq(api.clampRange('1900', RWD), 1900, 'clampRange：字符串数字也认（存储读回的形态）');
+eq(api.clampRange(1923, RWD), 1900, 'clampRange：就近取整到 step（50）');
+eq(api.clampRange(1930, RWD), 1950, 'clampRange：向上取整到 step');
+eq(api.clampRange(300, RWD), RWD.min, 'clampRange：低于下限夹到 min');
+eq(api.clampRange(99999, RWD), RWD.max, 'clampRange：高于上限夹到 max');
+eq(api.clampRange('abc', RWD), RWD.def, 'clampRange：非法字符串回落默认值');
+eq(api.clampRange(undefined, RWD), RWD.def, 'clampRange：undefined 回落默认值');
+eq(api.clampRange(null, RWD), RWD.def, 'clampRange：null 回落默认值');
+eq(api.clampRange(NaN, RWD), RWD.def, 'clampRange：NaN 回落默认值');
+// widthCap：CSS 与运行时共用的单一取值入口
+eq(api.widthCap({}), api.READ_W, 'widthCap：选项缺失时用默认宽度');
+eq(api.widthCap({ readWidth: 2000 }), 2000, 'widthCap：取用户设定值');
+eq(api.widthCap({ readWidth: 50 }), RWD.min, 'widthCap：越界值同样被归一');
+// readOpt：布尔项与数值项的统一归一入口
+eq(api.readOpt('readWidth', 2100), 2100, 'readOpt：数值项正常读取');
+eq(api.readOpt('readWidth', 'bad'), RWD.def, 'readOpt：数值项坏值回落默认');
+eq(api.readOpt('nightMode', 'bad'), false, 'readOpt：布尔项坏值回落默认（不把字符串当真）');
+eq(api.readOpt('nightMode', true), true, 'readOpt：布尔项正常读取');
 
 // ======================================================================
 // 第 2 组 · buildCSS 开关拼装
@@ -76,6 +116,13 @@ ok(new RegExp('\\.Comment-container\\s*\\{[^}]*max-width:\\s*' + api.READ_W + 'p
 ok(new RegExp('\\.Post-NormalMain \\.Post-RichTextContainer[^{]*\\{[^}]*max-width:\\s*' + api.READ_W + 'px').test(cssOn('hideSidebar')),
     'hideSidebar → 正文内容列阅读宽度放宽到 READ_W（' + api.READ_W + 'px）');
 ok(api.READ_W >= 1400, 'hideSidebar → 阅读上限已整体加宽（>=1400px，用户反馈「左右空太多」）');
+// v1.5.0：宽度不再是写死常量，CSS 必须跟随面板设定值（同一个 widthCap 出口）
+ok(new RegExp('\\.Comment-container\\s*\\{[^}]*max-width:\\s*1900px').test(api.buildCSS({ hideSidebar: true, readWidth: 1900 })),
+    'buildCSS → 阅读宽度取自 opt.readWidth（1900px 落到 CSS 上）');
+ok(new RegExp('\\.Post-NormalMain \\.Post-RichTextContainer[^{]*\\{[^}]*max-width:\\s*1100px').test(api.buildCSS({ hideSidebar: true, readWidth: 1100 })),
+    'buildCSS → 调窄同样生效（1100px），不是单向只认宽值');
+ok(new RegExp('\\.Comment-container\\s*\\{[^}]*max-width:\\s*' + RWD.max + 'px').test(api.buildCSS({ hideSidebar: true, readWidth: 99999 })),
+    'buildCSS → 越界值被夹到区间上限（' + RWD.max + 'px）而非原样写出');
 ok(/box-sizing:\s*border-box/.test(cssOn('hideSidebar')),
     'hideSidebar → 宽列同时给 box-sizing（width:100% 不与内边距叠加溢出）');
 // 旧代正文列不得再被写死 694px（那是「收窄」，与放宽诉求相反）
@@ -393,7 +440,28 @@ if (JSDOM) {
     api.fixPostLayout(d9f);
     eq(d9f.getElementById('w9f').style.width, '1600px', '比阅读上限更宽的内联列保持原样（不做过度修改）');
     // readCap：纯函数，上下限与比例都可独立核验
-    eq(api.readCap(2560), api.READ_W, 'readCap：超宽屏收在 READ_W 上限');
+    // 面板设定值必须贯通到运行时：fixPostLayout 收的上限应是「用户设定值」而非常量默认值。
+    // 这是本功能的核心承诺 —— 设置里调多少，页面就用多少。
+    // 断言必须把视口放宽：jsdom 默认视口 1024，88vw(=901) 会成为主导，
+    // 1500 与 2400 得到同一个结果 —— 那样变异测试就抓不出「运行时忽略设定值」。
+    api.__setOpt('readWidth', 2400);
+    var d9g = dom(
+        '<div class="Post-content"><div id="w9g" style="width:690px">' +
+        '<div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div></div>');
+    Object.defineProperty(d9g.defaultView, 'innerWidth', { value: 3000, configurable: true });
+    api.fixPostLayout(d9g);
+    eq(d9g.getElementById('w9g').style.maxWidth, '2400px',
+        '运行时上限 = 面板设定值（宽视口下取满 2400，而不是常量的 1500）');
+    api.__setOpt('readWidth', 900);
+    var d9h = dom(
+        '<div class="Post-content"><div id="w9h" style="width:690px">' +
+        '<div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div></div>');
+    Object.defineProperty(d9h.defaultView, 'innerWidth', { value: 3000, configurable: true });
+    api.fixPostLayout(d9h);
+    eq(d9h.getElementById('w9h').style.maxWidth, '900px',
+        '调窄到下限时上限即为 900px（设置真的改变了运行时行为）');
+    api.__setOpt('readWidth', api.READ_W);   // 复位，避免影响后续用例
+    eq(api.readCap(2560), api.READ_W, 'readCap：超宽屏收在 READ_W 上限（未传上限时用默认值）');
     eq(api.readCap(1600), Math.min(api.READ_W, 1408), 'readCap：1600 视口 → 88%');
     eq(api.readCap(1000), Math.min(api.READ_W, 900), 'readCap：窄屏不缩到不可用（下限 900）');
     eq(api.readCap(0), api.READ_W, 'readCap：取不到视口宽时退回 READ_W');

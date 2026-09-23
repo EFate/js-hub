@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.4.1
-// @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
+// @version      1.5.0
+// @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF/阅读宽度自定）、链接直链化、夜间模式 —— 11 个开关 + 1 项数值调节，4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
 // @match        *://*.zhihu.com/*
@@ -23,11 +23,13 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.4.1';
+    var VERSION = '1.5.0';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
-    // 文章页阅读宽度上限（px）。上提到常量区是为了让 L3 样式层与 L5 执行层共用同一来源，
-    // 避免「CSS 写一个值、运行时写另一个值」的漂移（本项目曾在版本号上踩过同类两处不一致的坑）。
+    // 文章页阅读宽度的「默认值」（px）。它同时是数值项 readWidth 的默认值 —— 用户可在设置
+    // 面板里 900~2400px 之间自定，故这里只作缺省与回退，不再是唯一定值。
+    // 真实取值一律走 widthCap(opt)：L3 样式层与 L5 执行层都从它取，避免「CSS 写一个值、
+    // 运行时写另一个值」的漂移（本项目曾在版本号上踩过同类两处不一致的坑）。
     var READ_W = 1500;
 
     var GROUPS = ['净化', '阅读', '链接', '外观'];
@@ -42,27 +44,56 @@
         hoverFocus:     { group: '阅读', label: '悬停时高亮当前卡片', tip: '鼠标悬停的回答/搜索结果卡片显示淡蓝色边框', def: true },
         refHighlight:   { group: '阅读', label: '引用角标高亮',       tip: '文内引用序号以蓝色加粗显示，便于定位参考资料', def: true },
         gifPlay:        { group: '阅读', label: 'GIF 自动播放',       tip: '点击页面任意位置后，静置的 GIF 图自动开始播放', def: false },
+        // 数值型选项：带 type/min/max/step/unit，面板自动渲染成一行滑块（见 L6 mountRangeRow）。
+        // dep 声明依赖的开关 ——「隐藏侧边栏并居中内容」关闭时本项不生效，面板据此置灰并提示。
+        readWidth:      { group: '阅读', label: '文章页阅读宽度',     tip: '专栏/回答正文的最大宽度，向右拖动更宽；窗口变窄时自动收缩', def: READ_W, type: 'range', min: 900, max: 2400, step: 50, unit: 'px', dep: 'hideSidebar' },
         directLink:     { group: '链接', label: '跳转链接直链化',     tip: '站内外链不再经过中转确认页，直接打开目标网址', def: true },
         nightMode:      { group: '外观', label: '夜间模式',           tip: '深色主题，切换即时生效无需刷新', def: false }
     };
 
     // ======================================================================
-    // L2 数据结构层 · OPT 单一数据源（loadOpts 唯一入口，saveOpt 唯一出口）
+    // L2 数据结构层 · OPT 单一数据源（loadOpts 唯一入口，saveOpt 唯一出口，readOpt 唯一归一）
     // ======================================================================
 
     var OPT = {};
 
+    // 数值项归一（唯一的合法值判据）：取整到 step、夹进 [min,max]，非法输入回落默认值。
+    // 读、写、渲染三条路都过它 ——「存进去的」与「用起来的」因此永远一致；
+    // 手改存储或旧版本遗留的越界值，也不会把版面拉坏。
+    function clampRange(v, def) {
+        var n = (typeof v === 'number') ? v : parseFloat(v);
+        if (!isFinite(n)) return def.def;
+        var st = def.step || 1;
+        n = Math.round(n / st) * st;
+        if (n < def.min) n = def.min;
+        if (n > def.max) n = def.max;
+        return n;
+    }
+
+    // 单值归一：数值项走 clampRange，布尔项非布尔即回落默认
+    function readOpt(name, v) {
+        var d = OPT_DEFS[name];
+        if (d.type === 'range') return clampRange(v, d);
+        return (typeof v === 'boolean') ? v : d.def;
+    }
+
     function loadOpts() {
         for (var name in OPT_DEFS) {
-            var v = GM_getValue(PREFIX + '.' + name);
-            OPT[name] = (typeof v === 'boolean') ? v : OPT_DEFS[name].def;
+            OPT[name] = readOpt(name, GM_getValue(PREFIX + '.' + name));
         }
         return OPT;
     }
 
     function saveOpt(name, value) {
-        OPT[name] = value;
-        GM_setValue(PREFIX + '.' + name, value);
+        var v = readOpt(name, value);   // 写前归一：坏值不落盘
+        OPT[name] = v;
+        GM_setValue(PREFIX + '.' + name, v);
+        return v;
+    }
+
+    // 阅读宽度上限的单一取值入口（L3 样式层与 L5 执行层共用它，杜绝两处写死）
+    function widthCap(opt) {
+        return clampRange(opt && opt.readWidth, OPT_DEFS.readWidth);
     }
 
     // ======================================================================
@@ -209,9 +240,11 @@
                让它**贴在左侧**，右侧腾出的空间全成了空白。所以光「隐藏」不够，必须
                ① 让正文列本身变宽（放宽）或 ② 让行容器居中 —— ref 的做法是两者都做。
 
-               本轮修正（v1.4.1）：阅读上限 1000px → READ_W（1500px），且上限随视口自适应
-               （宽屏 1500px、窄屏 88vw）。起因是用户反馈「居中好了，但左右空太多」——
+               本轮修正（v1.4.1）：阅读上限 1000px → 1500px 基线，且上限随视口自适应
+               （宽屏取上限、窄屏 88vw）。起因是用户反馈「居中好了，但左右空太多」——
                居中解决的是「位置」，加宽解决的是「宽度」，两者缺一不可。
+               本轮补充（v1.5.0）：该上限不再是写死的常量，改由设置面板的「文章页阅读宽度」
+               滑块在 900~2400px 间自定；CSS（此处）与运行时统一从 widthCap(opt) 取同一值。
                ② 居中改用「双 auto 外边距」写法 —— 对 block 父级（需自身有确定宽度）与 flex 父级
                   （auto 外边距优先吸收剩余空间）**都成立**。上一版用 flex:0 1 auto + 父级
                   justify-content，一旦父级不是 flex 就整体失效，这是上一版在真实页面不生效的关键；
@@ -222,7 +255,7 @@
                 width: 100% !important; max-width: 100% !important; margin: 0 auto !important;
             }
 
-            /* 正文列：撑满可用宽度（上限 READ_W：宽屏 1500px、窄屏 88vw）并居中。
+            /* 正文列：撑满可用宽度（上限 = 面板设定的阅读宽度，窄屏再按 88vw 收）并居中。
                margin-left/right:auto 是唯一同时适配 block 与 flex 两种父级的居中手段。
                box-sizing 与 width:100% 必须成对给出，否则内边距会叠加把宽列顶出容器。 */
             .Post-NormalMain > div, .Post-NormalSub > div,
@@ -230,19 +263,19 @@
             .Post-NormalMain .Post-Header,
             .Post-NormalMain .Post-RichTextContainer {
                 width: 100% !important;
-                max-width: ${READ_W}px !important;
+                max-width: ${widthCap(opt)}px !important;
                 box-sizing: border-box !important;
                 margin-left: auto !important;
                 margin-right: auto !important;
             }
             .Comment-container {
-                width: 100% !important; max-width: ${READ_W}px !important;
+                width: 100% !important; max-width: ${widthCap(opt)}px !important;
                 box-sizing: border-box !important;
                 margin-left: auto !important; margin-right: auto !important;
                 padding-left: 0 !important; padding-right: 0 !important;
             }
             .ColumnPageHeader-content {
-                max-width: ${READ_W}px !important;
+                max-width: ${widthCap(opt)}px !important;
                 margin-left: auto !important; margin-right: auto !important;
             }
 
@@ -480,11 +513,13 @@
     }
 
     // 阅读上限随视口自适应（纯函数，可测）：
-    // 宽屏放开到 READ_W（1500px），窄屏收成 88% 视口 —— 保证任何屏宽下左右留白都不过多。
-    // 下限 900px 是给「窗口被拖得很窄」兜底，避免读数被压到不可用。
-    function readCap(vw) {
-        if (!vw) return READ_W;
-        return Math.min(READ_W, Math.max(900, Math.round(vw * 0.88)));
+    // 宽屏放开到用户设定的上限，窄屏收成 88% 视口 —— 保证任何屏宽下左右留白都不过多。
+    // 下限 900px 是给「窗口被拖得很窄」兜底，避免读数被压到不可用；
+    // 未传上限（或传了非法值）时退回默认值，保证纯函数始终可用。
+    function readCap(vw, cap) {
+        if (typeof cap !== 'number' || !(cap > 0)) cap = READ_W;
+        if (!vw) return cap;
+        return Math.min(cap, Math.max(900, Math.round(vw * 0.88)));
     }
 
     // 文章页布局自适应（v1.4.0）：不依赖任何类名，纯几何驱动。
@@ -513,7 +548,7 @@
         var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
         if (!root) return 0;
 
-        var capW = readCap(win.innerWidth);   // 阅读上限：宽屏 1500px / 窄屏 88vw
+        var capW = readCap(win.innerWidth, widthCap(OPT));   // 上限取自面板设置，窄屏再按 88vw 收
 
         var n = 0, el = root, chain = [], i, cs, pcs, mw, p, cw, pw, iw, isNarrow, isRowFlex;
         for (i = 0; i < 8 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
@@ -746,6 +781,27 @@
             transition:transform .22s cubic-bezier(.4,0,.2,1); }
         .zhx-switch input:checked + i { background:var(--zhx-accent); }
         .zhx-switch input:checked + i::after { transform:translateX(18px); }
+        /* —— 数值行（滑块）：设置面板里唯一非开关控件 —— */
+        .zhx-row-stack { flex-direction:column; align-items:stretch; gap:9px; padding-bottom:12px; }
+        .zhx-row-stack .zhx-row-label { display:flex; align-items:center; gap:8px; }
+        .zhx-val { margin-left:auto; flex:none; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600;
+            color:var(--zhx-accent); background:rgba(45,164,78,.12); border:1px solid rgba(45,164,78,.35);
+            font-variant-numeric:tabular-nums; transition:color .15s, background .15s, border-color .15s; }
+        .zhx-range { -webkit-appearance:none; appearance:none; display:block; width:100%; height:4px; margin:0; padding:0;
+            border-radius:2px; outline:none; cursor:pointer;
+            background:linear-gradient(to right, var(--zhx-accent) 0 var(--zhx-fill,0%), var(--zhx-bd) var(--zhx-fill,0%) 100%); }
+        .zhx-range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px; border-radius:50%;
+            background:var(--zhx-accent); border:2px solid var(--zhx-bg); box-shadow:0 0 0 1px var(--zhx-bd);
+            transition:transform .15s; }
+        .zhx-range:hover::-webkit-slider-thumb { transform:scale(1.12); }
+        .zhx-range:focus-visible { box-shadow:0 0 0 3px rgba(45,164,78,.28); }
+        .zhx-range::-moz-range-thumb { width:12px; height:12px; border-radius:50%; background:var(--zhx-accent);
+            border:2px solid var(--zhx-bg); box-shadow:0 0 0 1px var(--zhx-bd); cursor:pointer; }
+        .zhx-scale { display:flex; justify-content:space-between; font-size:11px; color:var(--zhx-fg-2); font-variant-numeric:tabular-nums; }
+        .zhx-dep { display:none; margin-top:2px; font-size:11px; color:#d29922; }
+        .zhx-row.zhx-off .zhx-dep { display:block; }
+        .zhx-row.zhx-off .zhx-range { opacity:.35; pointer-events:none; }
+        .zhx-row.zhx-off .zhx-val { color:var(--zhx-fg-2); background:transparent; border-color:var(--zhx-bd); }
         .zhx-foot { padding:8px 16px; border-top:1px solid var(--zhx-bd-2); font-size:11px; color:var(--zhx-fg-2); flex:none; }
         #zhx-toasts { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:2147483004; display:flex;
             flex-direction:column; gap:8px; align-items:center; pointer-events:none; }
@@ -793,6 +849,7 @@
             Object.keys(OPT_DEFS).forEach(function (name) {
                 var def = OPT_DEFS[name];
                 if (def.group !== g) return;
+                if (def.type === 'range') { mountRangeRow(body, name, def); return; }
                 var row = document.createElement('div');
                 row.className = 'zhx-row';
                 row.innerHTML =
@@ -821,6 +878,70 @@
         });
     }
 
+    // 数值行（滑块）：拖动中只改内存做即时预览，松手（change）才落盘 —— 高频 input 不写存储、
+    // 不弹提示；拖动期间面板上就能看到宽度变化，符合「改动即时生效」的一致体验。
+    function mountRangeRow(body, name, def) {
+        var row = document.createElement('div');
+        row.className = 'zhx-row zhx-row-stack';
+        row.setAttribute('data-zhx-opt', name);
+        row.innerHTML =
+            '<div class="zhx-row-text">' +
+            '<div class="zhx-row-label"><span class="zhx-name"></span><span class="zhx-val"></span></div>' +
+            '<div class="zhx-row-tip"></div>' +
+            '<div class="zhx-dep"></div>' +
+            '</div>' +
+            '<input type="range" class="zhx-range">' +
+            '<div class="zhx-scale"><span></span><span></span></div>';
+        row.querySelector('.zhx-name').textContent = def.label;
+        row.querySelector('.zhx-row-tip').textContent = def.tip;
+        if (def.dep && OPT_DEFS[def.dep]) {
+            row.querySelector('.zhx-dep').textContent = '需先开启「' + OPT_DEFS[def.dep].label + '」后生效';
+        }
+        var unit = def.unit || '';
+        var scale = row.querySelectorAll('.zhx-scale span');
+        scale[0].textContent = def.min + unit;
+        scale[1].textContent = def.max + unit;
+
+        var r = row.querySelector('.zhx-range');
+        r.min = def.min;
+        r.max = def.max;
+        r.step = def.step;
+        r.value = OPT[name];
+        r.setAttribute('aria-label', def.label);
+
+        function paint(v) {
+            row.querySelector('.zhx-val').textContent = v + unit;
+            r.style.setProperty('--zhx-fill', Math.round((v - def.min) / (def.max - def.min) * 100) + '%');
+        }
+        paint(OPT[name]);
+        row.classList.toggle('zhx-off', !!(def.dep && !OPT[def.dep]));
+
+        r.addEventListener('input', function () {
+            var v = clampRange(r.value, def);
+            OPT[name] = v;                 // 仅内存预览，不写存储
+            paint(v);
+            rebuildStyle();
+            fixPostLayout(document);
+        });
+        r.addEventListener('change', function () {
+            var v = clampRange(r.value, def);
+            r.value = v;
+            applyOpt(name, v);             // 落盘走唯一应用路径
+            toast(def.label + '已设为 ' + v + unit, 'ok');
+        });
+        body.appendChild(row);
+    }
+
+    // 依赖开关变化时同步数值行的可用态（置灰 + 显示依赖提示）
+    function refreshRangeRows() {
+        if (!els.panel) return;
+        var rows = els.panel.querySelectorAll('.zhx-row-stack');
+        for (var i = 0; i < rows.length; i++) {
+            var def = OPT_DEFS[rows[i].getAttribute('data-zhx-opt')];
+            if (def && def.dep) rows[i].classList.toggle('zhx-off', !OPT[def.dep]);
+        }
+    }
+
     function openPanel() { mountUI(); els.overlay.classList.add('zhx-open'); els.panel.classList.add('zhx-open'); }
     function closePanel() { els.overlay.classList.remove('zhx-open'); els.panel.classList.remove('zhx-open'); }
 
@@ -840,24 +961,26 @@
         }, 2200);
     }
 
-    // 开关变更的唯一应用路径：存储 → 对应生效手段 → 菜单标签刷新
+    // 开关 / 数值变更的唯一应用路径：归一 → 存储 → 对应生效手段 → 菜单与面板状态刷新
     function applyOpt(name, value) {
-        saveOpt(name, value);
         var def = OPT_DEFS[name];
-        if (name === 'nightMode') { toggleNight(value); registerMenu(); return; }
-        if (name === 'autoHideHeader') { watchScroll(value); rebuildStyle(); return; }
+        var v = saveOpt(name, value);   // 归一后的真实值（数值项可能被夹进区间）
+        if (name === 'nightMode') { toggleNight(v); registerMenu(); return; }
+        if (name === 'autoHideHeader') { watchScroll(v); rebuildStyle(); return; }
         if (def) rebuildStyle();
         if (name === 'directLink') applyLink(document);
         if (name === 'timeTop') applyTime(document);
         if (name === 'picOriginal') applyImg(document);
-        if (name === 'gifPlay' && value) playGifs(document);
+        if (name === 'gifPlay' && v) playGifs(document);
         if (name === 'hideSidebar') {
             cleanSticky(document);
             fixPostLayout(document);
             scheduleDiag(document);
+            refreshRangeRows();    // 依赖它的数值行同步置灰 / 恢复
             // 关闭净化时若启动标记还在（极早期切换），立即解除，避免页脚被长期遮挡
-            if (!value) document.documentElement.removeAttribute('data-zhx-booting');
+            if (!v) document.documentElement.removeAttribute('data-zhx-booting');
         }
+        if (name === 'readWidth') { fixPostLayout(document); scheduleDiag(document); }
     }
 
     function rebuildStyle() {
@@ -1041,6 +1164,8 @@
         fixPostLayout: fixPostLayout, hideColumn: hideColumn, hideNarrowCols: hideNarrowCols,
         layoutVerdict: layoutVerdict, runDiag: runDiag, scheduleDiag: scheduleDiag,
         DIAG_ID: DIAG_ID, READ_W: READ_W, readCap: readCap,
+        clampRange: clampRange, readOpt: readOpt, widthCap: widthCap,
+        mountRangeRow: mountRangeRow, refreshRangeRows: refreshRangeRows,
         __setOpt: function (name, value) { OPT[name] = value; }   // 测试注入开关用
     };
 
