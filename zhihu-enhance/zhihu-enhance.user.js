@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.4.0
+// @version      1.4.1
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,9 +23,12 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.4.0';
+    var VERSION = '1.4.1';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
+    // 文章页阅读宽度上限（px）。上提到常量区是为了让 L3 样式层与 L5 执行层共用同一来源，
+    // 避免「CSS 写一个值、运行时写另一个值」的漂移（本项目曾在版本号上踩过同类两处不一致的坑）。
+    var READ_W = 1500;
 
     var GROUPS = ['净化', '阅读', '链接', '外观'];
 
@@ -206,8 +209,9 @@
                让它**贴在左侧**，右侧腾出的空间全成了空白。所以光「隐藏」不够，必须
                ① 让正文列本身变宽（放宽）或 ② 让行容器居中 —— ref 的做法是两者都做。
 
-               本轮修正（v1.3.2）：
-               ① 阅读宽度 850px → 1000px；
+               本轮修正（v1.4.1）：阅读上限 1000px → READ_W（1500px），且上限随视口自适应
+               （宽屏 1500px、窄屏 88vw）。起因是用户反馈「居中好了，但左右空太多」——
+               居中解决的是「位置」，加宽解决的是「宽度」，两者缺一不可。
                ② 居中改用「双 auto 外边距」写法 —— 对 block 父级（需自身有确定宽度）与 flex 父级
                   （auto 外边距优先吸收剩余空间）**都成立**。上一版用 flex:0 1 auto + 父级
                   justify-content，一旦父级不是 flex 就整体失效，这是上一版在真实页面不生效的关键；
@@ -218,24 +222,27 @@
                 width: 100% !important; max-width: 100% !important; margin: 0 auto !important;
             }
 
-            /* 正文列：撑满可用宽度（上限 1000px）并居中。
-               margin-left/right:auto 是唯一同时适配 block 与 flex 两种父级的居中手段。 */
+            /* 正文列：撑满可用宽度（上限 READ_W：宽屏 1500px、窄屏 88vw）并居中。
+               margin-left/right:auto 是唯一同时适配 block 与 flex 两种父级的居中手段。
+               box-sizing 与 width:100% 必须成对给出，否则内边距会叠加把宽列顶出容器。 */
             .Post-NormalMain > div, .Post-NormalSub > div,
             .Post-Row-Content-left, .Post-Main,
             .Post-NormalMain .Post-Header,
             .Post-NormalMain .Post-RichTextContainer {
                 width: 100% !important;
-                max-width: 1000px !important;
+                max-width: ${READ_W}px !important;
+                box-sizing: border-box !important;
                 margin-left: auto !important;
                 margin-right: auto !important;
             }
             .Comment-container {
-                width: 100% !important; max-width: 1000px !important;
+                width: 100% !important; max-width: ${READ_W}px !important;
+                box-sizing: border-box !important;
                 margin-left: auto !important; margin-right: auto !important;
                 padding-left: 0 !important; padding-right: 0 !important;
             }
             .ColumnPageHeader-content {
-                max-width: 1000px !important;
+                max-width: ${READ_W}px !important;
                 margin-left: auto !important; margin-right: auto !important;
             }
 
@@ -472,8 +479,13 @@
         return n;
     }
 
-    // 文章页阅读宽度上限：解除写死宽度后，给正文一个舒适上限，超出部分在两侧留白。
-    var READ_W = 1000;
+    // 阅读上限随视口自适应（纯函数，可测）：
+    // 宽屏放开到 READ_W（1500px），窄屏收成 88% 视口 —— 保证任何屏宽下左右留白都不过多。
+    // 下限 900px 是给「窗口被拖得很窄」兜底，避免读数被压到不可用。
+    function readCap(vw) {
+        if (!vw) return READ_W;
+        return Math.min(READ_W, Math.max(900, Math.round(vw * 0.88)));
+    }
 
     // 文章页布局自适应（v1.4.0）：不依赖任何类名，纯几何驱动。
     //
@@ -501,27 +513,67 @@
         var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
         if (!root) return 0;
 
-        var n = 0, el = root, chain = [], i, cs, mw;
+        var capW = readCap(win.innerWidth);   // 阅读上限：宽屏 1500px / 窄屏 88vw
+
+        var n = 0, el = root, chain = [], i, cs, pcs, mw, p, cw, pw, iw, isNarrow, isRowFlex;
         for (i = 0; i < 8 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
             chain.push(el);
             el = el.parentNode;
         }
         for (i = 0; i < chain.length; i++) {
             el = chain[i];
-            try { cs = win.getComputedStyle(el); } catch (e) { cs = null; }
-            // ① 解除窄宽度上限：正文列通常 690px 上下，侧栏更窄；
-            //    视口级宽约束（一般 >=1100px）保持不动，避免把页头/页脚拉变形。
+            cs = null; pcs = null;
+            try { cs = win.getComputedStyle(el); } catch (e) {}
+            p = el.parentNode;
+            if (p && p.tagName !== 'BODY' && p.tagName !== 'HTML') {
+                try { pcs = win.getComputedStyle(p); } catch (e) {}
+            }
+
+            // ① 解除窄宽度上限：正文列常被写死 690px 上下。
+            //    比阅读上限还窄的 max-width 一律解除（可能是知乎的 690，也可能是旧版脚本自己
+            //    v1.3.2 写死的 1000）；比阅读上限更宽的约束（视口级）保持不动，避免拉变形页头页脚。
             if (cs && cs.maxWidth && cs.maxWidth !== 'none' && /px$/.test(cs.maxWidth)) {
                 mw = parseFloat(cs.maxWidth);
-                if (mw > 0 && mw < 1100) { el.style.setProperty('max-width', 'none', 'important'); n++; }
+                if (mw > 0 && mw < capW) { el.style.setProperty('max-width', 'none', 'important'); n++; }
             }
-            // ② 内联写死的宽度改自适应（第一代脚本面对的情形：style="width:690px"）
-            if (el.style && /^\d+(\.\d+)?px$/.test(el.style.width || '')) {
-                el.style.setProperty('width', 'auto', 'important'); n++;
+
+            // ② 加宽（本轮重点）：v1.4.0 只「解上限」不「撑宽度」，而正文列的窄往往来自**
+            //    自身写死的宽度**（无论是 CSS 类给的，还是内联 style 给的 690px —— 在计算样式里
+            //    读到的就是 690px），于是居中生效了、左右却各留一大片空白。用户反馈正是这个形态。
+            //    判据（任一成立即视为「被写死的窄列」）：
+            //      · 计算宽度明显窄于父级可用宽度（CSS 类写死的情形）
+            //      · 内联宽度是 px 且小于阅读上限（第一代脚本面对的情形）
+            //    动作：
+            //      · 父级是 row 方向 flex 容器 → flex-grow 增长（flex-basis 写死的宽度会被填平）
+            //      · 其余（block 等）          → width: 100%
+            //    两条都同时给 box-sizing:border-box，否则内边距会叠加把宽列顶出容器产生横向滚动。
+            //    注意不能写 width:auto —— flex 行内 auto 会缩成内容宽度，越改越窄。
+            cw = pxOf(cs && cs.width);
+            pw = pxOf(pcs && pcs.width);
+            iw = pxOf(el.style && el.style.width);
+            isNarrow = (cw > 0 && pw > 0 && cw < pw - 24) || (iw > 0 && iw < capW);
+            if (isNarrow) {
+                isRowFlex = !!(pcs && /^(inline-)?flex$/.test(pcs.display) &&
+                    /^row/.test(pcs.flexDirection || 'row'));
+                if (isRowFlex) {
+                    if (!(parseFloat(cs && cs.flexGrow) > 0)) {
+                        el.style.setProperty('flex-grow', '1', 'important');
+                        n++;
+                    }
+                } else {
+                    el.style.setProperty('width', '100%', 'important');
+                    n++;
+                }
+                el.style.setProperty('box-sizing', 'border-box', 'important');
+                el.style.setProperty('max-width', capW + 'px', 'important');
+                el.style.setProperty('margin-left', 'auto', 'important');
+                el.style.setProperty('margin-right', 'auto', 'important');
             }
+
             // ③ 居中：双 auto 外边距（block / flex 父级通吃）
             el.style.setProperty('margin-left', 'auto', 'important');
             el.style.setProperty('margin-right', 'auto', 'important');
+
             // ④ 清掉为侧栏留位的不对称内边距
             if (cs) {
                 var pl = parseFloat(cs.paddingLeft) || 0, pr = parseFloat(cs.paddingRight) || 0;
@@ -529,10 +581,10 @@
                 if (pr > pl + 40) { el.style.setProperty('padding-right', '0', 'important'); n++; }
             }
         }
-        // ⑤ 链上最外层（最接近 body 的那层）收一个阅读上限，避免解除后撑满超宽屏
+        // ⑤ 链上最外层（最接近 body 的那层）收阅读上限：解除宽度后避免在超宽屏上撑到满屏
         var outer = chain[chain.length - 1];
         if (outer && outer.style) {
-            outer.style.setProperty('max-width', READ_W + 'px', 'important');
+            outer.style.setProperty('max-width', capW + 'px', 'important');
             outer.style.setProperty('margin-left', 'auto', 'important');
             outer.style.setProperty('margin-right', 'auto', 'important');
             n++;
@@ -540,6 +592,11 @@
         // ⑥ 隐藏行内占位列
         n += hideNarrowCols(win, chain);
         return n;
+    }
+
+    // 计算样式里的长度取 px 数值；非 px（auto / 100% / '' / none / fit-content…）一律返回 0。
+    function pxOf(v) {
+        return (v && /^-?\d+(\.\d+)?px$/.test(v)) ? parseFloat(v) : 0;
     }
 
     // 行走行列清理：以「元素实测宽度 > 0」作为「环境有布局引擎」的开关 ——
@@ -983,7 +1040,7 @@
         applyLink: applyLink, applyTime: applyTime, applyImg: applyImg, cleanSticky: cleanSticky,
         fixPostLayout: fixPostLayout, hideColumn: hideColumn, hideNarrowCols: hideNarrowCols,
         layoutVerdict: layoutVerdict, runDiag: runDiag, scheduleDiag: scheduleDiag,
-        DIAG_ID: DIAG_ID, READ_W: READ_W,
+        DIAG_ID: DIAG_ID, READ_W: READ_W, readCap: readCap,
         __setOpt: function (name, value) { OPT[name] = value; }   // 测试注入开关用
     };
 

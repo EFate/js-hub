@@ -69,10 +69,15 @@ ok(/\.Post-NormalSub[^{]*\{/.test(cssOn('hideSidebar')),
 // 其内部 .CatalogModule-title-<hash> 后缀是构建哈希，不能写进选择器）
 ok(/\.Post-Row-Content-right, \.Catalog,/.test(cssOn('hideSidebar')),
     'hideSidebar → 目录面板用 .Catalog 判据隐藏（不写哈希后缀）');
-ok(/\.Comment-container\s*\{[^}]*max-width:\s*1000px/.test(cssOn('hideSidebar')),
-    'hideSidebar → 评论区阅读宽度一并放宽到 1000px');
-ok(/\.Post-NormalMain \.Post-RichTextContainer[^{]*\{[^}]*max-width:\s*1000px/.test(cssOn('hideSidebar')),
-    'hideSidebar → 正文内容列阅读宽度放宽到 1000px');
+// 阅读宽度只有一个来源：READ_W 常量（CSS 由 buildCSS 内插，运行时由 readCap 输出），
+// 断言同时锚定「CSS 里出现的数值」与「常量本身够宽」，避免两处漂移或悄悄退回窄值。
+ok(new RegExp('\\.Comment-container\\s*\\{[^}]*max-width:\\s*' + api.READ_W + 'px').test(cssOn('hideSidebar')),
+    'hideSidebar → 评论区阅读宽度放宽到 READ_W（' + api.READ_W + 'px）');
+ok(new RegExp('\\.Post-NormalMain \\.Post-RichTextContainer[^{]*\\{[^}]*max-width:\\s*' + api.READ_W + 'px').test(cssOn('hideSidebar')),
+    'hideSidebar → 正文内容列阅读宽度放宽到 READ_W（' + api.READ_W + 'px）');
+ok(api.READ_W >= 1400, 'hideSidebar → 阅读上限已整体加宽（>=1400px，用户反馈「左右空太多」）');
+ok(/box-sizing:\s*border-box/.test(cssOn('hideSidebar')),
+    'hideSidebar → 宽列同时给 box-sizing（width:100% 不与内边距叠加溢出）');
 // 旧代正文列不得再被写死 694px（那是「收窄」，与放宽诉求相反）
 ok(!/\.Post-Row-Content-left \{[^}]*max-width:\s*694px/.test(cssOn('hideSidebar')),
     'hideSidebar → 旧代正文列不再被压到 694px');
@@ -319,8 +324,8 @@ if (JSDOM) {
     eq(d7.querySelector('.ztext').style.maxWidth, '', '正文根自身未被改动（只处理窄约束）');
     eq(d7.getElementById('w7').style.marginLeft, 'auto', '双 auto 外边距居中（左）—— v1.4.0 前完全缺失');
     eq(d7.getElementById('w7').style.marginRight, 'auto', '双 auto 外边距居中（右）');
-    eq(d7.querySelector('.Post-content').style.maxWidth, api.READ_W + 'px',
-        '链上最外层收一个阅读上限（避免解除后撑满超宽屏）');
+    eq(d7.querySelector('.Post-content').style.maxWidth, api.readCap(d7.defaultView.innerWidth) + 'px',
+        '链上最外层收一个阅读上限（随视口自适应，避免撑满超宽屏）');
     // 为侧栏留位的不对称内边距须清零（左内距远大于右内距时）
     var d7c = dom(
         '<div class="Post-RichTextContainer" id="rt7c" style="padding-left:200px; padding-right:20px">' +
@@ -332,6 +337,66 @@ if (JSDOM) {
     var d7b = dom('<div class="Topstory-container"><div id="x7" style="max-width:400px">首页</div></div>');
     eq(api.fixPostLayout(d7b), 0, '非文章页空转（不误伤首页容器）');
     eq(d7b.getElementById('x7').style.maxWidth, '400px', '非文章页的内联 max-width 保持原样');
+
+    // ---- 场景 7b：加宽（v1.4.1 重点）----
+    // v1.4.0 只「解上限」不「撑宽度」：正文列的窄来自**自身写死的宽度**（CSS 类给的 690px
+    // 在计算样式里就是 690px），于是居中生效、左右仍各留一大片空白 —— 用户反馈正是这个形态。
+    // 本组验证「按几何判据把明显窄于父级的列撑满」，以及上下限的取值。
+    group('e2e · 文章页加宽（窄列撑满）');
+    // 用「样式表宽度 + 父级固定宽度」构造「自身计算宽度 690px」的真实形态，
+    // 从而把「几何加宽分支」与「内联宽度改写分支」**隔离**测试 ——
+    // 若窄列还带内联宽度，两个分支会同时兜住结果，变异测试便抓不出几何分支失效（曾出现该假绿）。
+    var d9 = dom(
+        '<style>.nar9{width:690px}</style>' +
+        '<div class="Post-content" id="pc9" style="width:1200px">' +
+        '  <div class="nar9" id="w9"><div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div>' +
+        '</div>');
+    eq(d9.defaultView.getComputedStyle(d9.getElementById('w9')).width, '690px',
+        '前置：窄列宽度来自样式表（计算宽度 690px）');
+    eq(d9.getElementById('w9').style.width, '', '前置：窄列无内联宽度（内联改写分支不参与）');
+    ok(api.fixPostLayout(d9) >= 1, 'fixPostLayout 识别出「计算宽度明显窄于父级」的列');
+    eq(d9.getElementById('w9').style.width, '100%', '写死在样式表里的窄列被撑满（几何加宽生效）');
+    eq(d9.getElementById('w9').style.boxSizing, 'border-box', '撑宽同时给 border-box（内边距不会把列顶出容器）');
+    eq(d9.getElementById('w9').style.maxWidth, api.readCap(d9.defaultView.innerWidth) + 'px',
+        '撑宽后仍收阅读上限（不无限拉宽）');
+    eq(d9.getElementById('w9').style.marginLeft, 'auto', '加宽后仍保持居中（左）');
+    // 父级是 row 方向 flex 容器 → 走 flex-grow 增长（flex-basis 写死的宽度会被填平）
+    var d9b = dom(
+        '<style>.nar9b{width:600px}</style>' +
+        '<div style="display:flex;width:1200px">' +
+        '  <div class="nar9b" id="f9"><div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div>' +
+        '  <div id="s9" style="display:none">侧栏</div>' +
+        '</div>');
+    api.fixPostLayout(d9b);
+    eq(d9b.getElementById('f9').style.flexGrow, '1',
+        'flex 行内的窄列用 flex-grow 增长（能填平 flex-basis 写死的宽度）');
+    eq(d9b.getElementById('f9').style.width, '',
+        'flex 行内不写 width（避免与 flex-basis 打架，越改越窄）');
+    eq(d9b.getElementById('f9').style.maxWidth, api.readCap(1024) + 'px', 'flex 行内同样收阅读上限');
+    eq(d9b.getElementById('s9').style.display, 'none', 'flex 行内已隐藏的侧栏不被改动');
+    // 已经够宽的列不再动它（避免把所有容器都写满 inline 样式）
+    var d9c = dom('<div class="Post-content"><div id="w9c"><div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div></div>');
+    api.fixPostLayout(d9c);
+    eq(d9c.getElementById('w9c').style.width, '', '没有写死宽度的列不被强行加宽（无过度修改）');
+    // 内联写死的窄列（第一代脚本面对的情形）：同样必须撑宽，且绝不能改成 width:auto
+    // —— flex 行内 auto 会缩成内容宽度，越改越窄（v1.4.0 的隐患，变异 M13 守护此点）。
+    var d9e = dom(
+        '<div class="Post-content"><div id="w9e" style="width:690px">' +
+        '<div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div></div>');
+    api.fixPostLayout(d9e);
+    eq(d9e.getElementById('w9e').style.width, '100%',
+        '内联写死的窄列被撑满，且用的是 100% 而非 auto（auto 在 flex 行内会缩得更窄）');
+    // 宽度已超过阅读上限的列不再被动：无论视口多宽，1600px 都 > READ_W，语义稳定可测。
+    var d9f = dom(
+        '<div class="Post-content"><div id="w9f" style="width:1600px">' +
+        '<div class="Post-RichTextContainer"><div class="ztext">正文</div></div></div></div>');
+    api.fixPostLayout(d9f);
+    eq(d9f.getElementById('w9f').style.width, '1600px', '比阅读上限更宽的内联列保持原样（不做过度修改）');
+    // readCap：纯函数，上下限与比例都可独立核验
+    eq(api.readCap(2560), api.READ_W, 'readCap：超宽屏收在 READ_W 上限');
+    eq(api.readCap(1600), Math.min(api.READ_W, 1408), 'readCap：1600 视口 → 88%');
+    eq(api.readCap(1000), Math.min(api.READ_W, 900), 'readCap：窄屏不缩到不可用（下限 900）');
+    eq(api.readCap(0), api.READ_W, 'readCap：取不到视口宽时退回 READ_W');
 
     // ---- 场景 8：布局诊断（纯函数判据 + 无布局引擎时不误报）----
     group('e2e · 布局诊断');
