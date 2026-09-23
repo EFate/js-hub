@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.2.0
+// @version      1.3.0
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF）、链接直链化、夜间模式 —— 11 个开关 4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.2.0';
+    var VERSION = '1.3.0';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
 
@@ -161,29 +161,49 @@
             .Modal-enter, .Modal-enter-active, .Modal-enter-done { display: none !important; }
         `;
         if (opt.hideSidebar) css += `
+            /* 侧栏隐藏：三轨选取，先稳后兜。
+               ① 知乎埋点语义属性（data-za-detail-view-path-module 标记右侧栏）—— 跨改版最稳定；
+               ② 语义类名（GlobalSideBar / *-sideColumn / Card.*）—— 长期沿用；
+               ③ 结构特征（sticky 容器内的推荐卡等）—— 兜住无类名的内联布局。 */
+            div[data-za-detail-view-path-module="RightSideBar"],
             .GlobalSideBar, .Question-sideColumn, .Search-sideColumn, .Topstory-sideColumn,
             .Post-SideActions, .Post-Sub, .Post-Row-Content-right,
             .Card.AnswerAuthor, .Card.AuthorCard, .HotSearchCard, .Question-sideColumnAdContainer,
+            .Recommendations-Main, .Question-mainColumnLogin, .Pc-card.Card,
             div[style*="position: sticky"] .Card, div[style*="position:sticky"] .Card,
             .Post-SideActions + div[style*="position: sticky"], .Post-SideActions + div[style*="position:sticky"] {
                 display: none !important;
             }
             html { overflow-y: scroll !important; overflow-x: hidden !important; }
+
+            /* —— 首页 / 搜索页：锁定标准内容宽度并居中 —— */
             .Topstory-container, .Search-container { width: 694px !important; min-width: 694px !important; margin: 0 auto !important; padding: 0 !important; }
             .Topstory { display: flex !important; justify-content: center !important; }
             .Topstory-mainColumn, .Search-mainColumn { width: 100% !important; margin: 0 !important; float: none !important; }
+
+            /* —— 问题页：主栏居中 —— */
             .Question-main { display: block !important; width: 694px !important; margin: 0 auto !important; }
             .Question-mainColumn { width: 694px !important; margin: 0 auto !important; float: none !important; }
             .QuestionPage .ListShortcut { width: 694px !important; margin: 0 auto !important; }
+
+            /* —— 专栏文章页：隐藏目录后让正文真正水平居中 ——
+               旧写法把正文硬压 690px 并靠左，右留白明显；现改为
+               「外层 flex 居中 + 正文列自适应宽度」，宽度跟随知乎自身内容列，不再写死。 */
             .Post-content, .Post-Row-Content { display: flex !important; justify-content: center !important; width: 100% !important; }
-            .Post-Row-Content-left { margin: 0 auto !important; width: 690px !important; max-width: 690px !important; flex: none !important; }
+            .Post-Row-Content-left { margin: 0 auto !important; flex: 0 1 auto !important; max-width: 694px !important; }
             .Post-Main { margin: 0 auto !important; width: 100% !important; }
-            .Comment-container { margin: 0 auto !important; width: 690px !important; max-width: 690px !important; }
+            .Comment-container { margin: 0 auto !important; max-width: 690px !important; }
             .ColumnPageHeader-content { margin: 0 auto !important; width: 690px !important; max-width: 1000px !important; }
             .Topstory-container, .Topstory-mainColumn, .Question-mainColumn, .Question-main,
             .Post-Row-Content, .Post-Row-Content-left, .Post-Main {
                 transition: none !important; animation: none !important; transform: none !important;
             }
+            /* 首屏页脚防闪现：知乎 SPA 在正文水合前会先把页脚（帮助/举报/备案）渲染出来，
+               造成「打开时闪一下再消失」。启动期由 html[data-zhx-booting] 先藏住，
+               主内容就绪后脚本移除该属性，页脚恢复正常显示（正常的关于页不受影响）。
+               判据同时覆盖新版 <footer> 与旧版 .zh-footer，避免只认单一类名。 */
+            html[data-zhx-booting] footer,
+            html[data-zhx-booting] .zh-footer { visibility: hidden !important; }
         `;
         if (opt.autoHideHeader) css += `
             header.AppHeader { transition: transform 0.25s ease !important; position: sticky !important; top: 0 !important; z-index: 999 !important; }
@@ -314,16 +334,35 @@
         }
     }
 
-    // sticky 卡片兜底清理（内联样式容器里藏的推荐卡，CSS 选择器够不到）
+    // 侧栏兜底清理（内联样式容器里的推荐卡、无类名的目录面板 —— CSS 选择器够不到，
+    // 需按结构特征上溯定位，这是 ref 脚本 'a[aria-label="边栏锚点"]'.closest('div') 的等价做法）
     function cleanSticky(doc) {
         if (!OPT.hideSidebar) return;
+        var n = 0;
+        // ① sticky 容器内的推荐卡
         var divs = doc.querySelectorAll('div[style*="position: sticky"], div[style*="position:sticky"]');
         for (var i = 0; i < divs.length; i++) {
             var d = divs[i];
             if (d.style.display !== 'none' && d.querySelector('.Card, .AnswerAuthor, .HotSearchCard')) {
                 d.style.display = 'none';
+                n++;
             }
         }
+        // ② 专栏目录面板：锚点本身在 CSS 里已隐藏，其容器需上溯隐藏（CSS 无父选择器）
+        var anchors = doc.querySelectorAll('a[aria-label="边栏锚点"]:not([' + MARK + '-toc])');
+        for (var j = 0; j < anchors.length; j++) {
+            var a = anchors[j];
+            a.setAttribute(MARK + '-toc', '1');
+            // 上溯到最近的块级容器（div/section/aside/nav），最多 4 层；
+            // 不用宽度判据（jsdom 无布局引擎，getBoundingClientRect 恒 0）
+            var box = a.parentNode;
+            for (var k = 0; k < 4 && box && box.tagName !== 'BODY'; k++) {
+                if (/^(DIV|SECTION|ASIDE|NAV)$/.test(box.tagName)) break;
+                box = box.parentNode;
+            }
+            if (box && box.style && box.tagName !== 'BODY') { box.style.display = 'none'; n++; }
+        }
+        return n;
     }
 
     function toggleNight(on) {
@@ -479,7 +518,11 @@
         if (name === 'timeTop') applyTime(document);
         if (name === 'picOriginal') applyImg(document);
         if (name === 'gifPlay' && value) playGifs(document);
-        if (name === 'hideSidebar') cleanSticky(document);
+        if (name === 'hideSidebar') {
+            cleanSticky(document);
+            // 关闭净化时若启动标记还在（极早期切换），立即解除，避免页脚被长期遮挡
+            if (!value) document.documentElement.removeAttribute('data-zhx-booting');
+        }
     }
 
     function rebuildStyle() {
@@ -584,6 +627,35 @@
         document.addEventListener('click', handler, true);
     }
 
+    // 首屏页脚防闪现：document-start 先打标记藏住页脚，主内容出现后立即解除。
+    // 知乎 SPA 在正文水合前会先渲染页脚（帮助/举报/备案），表现为「打开时闪一下」。
+    // 解除判据：主内容区出现任一真实内容节点（首页/问题页/文章页各取一个锚点）。
+    var bootUnmarker = null;
+
+    function watchBootMark() {
+        if (!OPT.hideSidebar) return;                      // 与侧栏净化同组：未开启则不介入
+        var root = document.documentElement;
+        root.setAttribute('data-zhx-booting', '1');
+        var done = false;
+        function unmark() {
+            if (done) return;
+            done = true;
+            root.removeAttribute('data-zhx-booting');
+            if (bootUnmarker) { bootUnmarker.disconnect(); bootUnmarker = null; }
+        }
+        var sel = '.Topstory-container, .Question-mainColumn, .Post-content, .Search-container, .App-main > *';
+        function ready() {
+            var el = document.querySelector(sel);
+            return !!(el && el.children.length > 0);
+        }
+        // 主路径：主内容一出现就解除（MutationObserver，不做轮询）
+        bootUnmarker = new MutationObserver(function () { if (ready()) unmark(); });
+        bootUnmarker.observe(document.documentElement, { childList: true, subtree: true });
+        // 兜底：最多观察 4 秒，无论锚点是否命中都解除，绝不长期遮挡页脚
+        setTimeout(unmark, 4000);
+        if (ready()) unmark();
+    }
+
     // ======================================================================
     // 启动 · document-start 注入样式防闪烁，DOMContentLoaded 后挂监听
     // ======================================================================
@@ -597,6 +669,8 @@
         var target = document.head || document.documentElement;
         if (target) target.appendChild(styleEl);
         else requestAnimationFrame(function () { (document.head || document.documentElement).appendChild(styleEl); });
+
+        watchBootMark();   // 越早越好：紧贴样式注入，抢在页脚渲染之前
 
         if (OPT.nightMode) {
             document.documentElement.setAttribute('data-theme', 'dark');

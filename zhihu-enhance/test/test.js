@@ -44,6 +44,15 @@ eq(allOff, api.buildCSS({ nightMode: true }), 'nightMode 不影响 CSS 内容（
 ok(cssOn('hideLogin').indexOf('Modal-enter') > -1, 'hideLogin → Modal 隐藏');
 ok(cssOn('hideSidebar').indexOf('GlobalSideBar') > -1, 'hideSidebar → 侧边栏选择器');
 ok(cssOn('hideSidebar').indexOf('justify-content: center') > -1, 'hideSidebar → 内容居中');
+ok(/div\[data-za-detail-view-path-module="RightSideBar"\][^{]*\{/.test(cssOn('hideSidebar')),
+    'hideSidebar → 侧栏用知乎埋点语义属性隐藏（跨改版稳定）');
+ok(/\.Post-Row-Content-left \{[^}]*\}/.test(cssOn('hideSidebar')) &&
+    !/width: 690px/.test(cssOn('hideSidebar').match(/\.Post-Row-Content-left \{[^}]*\}/)[0]),
+    'hideSidebar → 文章页正文列不再硬压 690px（改为自适应居中）');
+ok(cssOn('hideSidebar').indexOf('data-zhx-booting') > -1 &&
+    /html\[data-zhx-booting\] footer/.test(cssOn('hideSidebar')) &&
+    cssOn('hideSidebar').indexOf('.zh-footer') > -1,
+    'hideSidebar → 首屏页脚防闪现规则（覆盖 footer 与 .zh-footer）');
 ok(cssOn('autoHideHeader').indexOf('is-hidden') > -1, 'autoHideHeader → 顶栏隐藏类');
 ok(cssOn('picMaxHeight').indexOf('max-height: 500px') > -1, 'picMaxHeight → 限高');
 ok(cssOn('hoverFocus').indexOf('outline') > -1, 'hoverFocus → 聚焦框');
@@ -214,6 +223,25 @@ if (JSDOM) {
     api.cleanSticky(d5);
     eq(d5.getElementById('s1').style.display, 'none', '含 Card 的 sticky 容器隐藏');
     ok(d5.getElementById('s2').style.display !== 'none', '无关 sticky 容器不动');
+
+    // ---- 场景 6：专栏文章页目录（锚点语义定位 + 容器上溯隐藏）----
+    group('e2e · 文章页目录');
+    var d6 = dom(
+        '<div class="Post-content">' +
+        '  <div class="Post-SideActions" id="tocbox"><a aria-label="边栏锚点" href="#"><span>目录</span></a><div>一、讯飞星火</div></div>' +
+        '  <div class="Post-Row-Content-left"><h1>正文标题</h1></div>' +
+        '</div>');
+    ok(d6.querySelector('a[aria-label="边栏锚点"]') !== null, '目录锚点可被语义选择器定位');
+    api.__setOpt('hideSidebar', true);
+    var n6 = api.cleanSticky(d6);
+    ok(n6 >= 1, 'cleanSticky 处理了目录锚点');
+    eq(d6.getElementById('tocbox').style.display, 'none', '锚点容器（目录面板）被隐藏');
+    ok(d6.querySelector('a[aria-label="边栏锚点"]').getAttribute('data-zhx-toc') === '1', '锚点落幂等标记');
+    api.cleanSticky(d6);   // 幂等复跑
+    eq(d6.getElementById('tocbox').style.display, 'none', '幂等：重复调用不改变结果');
+    var css6 = api.buildCSS({ hideSidebar: true });
+    ok(/div\[data-za-detail-view-path-module="RightSideBar"\][^{]*\{/.test(css6), 'CSS 内含侧栏语义属性规则');
+    ok(!/\.Post-Row-Content-left[^}]*width:\s*690px/.test(css6), '正文列不再被写死 690px');
 } else {
     console.log('（未找到 jsdom，跳过 e2e 场景）');
 }
