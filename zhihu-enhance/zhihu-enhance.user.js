@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.5.0';
+    var VERSION = '1.5.1';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
     // 文章页阅读宽度的「默认值」（px）。它同时是数值项 readWidth 的默认值 —— 用户可在设置
@@ -289,6 +289,16 @@
                判据同时覆盖新版 <footer> 与旧版 .zh-footer，避免只认单一类名。 */
             html[data-zhx-booting] footer,
             html[data-zhx-booting] .zh-footer { visibility: hidden !important; }
+            /* 首屏防闪（v1.5.1）：正文容器在「宽度校正落地」之前一律不可见。
+               起因是「打开时闪一下、宽度由小变大」—— 成因不是 CSS 过渡（本文件已对文章页
+               容器关掉 transition），而是时序：页面先按站点默认的窄列（常 690px）绘制了一帧
+               到若干帧，之后才轮到本脚本把宽度撑开。
+               这里用 visibility 而非 display：visibility:hidden 的元素仍参与布局，几何判定
+               （自身宽 / 父宽 / 内边距）照常可读，故遮蔽期间校正逻辑不受影响；解除时机由
+               JS 与校正同帧完成（见 L7 syncPass），用户第一眼看到的就是最终宽度。 */
+            html[data-zhx-booting] .Post-content,
+            html[data-zhx-booting] .Post-NormalMain,
+            html[data-zhx-booting] .Post-Row-Content { visibility: hidden !important; }
         `;
         if (opt.autoHideHeader) css += `
             header.AppHeader { transition: transform 0.25s ease !important; position: sticky !important; top: 0 !important; z-index: 999 !important; }
@@ -442,6 +452,17 @@
     var POST_ROOT_SEL = '.ztext, .RichText, .Post-RichTextContainer, article,' +
         ' .Post-NormalMain, .Post-NormalSub, .Post-Row-Content-left, .Post-content';
 
+    // 正文「实体」选择器（比 POST_ROOT_SEL 更严）：只有它出现才说明正文已真正渲染，
+    // 而不是 SPA 先到的骨架 / 页脚。首帧同步校正（syncPass）与首屏遮蔽解除（bootReady）
+    // 都以它为准 —— 用宽松的 POST_ROOT_SEL 会在骨架阶段就放行，把窄列露出来。
+    var POST_BODY_SEL = '.Post-RichTextContainer, .RichText.ztext, .ztext';
+
+    // 正文「文本根」（最内层）。上溯链必须从它起步而不是从 POST_BODY_SEL 的命中项 ——
+    // querySelector 只看**文档顺序**、不看选择器书写顺序，而上表里 .Post-RichTextContainer
+    // 是 .ztext 的父，会先被命中，于是链从正文列外层起，文本根自身若带宽度约束（ref 脚本
+    // 的 .css-c0fani 就带 690px）就永远解不掉。故：文本根优先，实体兜底。
+    var POST_TEXT_SEL = '.RichText.ztext, .ztext';
+
     // 从 el 起向上扩张，隐藏「仍不包含正文根」的最外层块级容器。
     // 若 el 的直接父级就已含正文，则退让为只处理 el 自身（绝不波及正文）。
     function hideColumn(el, doc) {
@@ -545,13 +566,15 @@
         // 限定文章页：/p/<id> 路径，或页面里确实存在文章正文容器
         var path = (win.location && win.location.pathname) || '';
         if (!/^\/p\/\d+/.test(path) && !doc.querySelector('.Post-RichTextContainer')) return 0;
-        var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
+        var root = doc.querySelector(POST_TEXT_SEL) || doc.querySelector(POST_BODY_SEL);
         if (!root) return 0;
 
         var capW = readCap(win.innerWidth, widthCap(OPT));   // 上限取自面板设置，窄屏再按 88vw 收
 
         var n = 0, el = root, chain = [], i, cs, pcs, mw, p, cw, pw, iw, isNarrow, isRowFlex;
-        for (i = 0; i < 8 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
+        // 链深 9：起点下移到文本根后多了一层（.ztext → .Post-RichTextContainer → …），
+        // 少一层就可能够不到行容器，居中/解限会在最外一层落空。
+        for (i = 0; i < 9 && el && el.tagName !== 'BODY' && el.tagName !== 'HTML'; i++) {
             chain.push(el);
             el = el.parentNode;
         }
@@ -688,7 +711,7 @@
     function runDiag(doc) {
         if (!OPT.hideSidebar) { dropDiag(doc); return; }
         var win = doc.defaultView;
-        var root = doc.querySelector('.Post-RichTextContainer, .RichText.ztext, .ztext');
+        var root = doc.querySelector(POST_TEXT_SEL) || doc.querySelector(POST_BODY_SEL);
         if (!win || !root || !root.getBoundingClientRect) { dropDiag(doc); return; }
         var r = root.getBoundingClientRect();
         if (!layoutVerdict(r.width, r.left, win.innerWidth)) { dropDiag(doc); return; }
@@ -978,14 +1001,26 @@
             scheduleDiag(document);
             refreshRangeRows();    // 依赖它的数值行同步置灰 / 恢复
             // 关闭净化时若启动标记还在（极早期切换），立即解除，避免页脚被长期遮挡
-            if (!v) document.documentElement.removeAttribute('data-zhx-booting');
+            if (!v) bootUnmark();
         }
         if (name === 'readWidth') { fixPostLayout(document); scheduleDiag(document); }
     }
 
+    // 全脚本唯一的样式表元素。改写一律原地换 textContent —— 不删不留空档，
+    // 否则会出现「样式表空一帧」（宽度回落到站点默认再变回来，正是要治的那种闪）。
+    var styleEl = null;
+
+    // 样式表归位。「同权重同选择器，后出现者胜」—— document-start 时 <head> 可能还不存在，
+    // 只能先挂到 documentElement（位于 head 之前，等于排在站点全部样式之前而落败），
+    // 故 <head> 一出现就移入其末尾。幂等，可随任意 DOM 变更重复调用（只做一次 parentNode 比较）。
+    function placeStyle() {
+        if (!styleEl) return;
+        var t = document.head || document.documentElement;
+        if (t && styleEl.parentNode !== t) t.appendChild(styleEl);
+    }
+
     function rebuildStyle() {
-        var el = document.getElementById('zhx-style');
-        if (el) el.textContent = buildCSS(OPT);
+        if (styleEl) styleEl.textContent = buildCSS(OPT);
     }
 
     var menuIds = [];   // 已注册菜单句柄，重注册前先摘除，避免菜单项堆积
@@ -1026,11 +1061,47 @@
     }
 
     var observer = null;
+    var runSoon = debounce(dynRun, 200);
+    var syncRoot = null;   // 已做过同步校正的正文根，用来识别「换了一篇文章」
+    var syncDone = false;
+
+    // 首帧同步校正（v1.5.1）：
+    // 「打开文章闪一下、宽度由小变大」的成因是**时序**，不是 CSS 过渡 —— 页面先按站点默认的
+    // 窄列绘制了一帧到若干帧，随后才轮到本脚本改写宽度。要消掉它只能赶在**绘制之前**落地：
+    // MutationObserver 的回调执行于 DOM 变更之后、渲染之前，在回调里同步改写，中间态就根本
+    // 进不了绘制队列。
+    // 又因为知乎是 SPA，切页会重建正文 DOM，所以判据不是「第一次」而是「每换一个正文根都
+    // 同步一次」：旧根被移除（isConnected 转 false）即视为换篇，重新接管。
+    // 稳态下本函数只做一次 O(1) 的 isConnected 判定，查询开销为零。
+    function syncPass() {
+        if (syncDone && syncRoot && syncRoot.isConnected) return false;   // 仍是同一篇，交给 debounce
+        var root = document.querySelector(POST_BODY_SEL);
+        if (!root || root === syncRoot) return false;
+        syncRoot = root;
+        syncDone = true;
+        dynRun();          // 同步完成几何校正（内联 !important，同帧生效，不入绘制队列）
+        bootUnmark();      // 同帧解除首屏遮蔽：用户第一眼看到的就是最终宽度
+        compensatePass();  // 正文随后异步再设宽的情形，由两次有界补偿兜住
+        return true;
+    }
+
+    // 首屏补偿：正文就绪后再补两次校正，覆盖「首帧只拿到骨架、真内容稍后替换」的情形。
+    // 有界（两次固定延时）而非轮询；非文章页不触发（选择器不命中即直接返回）。
+    function compensatePass() {
+        setTimeout(function () { if (document.querySelector(POST_BODY_SEL)) dynRun(); }, 150);
+        setTimeout(function () { if (document.querySelector(POST_BODY_SEL)) dynRun(); }, 600);
+    }
 
     function startObserver() {
         if (observer) return;
-        observer = new MutationObserver(debounce(dynRun, 200));
-        observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+        observer = new MutationObserver(function () {
+            placeStyle();                // 幂等：<head> 一出现就把样式表排到站点样式之后
+            if (syncPass()) return;      // 正文根出现 / 更换 → 同步校正，不进 debounce
+            runSoon();
+        });
+        // 观察 document 而非 body：document-start 时 body 可能尚未创建，只观察 body 会漏掉
+        // 「body 被插入」那一刻；从根上观察，树里的一切都覆盖得到。
+        observer.observe(document, { childList: true, subtree: true });
     }
 
     // scroll 监听（autoHideHeader 专用，随开关挂载/卸载）
@@ -1087,33 +1158,49 @@
         document.addEventListener('click', handler, true);
     }
 
-    // 首屏页脚防闪现：document-start 先打标记藏住页脚，主内容出现后立即解除。
-    // 知乎 SPA 在正文水合前会先渲染页脚（帮助/举报/备案），表现为「打开时闪一下」。
-    // 解除判据：主内容区出现任一真实内容节点（首页/问题页/文章页各取一个锚点）。
+    // 首屏防闪现：document-start 先打标记藏住页脚（v1.5.1 起还包含文章页正文容器），
+    // 主内容出现后立即解除。知乎 SPA 在正文水合前会先渲染页脚（帮助/举报/备案），
+    // 表现为「打开时闪一下」；文章页正文容器则会在宽度校正落地前闪一下窄列。
+    // 两者共用一个标记与一个解除时机：校正与解除同帧完成，中间态不进绘制队列。
     var bootUnmarker = null;
+    var bootMarked = false;
+
+    // 解除首屏遮蔽（幂等）。可被首帧同步路径随时调用 —— 这正是「校正与解除同帧」的落点。
+    function bootUnmark() {
+        if (!bootMarked) return;
+        bootMarked = false;
+        document.documentElement.removeAttribute('data-zhx-booting');
+        if (bootUnmarker) { bootUnmarker.disconnect(); bootUnmarker = null; }
+    }
+
+    // 首屏遮蔽的解除判据。
+    // 文章页刻意「更严」：必须等正文实体（POST_BODY_SEL）出现，而不是容器一有子节点就算就绪 ——
+    // 骨架阶段就放行会让站点默认的窄列露出来，正是本版要治的那个闪。
+    // 非文章页（首页/问题页/搜索页）不涉及宽度校正，主内容一出现即解除，不必等正文实体。
+    function bootReady() {
+        if (document.querySelector(POST_BODY_SEL)) return true;
+        var pc = document.querySelector('.Post-content');
+        if (pc) {
+            // 文章页的判据刻意比「容器有子节点」更严：骨架/占位先到时若放行，站点默认的窄列
+            // 就露出来了。但也不能只认某几个类名（正文容器可能改名），故取两条充分条件的**或**：
+            // 正文实体命中（最快最准），或容器里已有成段正文（>40 字 —— 空骨架不可能有）。
+            // 两条都没命中就继续等，由 4 秒兜底保证不会长期空白。
+            return (pc.textContent || '').replace(/\s+/g, '').length > 40;
+        }
+        var el = document.querySelector('.Topstory-container, .Question-mainColumn, .Search-container, .App-main > *');
+        return !!(el && el.children.length > 0);
+    }
 
     function watchBootMark() {
         if (!OPT.hideSidebar) return;                      // 与侧栏净化同组：未开启则不介入
-        var root = document.documentElement;
-        root.setAttribute('data-zhx-booting', '1');
-        var done = false;
-        function unmark() {
-            if (done) return;
-            done = true;
-            root.removeAttribute('data-zhx-booting');
-            if (bootUnmarker) { bootUnmarker.disconnect(); bootUnmarker = null; }
-        }
-        var sel = '.Topstory-container, .Question-mainColumn, .Post-content, .Search-container, .App-main > *';
-        function ready() {
-            var el = document.querySelector(sel);
-            return !!(el && el.children.length > 0);
-        }
+        bootMarked = true;
+        document.documentElement.setAttribute('data-zhx-booting', '1');
         // 主路径：主内容一出现就解除（MutationObserver，不做轮询）
-        bootUnmarker = new MutationObserver(function () { if (ready()) unmark(); });
+        bootUnmarker = new MutationObserver(function () { if (bootReady()) bootUnmark(); });
         bootUnmarker.observe(document.documentElement, { childList: true, subtree: true });
         // 兜底：最多观察 4 秒，无论锚点是否命中都解除，绝不长期遮挡页脚
-        setTimeout(unmark, 4000);
-        if (ready()) unmark();
+        setTimeout(bootUnmark, 4000);
+        if (bootReady()) bootUnmark();
     }
 
     // ======================================================================
@@ -1123,14 +1210,13 @@
     function boot() {
         loadOpts();
 
-        var styleEl = document.createElement('style');
+        styleEl = document.createElement('style');
         styleEl.id = 'zhx-style';
         styleEl.textContent = buildCSS(OPT);
-        var target = document.head || document.documentElement;
-        if (target) target.appendChild(styleEl);
-        else requestAnimationFrame(function () { (document.head || document.documentElement).appendChild(styleEl); });
+        placeStyle();
 
         watchBootMark();   // 越早越好：紧贴样式注入，抢在页脚渲染之前
+        startObserver();   // 同样尽早：首帧的宽度校正要靠它同步执行，越早挂上越早接手
 
         if (OPT.nightMode) {
             document.documentElement.setAttribute('data-theme', 'dark');
@@ -1142,7 +1228,7 @@
         registerMenu();
 
         function start() {
-            startObserver();
+            placeStyle();      // <head> 就绪后归位：静态规则层叠优先于站点样式
             watchScroll(OPT.autoHideHeader);
             dynRun();
             watchGifTrigger();
@@ -1162,6 +1248,8 @@
         normalizeImg: normalizeImg, pickOriginal: pickOriginal, pickTime: pickTime,
         applyLink: applyLink, applyTime: applyTime, applyImg: applyImg, cleanSticky: cleanSticky,
         fixPostLayout: fixPostLayout, hideColumn: hideColumn, hideNarrowCols: hideNarrowCols,
+        POST_BODY_SEL: POST_BODY_SEL, POST_TEXT_SEL: POST_TEXT_SEL,
+        syncPass: syncPass, bootReady: bootReady, bootUnmark: bootUnmark,
         layoutVerdict: layoutVerdict, runDiag: runDiag, scheduleDiag: scheduleDiag,
         DIAG_ID: DIAG_ID, READ_W: READ_W, readCap: readCap,
         clampRange: clampRange, readOpt: readOpt, widthCap: widthCap,

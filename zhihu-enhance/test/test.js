@@ -95,6 +95,19 @@ ok(cssOn('hideSidebar').indexOf('data-zhx-booting') > -1 &&
     cssOn('hideSidebar').indexOf('.zh-footer') > -1,
     'hideSidebar → 首屏页脚防闪现规则（覆盖 footer 与 .zh-footer）');
 
+// —— v1.5.1 首屏防闪：正文容器在「宽度校正落地」之前不可见 ——
+// 成因是**时序**（页面先按站点默认的窄列绘制若干帧，之后才轮到脚本撑宽），不是 CSS 过渡。
+// 断言必须同时锚定 html[data-zhx-booting] 前缀与正文容器选择器：缺前缀＝常驻隐藏，缺容器＝白写。
+ok(/html\[data-zhx-booting\] \.Post-content/.test(cssOn('hideSidebar')) &&
+    /html\[data-zhx-booting\] \.Post-NormalMain/.test(cssOn('hideSidebar')) &&
+    /html\[data-zhx-booting\] \.Post-Row-Content\s*\{/.test(cssOn('hideSidebar')),
+    'hideSidebar → 首屏遮蔽覆盖文章页正文容器（两代宿主）');
+ok(/html\[data-zhx-booting\] \.Post-NormalMain[^{]*\{[^}]*visibility:\s*hidden/.test(cssOn('hideSidebar')),
+    'hideSidebar → 遮蔽用 visibility（保留布局，几何判定仍可读）而非 display');
+ok(cssOn('hideSidebar').indexOf('html[data-zhx-booting] .Post-content') > -1 &&
+    allOff.indexOf('html[data-zhx-booting] .Post-content') === -1,
+    'hideSidebar → 遮蔽规则随该开关启停（关闭净化时不介入页面）');
+
 // —— v1.3.1 / v1.3.2 文章页「真正居中 + 放宽」修复 ——
 // 新代文章页正文宿主是 .Post-NormalMain（ref/知乎优化3.js 的宽屏样式即此写法）。
 // 断言必须匹配真实选择器形态，不能只匹配注释文字（历史上注释含相同串曾造成假绿；
@@ -116,6 +129,12 @@ ok(new RegExp('\\.Comment-container\\s*\\{[^}]*max-width:\\s*' + api.READ_W + 'p
 ok(new RegExp('\\.Post-NormalMain \\.Post-RichTextContainer[^{]*\\{[^}]*max-width:\\s*' + api.READ_W + 'px').test(cssOn('hideSidebar')),
     'hideSidebar → 正文内容列阅读宽度放宽到 READ_W（' + api.READ_W + 'px）');
 ok(api.READ_W >= 1400, 'hideSidebar → 阅读上限已整体加宽（>=1400px，用户反馈「左右空太多」）');
+// v1.5.1：首帧同步链路（正文实体选择器 + 同步校正 + 遮蔽解除判据）必须可测
+eq(api.POST_BODY_SEL, '.Post-RichTextContainer, .RichText.ztext, .ztext',
+    'POST_BODY_SEL 是「正文实体」判据（比 POST_ROOT_SEL 严）');
+ok(typeof api.syncPass === 'function', '导出 syncPass（首帧同步校正）');
+ok(typeof api.bootReady === 'function', '导出 bootReady（首屏遮蔽解除判据）');
+ok(typeof api.bootUnmark === 'function', '导出 bootUnmark（幂等解除遮蔽）');
 // v1.5.0：宽度不再是写死常量，CSS 必须跟随面板设定值（同一个 widthCap 出口）
 ok(new RegExp('\\.Comment-container\\s*\\{[^}]*max-width:\\s*1900px').test(api.buildCSS({ hideSidebar: true, readWidth: 1900 })),
     'buildCSS → 阅读宽度取自 opt.readWidth（1900px 落到 CSS 上）');
@@ -384,6 +403,21 @@ if (JSDOM) {
     var d7b = dom('<div class="Topstory-container"><div id="x7" style="max-width:400px">首页</div></div>');
     eq(api.fixPostLayout(d7b), 0, '非文章页空转（不误伤首页容器）');
     eq(d7b.getElementById('x7').style.maxWidth, '400px', '非文章页的内联 max-width 保持原样');
+
+    // ---- 场景 7a：宽度约束写在正文文本根自身（v1.5.1 链起点下移）----
+    // querySelector 只认文档顺序：.Post-RichTextContainer 是 .ztext 的父、会先被命中，
+    // 于是链从正文列外层起，文本根自身的宽度约束**永远够不到**。链起点改为「文本根优先」后覆盖。
+    group('e2e · 链起点=正文文本根');
+    var d8 = dom(
+        '<div class="Post-content">' +
+        '  <div class="Post-NormalMain"><div class="Post-RichTextContainer">' +
+        '    <div class="ztext" id="z8" style="max-width:694px">正文正文正文正文</div>' +
+        '  </div></div>' +
+        '</div>');
+    ok(api.fixPostLayout(d8) >= 1, '文本根自身带宽度约束时仍被处理（链起点已下移）');
+    eq(d8.getElementById('z8').style.maxWidth, 'none', '文本根自身的 max-width:694px 被解除');
+    eq(d8.getElementById('z8').style.marginLeft, 'auto', '文本根自身参与居中');
+    eq(api.POST_TEXT_SEL, '.RichText.ztext, .ztext', 'POST_TEXT_SEL 是链起点（文本根）');
 
     // ---- 场景 7b：加宽（v1.4.1 重点）----
     // v1.4.0 只「解上限」不「撑宽度」：正文列的窄来自**自身写死的宽度**（CSS 类给的 690px
