@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         网盘直链下载助手
 // @namespace    js-hub/netdisk-hub
-// @version      1.5.13
+// @version      1.5.14
 // @description  百度网盘 / 夸克网盘 / UC 网盘直链获取与下载调度工具：勾选文件自动换取直链，支持 API 下载（直接下载 / 复制直链 / 推送 IDM）与 Aria2 下载（RPC 推送 / 命令行生成）双通道，配置极简、开箱即用。
 // @author       EFate
 // @license      MIT
@@ -51,7 +51,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.5.13";
+	const VERSION = "1.5.14";
 	const KEY = {
 		aria: "nd.aria",
 		opt: "nd.opt",
@@ -716,15 +716,24 @@
 				return out;
 			},
 
-			/** 分享页走签名换链；网盘内页走静默授权 + filemetas（均全自动） */
+			/**
+			 * 分享页走签名换链；网盘内页走授权 + filemetas。
+			 *
+			 * ⚠️ 两条路都必须先拿到 access_token —— 这是 31326 的最后一道坎：
+			 * 百度换出的 dlink 是**开放平台口径**，服务器要的是「UA + access_token」，
+			 * 分享页签名（sign/timestamp）只用于「换链」这一步，**不参与下载鉴权**。
+			 * 所以分享页也必须挂令牌；哪怕页面参数全都正确，dlink 缺 access_token
+			 * 就是 31326。注意令牌获取要放在 page 分支**之前**，两条路共用。
+			 */
 			async resolve(files, page) {
-				if (page === "share") {
-					return providerApi.baiduResolve(files, providerApi.baiduShareInfo());
-				}
+				// 令牌是两条路的公共前置：分享页与内页都依赖它做下载鉴权
 				let token = store.get(KEY.baidu).token;
 				if (!token) token = await providerApi.baiduGetToken();
 				if (!token) {
 					throw new Error("百度授权未完成：请在弹出的百度授权页确认授权（若未弹出请检查是否被浏览器拦截），然后重新打开面板。");
+				}
+				if (page === "share") {
+					return providerApi.baiduResolve(files, providerApi.baiduShareInfo(), token);
 				}
 				return providerApi.baiduHomeResolve(files, token);
 			}
@@ -837,21 +846,25 @@
 		 * 给 dlink 挂上 access_token。
 		 * 参考实现的做法是 `new URL(dlink)` 后 `searchParams.set("access_token", tok)`
 		 * —— **覆盖式写入**，而不是「没有才追加」。这一点很关键：
-		 * filemetas 返回的 dlink 有时自带一个过期/无效的 access_token，
-		 * 只做「不存在才追加」会把这个坏值原样带到下载请求里，
-		 * 服务器照样回 31326。这里与参考实现对齐：只要拿到有效令牌就覆盖写。
-		 * 无令牌时保持原链（分享页 dlink 不依赖开放平台令牌）。
+		 * filemetas / sharedownload 返回的 dlink 有时自带一个过期/无效的 access_token，
+		 * 只做「不存在才追加」会把这个坏值原样带到下载请求里，服务器照样回 31326。
+		 *
+		 * 无令牌时**不再静默放行**：裸 dlink 必定 31326，静默返回只会让用户
+		 * 拿着一个必然失败的链接反复碰壁、还把失败点误判到别处。此处直接抛错，
+		 * 把问题拦在换链阶段并给出可操作提示。
 		 */
 		baiduDlink(url, token) {
 			const u = String(url || "").trim();
 			if (!/^https?:\/\//i.test(u)) return u;
-			if (!token) return u;
+			if (!token) throw new Error("缺少百度授权令牌，直链无法通过鉴权（31326）—— 请先完成授权后重试。");
 			try {
 				const parsed = new URL(u);
 				parsed.searchParams.set("access_token", token);
 				return parsed.href;
 			} catch (e) {
-				return u;
+				// URL 解析失败（极老的解析器或畸形链接）：退回手工拼接 + 覆盖原参数
+				const cleaned = u.replace(/([?&])access_token=[^&#]*/g, "$1").replace(/[?&]$/, "");
+				return cleaned + (cleaned.indexOf("?") >= 0 ? "&" : "?") + "access_token=" + encodeURIComponent(token);
 			}
 		},
 
@@ -882,10 +895,13 @@
 		/**
 		 * 百度分享页换链：tplconfig 取签名 → sharedownload 逐个换 dlink。
 		 * 错误码直达文案：112 页面过期、9019 令牌过期；list 为字符串表示文件
-		 * 超出分享直接下载的大小上限。换出的 dlink 下载时只需 UA pan.baidu.com
-		 * （**不带 Referer / Cookie**，否则与开放平台令牌口径冲突回 31326）。
+		 * 超出分享直接下载的大小上限。
+		 *
+		 * 换出的 dlink 是开放平台口径，下载须「UA pan.baidu.com + access_token」，
+		 * 且**不带 Referer / Cookie**（否则被当网页端会话，与令牌口径冲突回 31326）。
+		 * 页面签名只用于换链，不参与下载鉴权 —— 所以 token 必须挂到 dlink 上。
 		 */
-		async baiduResolve(files, info) {
+		async baiduResolve(files, info, token) {
 			const enc = (v) => encodeURIComponent(String(v === undefined || v === null ? "" : v));
 			if (!info || !info.uk || !info.shareId) {
 				throw new Error("未能从页面读取分享参数（uk / shareid），请刷新分享页后重试。");
@@ -927,11 +943,11 @@
 				}
 				const it = res.list[0] || {};
 				if (!it.dlink) throw new Error("接口未返回直链，请刷新页面重试。");
-				// 对齐参考实现：分享页 dlink 同样经 searchParams.set("access_token")
-				// 覆盖写入。分享链接在部分页面形态下会带一个失效的令牌，
-				// 传下去会被判未授权（31326）；有有效令牌时统一覆盖最稳。
+				// 无条件挂 access_token（对齐参考实现 getFileLink 的 searchParams.set）：
+				// 分享页签名只用于「换链」，下载鉴权走开放平台令牌口径。
+				// 覆盖写而非追加 —— 接口有时自带失效令牌，留着就还是 31326。
 				out.push({
-					url: providerApi.baiduDlink(it.dlink, store.get(KEY.baidu).token),
+					url: providerApi.baiduDlink(it.dlink, token),
 					name: f.name || it.server_filename || util.nameFromUrl(it.dlink),
 					size: f.size || it.size || 0,
 					headers: providerApi.downloadHeaders(providerApi.byId("baidu"))

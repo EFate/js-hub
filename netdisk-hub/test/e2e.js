@@ -455,6 +455,13 @@ async function main() {
 			let body;
 			if (/share\/tplconfig/.test(url)) {
 				body = { errno: 0, data: { sign: "SGN123", timestamp: "1700000000" } };
+			} else if (/oauth\/2\.0\/authorize/.test(url)) {
+				// 分享页同样需要 access_token（下载鉴权走开放平台口径），
+				// 授权请求会跟完重定向链后带出令牌
+				if (opt.onload) {
+					opt.onload({ status: 200, finalUrl: "https://openapi.baidu.com/oauth/2.0/login_success#access_token=SHARETOK1a", responseText: "", responseHeaders: "" });
+				}
+				return;
 			} else if (/api\/sharedownload/.test(url)) {
 				body = { errno: 0, list: [{ dlink: "https://d.pcs.baidu.com/file/xyz?fid=111&dst=1", server_filename: "视频.mkv", size: 1623456789 }] };
 			} else if (/getVersion/.test(opt.data || "")) {
@@ -525,11 +532,18 @@ async function main() {
 		assert.strictEqual(hit.name, "视频.mkv");
 		assert.ok(hit.headers, "应随行保存请求头");
 		assert.strictEqual(hit.headers["User-Agent"], "pan.baidu.com", "直链下载需专属 UA");
+		// 回归 31326（分享页同样中招）：分享页 dlink 也是开放平台口径，
+		// 必须挂 access_token —— 页面签名只负责「换链」，不参与下载鉴权。
+		assert.ok(/access_token=SHARETOK1a/.test(hit.url), "分享页 dlink 也必须带 access_token（否则 31326），实际：" + hit.url);
 		// 回归 31326：百度开放平台直链**不得**随行页面 Referer / Cookie。
 		// 带了会被当成网页端会话去校验，与 access_token 口径冲突 → 31326 未授权。
 		// 参考实现下载百度直链时显式传 { Origin: "", Referer: "" }。
 		assert.strictEqual(hit.headers.Referer, undefined, "百度直链不应带页面 Referer（否则 31326）");
 		assert.strictEqual(hit.headers.Cookie, undefined, "百度直链不应带页面 Cookie（否则 31326）");
+	});
+	t("分享页先取令牌再换链（令牌是两条路的公共前置）", () => {
+		const authReq = requests2.find((r) => /oauth\/2\.0\/authorize/.test(String(r.url)));
+		assert.ok(authReq, "分享页也应发起授权请求以取得 access_token");
 	});
 	t("推送 Aria2 时请求头原样带出（百度只带 UA，不带 Referer/Cookie）", async () => {
 		requests2.length = 0;
