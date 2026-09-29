@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         链接直跳助手
 // @namespace    js-hub/jump-hub
-// @version      1.3.4
+// @version      1.3.5
 // @description  点一次链接就直接到目标网站：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页，网盘链接自动带上旁边写着的提取码直达并解锁，统一在新标签页打开。全自动、全程零提示，不用选文字、不用点第二次、不用手输提取码。
 // @author       EFate
 // @license      MIT
@@ -65,7 +65,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.3.4";
+	const VERSION = "1.3.5";
 	const ATTR = "data-jh";
 	const KEY = {
 		opt: "jh.opt",
@@ -868,6 +868,7 @@
 		{
 			id: "xunlei", name: "迅雷云盘",
 			host: /(^|\.)pan\.xunlei\.com$/,
+			trailingHash: true, // 官方分享格式末尾带空 #（?pwd=xxxx#），缺失时部分登录态渲染异常
 			input: [".pass-input-wrap .td-input__inner", "input[type=password]", "input[type=text]"],
 			button: [".pass-input-wrap .td-button", "button"],
 			hint: /提取码|访问码|密码/
@@ -934,6 +935,14 @@
 			input: ["input[type=password]", "input[type=text]"],
 			button: ["button"],
 			hint: /提取码|访问码|密码/
+		},
+		{
+			id: "guangya", name: "光鸭云盘",
+			host: /(^|\.)guangyapan\.com$/,
+			pwdParam: "code", // 光鸭的码走 ?code=（实证：…?code=jiif），不是 pwd
+			input: ["input[type=password]", "input[type=text]"],
+			button: ["button"],
+			hint: /提取码|访问码|密码/
 		}
 	]);
 
@@ -953,6 +962,13 @@
 		for (const k of PWD_PARAM_NAMES) {
 			const v = u.searchParams.get(k);
 			if (v && /^[A-Za-z0-9]{3,8}$/.test(v)) return v;
+		}
+		// 每家专属的码参数（如光鸭 code）：只在自家域上认 —— OAuth 回调也用 code，
+		// 全局读会误伤（「读码排除 code」裁决在先，这里按域放开）
+		const pan = panOf(u.hostname);
+		if (pan && pan.pwdParam) {
+			const pv = u.searchParams.get(pan.pwdParam);
+			if (pv && /^[A-Za-z0-9]{3,8}$/.test(pv)) return pv;
 		}
 		const h = String(u.hash || "").replace(/^#/, "");
 		if (/^[A-Za-z0-9]{3,8}$/.test(h)) return h;
@@ -1013,11 +1029,13 @@
 		return out;
 	}
 
-	/** 给链接带上提取码。只加 query 参数，不动 hash —— 部分网盘用 hash 做路由 */
-	function withPwd(link, pwd) {
+	/** 给链接带上提取码。只加 query 参数，不动 hash —— 部分网盘用 hash 做路由。
+	 *  码参数按家配置（光鸭用 code），trailingHash 给迅雷补官方格式的空 # */
+	function withPwd(link, pwd, pan) {
 		const u = safeUrl(link);
 		if (!u || !pwd) return link;
-		u.searchParams.set("pwd", pwd);
+		u.searchParams.set((pan && pan.pwdParam) || "pwd", pwd);
+		if (pan && pan.trailingHash && !u.hash) u.hash = "#";
 		return u.href;
 	}
 
@@ -1091,7 +1109,14 @@
 		}
 		for (const a of list) {
 			if (a === self) continue;
-			if (isPanShare(a, a.href)) return true;
+			const h = a.href || "";
+			if (isPanShare(a, h)) return true;
+			// 壳链接（/redirect?url=… 这类）剥壳后再判：壳域名不是网盘，
+			// 只看 href 会把公共容器判定漏掉（实测 touchgal 资源卡整卡包壳）
+			if (h.length >= 24 && h.indexOf("=") >= 0) {
+				const bare = resolveTarget(h, location.href);
+				if (bare && bare !== h && isPanShare(a, bare)) return true;
+			}
 		}
 		return false;
 	}
@@ -1116,7 +1141,7 @@
 		if (readPwdFromUrl(u.href)) return null; // 已经带码
 		const hit = findNearbyPwd(anchor);
 		if (!hit) return null;
-		return { to: withPwd(u.href, hit.code), code: hit.code, pan, from: hit.from };
+		return { to: withPwd(u.href, hit.code, pan), code: hit.code, pan, from: hit.from };
 	}
 
 	/* ==========================================================================
@@ -1388,6 +1413,12 @@
 			const nd = netdiskTarget(a, href);
 			if (nd) to = nd.to;
 		}
+		// 壳链接剥出的裸网盘地址就地补码：deepScan 会把裸链写进 href，
+		// 中键 / 右键「新标签打开」绕开 click —— 不在这里补，那条路径拿不到码。
+		if (to && opt.panAuto && !readPwdFromUrl(to)) {
+			const nd2 = netdiskTarget(a, to);
+			if (nd2) to = nd2.to;
+		}
 		// 已经是网盘分享页（无需换链、无需补码）也要落标记 ——
 		// 否则点击层无法判断「这条已经处理过」，站点处理器就有机会把它拉回中转页。
 		if (!to && isPanShare(a, href)) to = href;
@@ -1543,6 +1574,12 @@
 		const a = anchorFromEvent(e);
 		if (!a) return;
 		if (a.getAttribute(ATTR + "-bypass") === "1") return; // 我们自己合成的导航链接
+		// 迅雷公告弹窗的支付中心推广：锚点被程序点击时走默认导航，同样吞掉
+		if (isPromoPopup(a.href)) {
+			e.preventDefault();
+			e.stopPropagation();
+			return;
+		}
 
 		// 注意：这里**不**因 e.defaultPrevented 提前返回。
 		// React / Vue 这类框架会在自己的根容器上先跑一遍处理器（可能已经
@@ -1598,6 +1635,27 @@
 		return !!panOf(u.hostname);
 	}
 
+	/** 迅雷「公告」弹窗的支付中心推广（2026-09-29）。
+	 *  实测：pan.xunlei.com 落地后公告弹窗会自动 window.open 支付中心，
+	 *  referfrom 带 ggong（公告）标记 —— 用户明确不需要这个跳转。
+	 *  只拦这个签名：用户主动点「开通会员」（不同 referfrom）不受影响。 */
+	function isPromoPopup(href) {
+		const u = safeUrl(href);
+		if (!u) return false;
+		if (!/(^|\.)pay\.xunlei\.com$/.test(normHost(u.hostname))) return false;
+		return (u.searchParams.get("referfrom") || "").indexOf("ggong") >= 0;
+	}
+
+	/** 被拦弹窗返回的哑对象：站点脚本拿到 null 可能崩，给它一个不会炸的壳 */
+	function stubPopup() {
+		return {
+			closed: false,
+			close() {}, focus() {}, blur() {}, print() {}, postMessage() {},
+			location: { href: "", assign() {}, replace() {} },
+			opener: null
+		};
+	}
+
 	/** window.open：站点用脚本开中转页时同样直接换掉 */
 	function hookOpen() {
 		if (!opt.on || !opt.guard || !win || !isFn(win.open)) return;
@@ -1605,6 +1663,10 @@
 		const original = win.open;
 		const wrapped = function (url, target, features) {
 			try {
+				if (opt.on && isString(url) && isPromoPopup(url)) {
+					log("拦截推广弹窗 →", url);
+					return stubPopup();
+				}
 				if (opt.on && isString(url)) {
 					const to = resolveTarget(url, location.href);
 					if (to && to !== url && shouldJump(url, to, location.href)) {
@@ -2482,6 +2544,8 @@ html{
 		parsePwdAll,
 		withPwd,
 		readPwdFromUrl,
+		isPromoPopup,
+		stubPopup,
 		// 引擎
 		eng: {
 			scan,
