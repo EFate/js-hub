@@ -1,0 +1,198 @@
+<svg viewBox="0 0 680 1150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .layer { fill: none; stroke: #e2e8f0; stroke-width: 1.2; stroke-dasharray: 4 3; }
+      .layer-title { font-family: sans-serif; font-size: 13px; font-weight: 600; fill: #64748b; }
+      .node { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .nt { font-family: sans-serif; font-size: 12.5px; font-weight: 600; fill: #1e293b; }
+      .nd { font-family: sans-serif; font-size: 10.5px; fill: #64748b; }
+      .arrow { stroke: #94a3b8; stroke-width: 1.3; fill: none; }
+      .band { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+      .band-t { font-family: sans-serif; font-size: 14px; font-weight: 700; fill: #047857; }
+      .band-d { font-family: sans-serif; font-size: 11px; fill: #10b981; }
+      .warn { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
+      .warn-t { font-family: sans-serif; font-size: 12.5px; font-weight: 600; fill: #92400e; }
+      .warn-d { font-family: sans-serif; font-size: 10.5px; fill: #b45309; }
+      .h1 { font-family: sans-serif; font-size: 15px; font-weight: 700; fill: #0f172a; }
+      .h2 { font-family: sans-serif; font-size: 11.5px; fill: #64748b; }
+      .note { font-family: sans-serif; font-size: 11px; fill: #475569; }
+    </style>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="26" class="h1">tieba-enhance v1.0.0 · 贴吧清爽净化助手 · 七层架构</text>
+  <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 12 开关 / 4 组</text>
+
+  <!-- L1 配置层 -->
+  <rect x="24" y="60" width="632" height="124" rx="12" class="layer"/>
+  <text x="40" y="82" class="layer-title">L1 配置层 · 一切开关与选择器的定义点</text>
+
+  <rect x="40" y="94" width="186" height="74" rx="8" class="node"/>
+  <text x="133" y="115" class="nt" text-anchor="middle">UserScript Meta 六件套</text>
+  <text x="133" y="133" class="nd" text-anchor="middle">name/namespace/version</text>
+  <text x="133" y="148" class="nd" text-anchor="middle">author/license/updateURL</text>
+  <text x="133" y="162" class="nd" text-anchor="middle">tieba.baidu.com 全站</text>
+
+  <rect x="238" y="94" width="186" height="74" rx="8" class="band"/>
+  <text x="331" y="115" class="band-t" text-anchor="middle">OPT_DEFS 选项定义表</text>
+  <text x="331" y="133" class="band-d" text-anchor="middle">12 开关 · 4 组分类</text>
+  <text x="331" y="148" class="band-d" text-anchor="middle">净化/精简/阅读/链接</text>
+  <text x="331" y="162" class="band-d" text-anchor="middle">label/默认值/tip</text>
+
+  <rect x="436" y="94" width="204" height="74" rx="8" class="node"/>
+  <text x="538" y="115" class="nt" text-anchor="middle">SELECTORS 选择器表</text>
+  <text x="538" y="133" class="nd" text-anchor="middle">开关名 → CSS 选择器列表</text>
+  <text x="538" y="148" class="nd" text-anchor="middle">存储键 tb.&lt;开关名&gt;</text>
+  <text x="538" y="162" class="nd" text-anchor="middle">GM_getValue/GM_setValue</text>
+
+  <line x1="340" y1="184" x2="340" y2="204" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L2 数据结构层 -->
+  <rect x="24" y="208" width="632" height="96" rx="12" class="layer"/>
+  <text x="40" y="230" class="layer-title">L2 数据结构层 · 单一数据源</text>
+
+  <rect x="40" y="242" width="286" height="46" rx="8" class="band"/>
+  <text x="183" y="262" class="band-t" text-anchor="middle">OPT 设置对象</text>
+  <text x="183" y="280" class="band-d" text-anchor="middle">loadOpts() → OPT → saveOpt()</text>
+
+  <rect x="338" y="242" width="302" height="46" rx="8" class="node"/>
+  <text x="489" y="262" class="nt" text-anchor="middle">缺失键补默认值 · 非布尔一律回落默认</text>
+  <text x="489" y="280" class="nd" text-anchor="middle">12 键全布尔，无数值迁移负担</text>
+
+  <line x1="340" y1="304" x2="340" y2="324" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L3 样式层 -->
+  <rect x="24" y="328" width="632" height="124" rx="12" class="layer"/>
+  <text x="40" y="350" class="layer-title">L3 样式层 · CSS 按开关拼装，改设置即时生效免刷新</text>
+
+  <rect x="40" y="362" width="186" height="74" rx="8" class="node"/>
+  <text x="133" y="383" class="nt" text-anchor="middle">净化 · 精简 CSS</text>
+  <text x="133" y="401" class="nd" text-anchor="middle">广告/横幅/悬浮/会员</text>
+  <text x="133" y="416" class="nd" text-anchor="middle">右栏/签名/杂物/彩名</text>
+  <text x="133" y="430" class="nd" text-anchor="middle">来源：SELECTORS 表</text>
+
+  <rect x="238" y="362" width="186" height="74" rx="8" class="node"/>
+  <text x="331" y="383" class="nt" text-anchor="middle">阅读 · 链接 CSS</text>
+  <text x="331" y="401" class="nd" text-anchor="middle">帖子页宽屏列宽</text>
+  <text x="331" y="416" class="nd" text-anchor="middle">楼主楼层淡底样式</text>
+  <text x="331" y="430" class="nd" text-anchor="middle">样式先行于 L5 打标</text>
+
+  <rect x="436" y="362" width="204" height="74" rx="8" class="warn"/>
+  <text x="538" y="383" class="warn-t" text-anchor="middle">防闪 · 启动即注入</text>
+  <text x="538" y="401" class="warn-d" text-anchor="middle">start 时写入 style</text>
+  <text x="538" y="416" class="warn-d" text-anchor="middle">CSS 隐藏先于首帧渲染</text>
+  <text x="538" y="430" class="warn-d" text-anchor="middle">rebuildStyle 原地更新</text>
+
+  <line x1="340" y1="452" x2="340" y2="472" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L4 核心逻辑层 -->
+  <rect x="24" y="476" width="632" height="150" rx="12" class="layer"/>
+  <text x="40" y="498" class="layer-title">L4 核心逻辑层 · 纯函数，全部 UMD 导出供测试 require</text>
+
+  <rect x="40" y="510" width="170" height="100" rx="8" class="band"/>
+  <text x="125" y="531" class="band-t" text-anchor="middle">resolveTiebaLink</text>
+  <text x="125" y="550" class="nd" text-anchor="middle">safecheck 中转</text>
+  <text x="125" y="565" class="nd" text-anchor="middle">jump2 url/u 参数</text>
+  <text x="125" y="580" class="nd" text-anchor="middle">仅放行外链</text>
+  <text x="125" y="595" class="nd" text-anchor="middle">百度域不动</text>
+
+  <rect x="222" y="510" width="124" height="100" rx="8" class="node"/>
+  <text x="284" y="531" class="nt" text-anchor="middle">pickOriginalUrl</text>
+  <text x="284" y="550" class="nd" text-anchor="middle">data-original 优先</text>
+  <text x="284" y="565" class="nd" text-anchor="middle">w=N 尺寸段换源</text>
+  <text x="284" y="580" class="nd" text-anchor="middle">非论坛图不动</text>
+  <text x="284" y="595" class="nd" text-anchor="middle">幂等</text>
+
+  <rect x="358" y="510" width="146" height="100" rx="8" class="node"/>
+  <text x="431" y="531" class="nt" text-anchor="middle">floorAuthorId</text>
+  <text x="431" y="550" class="nd" text-anchor="middle">data-field 解析</text>
+  <text x="431" y="565" class="nd" text-anchor="middle">取 author.user_id</text>
+  <text x="431" y="580" class="nd" text-anchor="middle">解析失败返 null</text>
+  <text x="431" y="595" class="nd" text-anchor="middle">不处理不猜</text>
+
+  <rect x="516" y="510" width="124" height="100" rx="8" class="node"/>
+  <text x="578" y="531" class="nt" text-anchor="middle">isListAd</text>
+  <text x="578" y="550" class="nd" text-anchor="middle">列表插入广告判据</text>
+  <text x="578" y="565" class="nd" text-anchor="middle">有 data-tid 正常帖</text>
+  <text x="578" y="580" class="nd" text-anchor="middle">置顶夹层不误伤</text>
+  <text x="578" y="595" class="nd" text-anchor="middle">e2e 直接断言</text>
+
+  <line x1="340" y1="626" x2="340" y2="646" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L5 执行层 -->
+  <rect x="24" y="650" width="632" height="124" rx="12" class="layer"/>
+  <text x="40" y="672" class="layer-title">L5 执行层 · DOM 改写，重入幂等</text>
+
+  <rect x="40" y="684" width="186" height="74" rx="8" class="node"/>
+  <text x="133" y="705" class="nt" text-anchor="middle">rewriteLinks</text>
+  <text x="133" y="723" class="nd" text-anchor="middle">中转 a 换直链 href</text>
+  <text x="133" y="738" class="nd" text-anchor="middle">normalizePics 换原图</text>
+  <text x="133" y="752" class="nd" text-anchor="middle">已处理打 data-tb 标记</text>
+
+  <rect x="238" y="684" width="186" height="74" rx="8" class="node"/>
+  <text x="331" y="705" class="nt" text-anchor="middle">markLZFloors</text>
+  <text x="331" y="723" class="nd" text-anchor="middle">一楼作者 = 楼主</text>
+  <text x="331" y="738" class="nd" text-anchor="middle">加 tbx-lz-floor 高亮类</text>
+  <text x="331" y="752" class="nd" text-anchor="middle">样式由 L3 提供</text>
+
+  <rect x="436" y="684" width="204" height="74" rx="8" class="band"/>
+  <text x="538" y="705" class="band-t" text-anchor="middle">domPass 统一清扫</text>
+  <text x="538" y="723" class="band-d" text-anchor="middle">启动跑一次 · 重扫复用</text>
+  <text x="538" y="738" class="band-d" text-anchor="middle">标记位防重复处理</text>
+  <text x="538" y="752" class="band-d" text-anchor="middle">单项失败不拖整体</text>
+
+  <line x1="340" y1="774" x2="340" y2="794" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L6 UI 层 -->
+  <rect x="24" y="798" width="632" height="124" rx="12" class="layer"/>
+  <text x="40" y="820" class="layer-title">L6 UI 层 · 设置面板（ghb 视觉规范，tb- 前缀）</text>
+
+  <rect x="40" y="832" width="186" height="74" rx="8" class="node"/>
+  <text x="133" y="853" class="nt" text-anchor="middle">面板懒挂载</text>
+  <text x="133" y="871" class="nd" text-anchor="middle">首次打开才建 DOM</text>
+  <text x="133" y="886" class="nd" text-anchor="middle">Esc/遮罩均可关闭</text>
+  <text x="133" y="900" class="nd" text-anchor="middle">明暗自适应</text>
+
+  <rect x="238" y="832" width="186" height="74" rx="8" class="node"/>
+  <text x="331" y="853" class="nt" text-anchor="middle">4 组 Tab 渲染</text>
+  <text x="331" y="871" class="nd" text-anchor="middle">净化/精简/阅读/链接</text>
+  <text x="331" y="886" class="nd" text-anchor="middle">开关行 = 标题+说明</text>
+  <text x="331" y="900" class="nd" text-anchor="middle">切换即时落盘生效</text>
+
+  <rect x="436" y="832" width="204" height="74" rx="8" class="warn"/>
+  <text x="538" y="853" class="warn-t" text-anchor="middle">GM 菜单唯一入口</text>
+  <text x="538" y="871" class="warn-d" text-anchor="middle">零注入：无页面内按钮</text>
+  <text x="538" y="886" class="warn-d" text-anchor="middle">无悬浮器件无快捷键</text>
+  <text x="538" y="900" class="warn-d" text-anchor="middle">菜单命令即面板开关</text>
+
+  <line x1="340" y1="922" x2="340" y2="942" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L7 Watcher 层 -->
+  <rect x="24" y="946" width="632" height="124" rx="12" class="layer"/>
+  <text x="40" y="968" class="layer-title">L7 Watcher 层 · 唯一的 DOM 监听者</text>
+
+  <rect x="40" y="980" width="186" height="74" rx="8" class="node"/>
+  <text x="133" y="1001" class="nt" text-anchor="middle">MutationObserver</text>
+  <text x="133" y="1019" class="nd" text-anchor="middle">观察帖子列表与楼层区</text>
+  <text x="133" y="1034" class="nd" text-anchor="middle">其余层只消费它的事件</text>
+  <text x="133" y="1048" class="nd" text-anchor="middle">无 setInterval 轮询</text>
+
+  <rect x="238" y="980" width="186" height="74" rx="8" class="node"/>
+  <text x="331" y="1001" class="nt" text-anchor="middle">250ms 防抖</text>
+  <text x="331" y="1019" class="nd" text-anchor="middle">高频变更合并成一次</text>
+  <text x="331" y="1034" class="nd" text-anchor="middle">复跑 domPass 补处理</text>
+  <text x="331" y="1048" class="nd" text-anchor="middle">幂等保证零副作用</text>
+
+  <rect x="436" y="980" width="204" height="74" rx="8" class="band"/>
+  <text x="538" y="1001" class="band-t" text-anchor="middle">启动序列</text>
+  <text x="538" y="1019" class="band-d" text-anchor="middle">loadOpts→applyStyle</text>
+  <text x="538" y="1034" class="band-d" text-anchor="middle">→ domPass → watch</text>
+  <text x="538" y="1048" class="band-d" text-anchor="middle">CSS 先于首帧生效</text>
+
+  <!-- 底部数据流注解 -->
+  <rect x="24" y="1086" width="632" height="48" rx="10" class="band"/>
+  <text x="340" y="1106" class="band-t" text-anchor="middle">CSS 功能零闪烁 · DOM 功能幂等 · 监听只在 L7</text>
+  <text x="340" y="1124" class="band-d" text-anchor="middle">识别拿不准的宁可不处理：新增选择器须有真实页面依据，e2e 夹具同步更新</text>
+</svg>
