@@ -22,7 +22,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">zhihu-enhance v1.5.1 · 知乎阅读增强助手 · 七层架构</text>
+  <text x="24" y="26" class="h1">zhihu-enhance v1.5.2 · 知乎阅读增强助手 · 七层架构</text>
   <text x="24" y="45" class="h2">零依赖 · 零网络请求 · 零注入（管理器菜单是唯一入口）· 11 开关 + 1 数值项 / 4 组</text>
 
   <!-- L1 配置层 -->
@@ -110,7 +110,7 @@
 
   <!-- L5 执行层 -->
   <rect x="24" y="626" width="632" height="150" rx="12" class="layer"/>
-  <text x="40" y="648" class="layer-title">L5 执行层 · 几何自适应加宽 + DOM 动作，带 data-zhx 幂等标记</text>
+  <text x="40" y="648" class="layer-title">L5 执行层 · pickPostRoot 挑正文根，几何自适应加宽，data-zhx 幂等标记</text>
 
   <rect x="40" y="660" width="142" height="98" rx="8" class="node"/>
   <text x="111" y="681" class="nt" text-anchor="middle">applyLink</text>
@@ -171,7 +171,7 @@
   <text x="136" y="999" class="nt" text-anchor="middle">MutationObserver</text>
   <text x="136" y="1017" class="nd" text-anchor="middle">首帧同步校正（syncPass）</text>
   <text x="136" y="1032" class="nd" text-anchor="middle">触发动态任务：直链 / 时间 / 原图</text>
-  <text x="136" y="1047" class="nd" text-anchor="middle">正文就绪 → 解除首屏遮蔽</text>
+  <text x="136" y="1047" class="nd" text-anchor="middle">isPostDoc 一票否决问题页</text>
 
   <rect x="244" y="978" width="192" height="78" rx="8" class="node"/>
   <text x="340" y="999" class="nt" text-anchor="middle">watchScroll（节流 120ms）</text>

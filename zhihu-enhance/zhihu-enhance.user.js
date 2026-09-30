@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         知乎阅读增强助手
 // @namespace    js-hub/zhihu-enhance
-// @version      1.5.1
+// @version      1.5.2
 // @description  净化（登录弹窗/侧边栏/顶栏）、阅读（时间置顶/原图/限高/聚焦框/角标高亮/GIF/阅读宽度自定）、链接直链化、夜间模式 —— 11 个开关 + 1 项数值调节，4 组分类，菜单打开设置面板，零依赖零网络请求
 // @author       EFate
 // @license      MIT
@@ -23,7 +23,7 @@
     // L1 配置层 · 选项定义表（一切开关的唯一来源）与存储键约定 zh.*
     // ======================================================================
 
-    var VERSION = '1.5.1';
+    var VERSION = '1.5.2';
     var PREFIX = 'zh';           // 存储键前缀：zh.<开关名>
     var MARK = 'data-zhx';       // DOM 幂等标记前缀：data-zhx-<任务>
     // 文章页阅读宽度的「默认值」（px）。它同时是数值项 readWidth 的默认值 —— 用户可在设置
@@ -463,6 +463,50 @@
     // 的 .css-c0fani 就带 690px）就永远解不掉。故：文本根优先，实体兜底。
     var POST_TEXT_SEL = '.RichText.ztext, .ztext';
 
+    // ======================================================================
+    // v1.5.2 页面判据与正文根挑选
+    //
+    // 事故（2026-09-30）：/question/ 页顶部弹出「文章宽45 左88 应为741」的诊断横幅。
+    // 根因有二：① runDiag 没有页面判据，任何页面都会量；② 「文档序第一个 .ztext」
+    // 不可靠 —— 问题页/回答页的评论区、用户条目（.UserItem）里也有 .ztext（评论
+    // 正文、用户签名），且可能排在真正的主内容之前。
+    // 修法：
+    //   · isPostDoc：问题页等路径**一票否决**，/p/<id> 直接认定，其余路径看文章
+    //     结构证据。fixPostLayout / syncPass / runDiag 三处共用同一个判据。
+    //   · pickPostRoot：先认 .Post-RichTextContainer 内的文本根；无容器时在全
+    //     文档 .ztext 里排除非正文区后挑文字最多者 —— 小签名、短评论永远选不上。
+    // ======================================================================
+
+    // 这些路径绝不按文章页处理（一票否决，证据类救不回来）
+    var NON_POST_PATH_RE = /^\/(question|pin|topic|people|org|pub|search|tardis|special|roundtable|zvideos|market|app|follow|hot|explore|list|notifications|messages|settings|terms|privacy|council|oia|signup|signin|billboard|activities|governance|zhuanlan)(\/|$)/;
+
+    function isPostDoc(doc, win) {
+        var w = win || doc.defaultView;
+        var path = '';
+        try { path = (w && w.location && w.location.pathname) || ''; } catch (e) { path = ''; }
+        if (NON_POST_PATH_RE.test(path)) return false;   // 一票否决：问题页等绝不按文章页处理
+        if (/^\/p\/\d+/.test(path)) return true;
+        return !!(doc.querySelector('.Post-RichTextContainer, .Post-NormalMain, .Post-Main'));
+    }
+
+    // 非正文区：这些容器里的 .ztext 是评论 / 签名，不是文章正文
+    var NOT_POST_ZONE_SEL = '.UserItem, .UserItem-item, .Comments-container, .Comments-list,' +
+        ' .Question-sideColumn, .GlobalSideBar, header, nav, footer, aside';
+
+    function pickPostRoot(doc) {
+        var c = doc.querySelector('.Post-RichTextContainer');
+        if (c) return c.querySelector(POST_TEXT_SEL) || c;
+        var all = doc.querySelectorAll(POST_TEXT_SEL);
+        var best = null, bestLen = 0, i, el, len;
+        for (i = 0; i < all.length && i < 32; i++) {
+            el = all[i];
+            if (el.closest && el.closest(NOT_POST_ZONE_SEL)) continue;
+            len = (el.textContent || '').length;
+            if (len > bestLen) { best = el; bestLen = len; }
+        }
+        return best || doc.querySelector(POST_BODY_SEL);
+    }
+
     // 从 el 起向上扩张，隐藏「仍不包含正文根」的最外层块级容器。
     // 若 el 的直接父级就已含正文，则退让为只处理 el 自身（绝不波及正文）。
     function hideColumn(el, doc) {
@@ -563,10 +607,8 @@
         if (!OPT.hideSidebar) return 0;
         var win = doc.defaultView;
         if (!win || typeof win.getComputedStyle !== 'function') return 0;
-        // 限定文章页：/p/<id> 路径，或页面里确实存在文章正文容器
-        var path = (win.location && win.location.pathname) || '';
-        if (!/^\/p\/\d+/.test(path) && !doc.querySelector('.Post-RichTextContainer')) return 0;
-        var root = doc.querySelector(POST_TEXT_SEL) || doc.querySelector(POST_BODY_SEL);
+        if (!isPostDoc(doc, win)) return 0;   // 问题页/首页等绝不按文章页处理（三处共用判据）
+        var root = pickPostRoot(doc);
         if (!root) return 0;
 
         var capW = readCap(win.innerWidth, widthCap(OPT));   // 上限取自面板设置，窄屏再按 88vw 收
@@ -710,8 +752,9 @@
 
     function runDiag(doc) {
         if (!OPT.hideSidebar) { dropDiag(doc); return; }
+        if (!isPostDoc(doc)) { dropDiag(doc); return; }   // 只在文章页诊断；问题页等拆除残留横幅
         var win = doc.defaultView;
-        var root = doc.querySelector(POST_TEXT_SEL) || doc.querySelector(POST_BODY_SEL);
+        var root = pickPostRoot(doc);
         if (!win || !root || !root.getBoundingClientRect) { dropDiag(doc); return; }
         var r = root.getBoundingClientRect();
         if (!layoutVerdict(r.width, r.left, win.innerWidth)) { dropDiag(doc); return; }
@@ -1075,6 +1118,7 @@
     // 稳态下本函数只做一次 O(1) 的 isConnected 判定，查询开销为零。
     function syncPass() {
         if (syncDone && syncRoot && syncRoot.isConnected) return false;   // 仍是同一篇，交给 debounce
+        if (!isPostDoc(document)) return false;   // 问题页等：评论区的 .ztext 不构成「正文根出现」
         var root = document.querySelector(POST_BODY_SEL);
         if (!root || root === syncRoot) return false;
         syncRoot = root;
@@ -1250,6 +1294,7 @@
         fixPostLayout: fixPostLayout, hideColumn: hideColumn, hideNarrowCols: hideNarrowCols,
         POST_BODY_SEL: POST_BODY_SEL, POST_TEXT_SEL: POST_TEXT_SEL,
         syncPass: syncPass, bootReady: bootReady, bootUnmark: bootUnmark,
+        isPostDoc: isPostDoc, pickPostRoot: pickPostRoot,
         layoutVerdict: layoutVerdict, runDiag: runDiag, scheduleDiag: scheduleDiag,
         DIAG_ID: DIAG_ID, READ_W: READ_W, readCap: readCap,
         clampRange: clampRange, readOpt: readOpt, widthCap: widthCap,

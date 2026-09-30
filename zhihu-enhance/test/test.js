@@ -511,6 +511,55 @@ if (JSDOM) {
     api.runDiag(d8);
     eq(d8.getElementById(api.DIAG_ID), null, '无布局引擎时不注入诊断横幅（jsdom 下不误报）');
 
+    // ---- 场景 9：问题页一票否决 + 正文根挑选（v1.5.2）----
+    // 用户实测（2026-09-30）：/question/ 页弹出「文章宽45 左88 应为741」横幅 ——
+    // runDiag 没有页面判据，把评论区/用户条目里的 span.ztext（45px）当正文量了宽。
+    group('e2e · 问题页不误判（v1.5.2）');
+    function domAt(url, html) {
+        return new JSDOM('<!DOCTYPE html><html><body>' + html + '</body></html>', { url: url }).window.document;
+    }
+    // ① 一票否决：即使问题页混进了文章结构类（假想的串场容器），也不按文章页处理
+    var dqa = domAt('https://www.zhihu.com/question/2021202927042196876',
+        '<div class="UserItem-item"><span class="ztext" id="uqa">作者签名</span></div>' +
+        '<div class="Post-RichTextContainer" id="strayqa"><div class="ztext">串场容器</div></div>');
+    eq(api.isPostDoc(dqa), false, 'isPostDoc：问题页一票否决（证据类救不回来）');
+    eq(api.fixPostLayout(dqa), 0, '问题页上 fixPostLayout 空转');
+    eq(dqa.getElementById('uqa').style.marginLeft, '', '用户条目的 .ztext 不被改写');
+    eq(dqa.getElementById('strayqa').style.marginLeft, '', '串场容器也不被文章页改写');
+    // ② 诊断横幅：问题页上「量到偏左的 45px 元素」也不得弹横幅；SPA 残留横幅要拆除
+    //    （jsdom 无布局引擎，手工桩一个真实事故同款的几何读数）
+    var dqb = domAt('https://www.zhihu.com/question/2021202927042196876',
+        '<div class="UserItem-item"><span class="ztext" id="uqb">签名</span></div>' +
+        '<div class="QuestionAnswer-content"><span class="RichText ztext" id="aqb">回答内容</span></div>');
+    dqb.getElementById('aqb').getBoundingClientRect = function () {
+        return { width: 45, left: 88, top: 0, right: 133, bottom: 20 };
+    };
+    Object.defineProperty(dqb.defaultView, 'innerWidth', { value: 1528, configurable: true });
+    api.runDiag(dqb);
+    eq(dqb.getElementById(api.DIAG_ID), null, '问题页量到「偏左的 45px 元素」也不弹横幅（页面判据先行）');
+    var stale = dqb.createElement('div');
+    stale.id = api.DIAG_ID;
+    dqb.body.appendChild(stale);
+    api.runDiag(dqb);
+    eq(dqb.getElementById(api.DIAG_ID), null, '问题页上的残留横幅（SPA 换页遗留）被拆除');
+    // ③ 正文根挑选：文档序第一个不可靠（评论区/用户条目的 .ztext 可能排在主内容之前）
+    var dqc = dom(
+        '<div class="UserItem-item"><span class="RichText ztext" id="strayq">一长串用户条目文本一长串用户条目文本一长串用户条目文本</span></div>' +
+        '<div><span class="RichText ztext" id="mainq">主内容</span></div>');
+    eq(api.pickPostRoot(dqc), dqc.getElementById('mainq'), '无文章容器：跳过非正文区（用户条目再长也不挑）');
+    var dqd = dom(
+        '<span class="RichText ztext" id="firstz">文档序第一个文档序第一个</span>' +
+        '<div class="Post-RichTextContainer"><div class="RichText ztext" id="inz">容器内的正文</div></div>');
+    eq(api.pickPostRoot(dqd), dqd.getElementById('inz'), '有文章容器：优先容器内的文本根（不认文档序第一）');
+    // ④ 文章路径与证据路径
+    eq(api.isPostDoc(domAt('https://zhuanlan.zhihu.com/p/650', '<div class="ztext">x</div>')), true,
+        '/p/<id> 路径直接认定文章页');
+    eq(api.isPostDoc(dom('<div class="Post-NormalMain"></div>')), true,
+        '无 /p/ 路径但有文章结构证据 → 文章页（jsdom about:blank）');
+    // ⑤ syncPass：问题页的评论区 .ztext 不构成「正文根出现」（syncPass 闭包读 global.document）
+    global.document = dqa;   // 保持到用例结束：compensatePass 的定时器后续还要读它
+    eq(api.syncPass(), false, 'syncPass：问题页上不把评论区的 .ztext 当正文根');
+
     // 无布局引擎时不得误藏兄弟列：hideNarrowCols 以「实测宽度 > 0」作为有布局引擎的开关，
     // jsdom 下宽度恒 0，若只看 txt<100 会把兄弟列全部误藏。
     var d6d = dom(
