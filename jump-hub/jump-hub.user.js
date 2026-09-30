@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         链接直跳助手
 // @namespace    js-hub/jump-hub
-// @version      1.3.5
+// @version      1.3.6
 // @description  点一次链接就直接到目标网站：跳过「安全提示 / 即将离开 / 确认跳转」这类中转页，网盘链接自动带上旁边写着的提取码直达并解锁，统一在新标签页打开。全自动、全程零提示，不用选文字、不用点第二次、不用手输提取码。
 // @author       EFate
 // @license      MIT
@@ -65,7 +65,7 @@
 (function () {
 	"use strict";
 
-	const VERSION = "1.3.5";
+	const VERSION = "1.3.6";
 	const ATTR = "data-jh";
 	const KEY = {
 		opt: "jh.opt",
@@ -785,9 +785,7 @@
 	 * 4. 网盘层
 	 * ======================================================================== */
 
-	const pans = (list) => list.map((p) => Object.assign({ pwdParam: "pwd" }, p));
-
-	const PANS = pans([
+	const PANS = [
 		{
 			id: "baidu", name: "百度网盘",
 			host: /(^|\.)(pan|yun|eyun)\.baidu\.com$/,
@@ -936,15 +934,7 @@
 			button: ["button"],
 			hint: /提取码|访问码|密码/
 		},
-		{
-			id: "guangya", name: "光鸭云盘",
-			host: /(^|\.)guangyapan\.com$/,
-			pwdParam: "code", // 光鸭的码走 ?code=（实证：…?code=jiif），不是 pwd
-			input: ["input[type=password]", "input[type=text]"],
-			button: ["button"],
-			hint: /提取码|访问码|密码/
-		}
-	]);
+	];
 
 	/** 按域名找网盘（先精确后宽松，长域名优先） */
 	function panOf(host) {
@@ -962,15 +952,7 @@
 		for (const k of PWD_PARAM_NAMES) {
 			const v = u.searchParams.get(k);
 			if (v && /^[A-Za-z0-9]{3,8}$/.test(v)) return v;
-		}
-		// 每家专属的码参数（如光鸭 code）：只在自家域上认 —— OAuth 回调也用 code，
-		// 全局读会误伤（「读码排除 code」裁决在先，这里按域放开）
-		const pan = panOf(u.hostname);
-		if (pan && pan.pwdParam) {
-			const pv = u.searchParams.get(pan.pwdParam);
-			if (pv && /^[A-Za-z0-9]{3,8}$/.test(pv)) return pv;
-		}
-		const h = String(u.hash || "").replace(/^#/, "");
+		}		const h = String(u.hash || "").replace(/^#/, "");
 		if (/^[A-Za-z0-9]{3,8}$/.test(h)) return h;
 		const m = /^(?:pwd|password|passwd|extract)=([A-Za-z0-9]{3,8})$/i.exec(h);
 		return m ? m[1] : "";
@@ -1030,11 +1012,11 @@
 	}
 
 	/** 给链接带上提取码。只加 query 参数，不动 hash —— 部分网盘用 hash 做路由。
-	 *  码参数按家配置（光鸭用 code），trailingHash 给迅雷补官方格式的空 # */
+	 *  trailingHash 给迅雷补官方格式的空 # */
 	function withPwd(link, pwd, pan) {
 		const u = safeUrl(link);
 		if (!u || !pwd) return link;
-		u.searchParams.set((pan && pan.pwdParam) || "pwd", pwd);
+		u.searchParams.set("pwd", pwd);
 		if (pan && pan.trailingHash && !u.hash) u.hash = "#";
 		return u.href;
 	}

@@ -29,7 +29,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">jump-hub v1.3.5 · 全站链接直跳助手 · 六层架构</text>
+  <text x="24" y="26" class="h1">jump-hub v1.3.6 · 全站链接直跳助手 · 六层架构</text>
   <text x="24" y="45" class="h2">通用识别是主干，站点规则只是加速 —— 没适配过的站点同样能识别；零注入，网盘终点站收手</text>
 
   <!-- ① 触发层 -->
@@ -127,7 +127,7 @@
 
   <rect x="448" y="594" width="192" height="66" rx="8" class="node"/>
   <text x="544" y="616" class="nt" text-anchor="middle">落地自动填码</text>
-  <text x="544" y="636" class="nd" text-anchor="middle">22 家网盘适配 · 光鸭 ?code=</text>
+  <text x="544" y="636" class="nd" text-anchor="middle">21 家网盘适配</text>
   <text x="544" y="651" class="nd" text-anchor="middle">迅雷尾缀# · 拦公告弹窗</text>
 
   <rect x="40" y="672" width="600" height="48" rx="8" class="warn"/>
