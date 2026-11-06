@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Copilot 增强助手
 // @namespace    js-hub/copilot-enhance
-// @version      1.1.0
+// @version      1.2.0
 // @description  解除 Microsoft 365 Copilot 的地区与模型限制、按界面语言自动选中目标模型档位（深度思考优先），并为附件上传增加网络抖动重试——11 个开关、4 组分类，菜单打开设置面板，零依赖
 // @author       EFate
 // @license      MIT
@@ -30,7 +30,7 @@
     // L1 配置层 · 版本、存储前缀、功能开关目录、选项定义表（一切开关的唯一来源）
     // ======================================================================
 
-    var VERSION = '1.1.0';
+    var VERSION = '1.2.0';
     var PREFIX = 'cp';               // 存储键前缀：cp.<开关名>
     var MARK_ATTR = 'data-cp-retry';
     var GROUPS = ['解锁', '模型', '网络', '通用'];
@@ -151,7 +151,8 @@
         forceUSRegion:     { group: '解锁', type: 'bool', label: '地区识别为美国',   tip: '把身份地区改为 US 并声明位于可用区域，解除区域限制', def: true },
         extraNavTabs:      { group: '解锁', type: 'bool', label: '补全导航入口',     tip: '导航栏缺失 Chat 与 Cowork 时自动补上（企业租户不改）', def: true },
         // —— 模型 ——
-        autoSelectModel:   { group: '模型', type: 'bool', label: '自动选择模型',     tip: '进入对话页后把模型切换器指向目标档位；已是目标档位则不做任何操作', def: true },
+        backgroundModel:   { group: '模型', type: 'bool', label: '后台静默设定模型', tip: '新页面在应用读取前先把模型偏好写进宿主存储，不打开菜单、不点击', def: true },
+        autoSelectModel:   { group: '模型', type: 'bool', label: '必要时自动点选',     tip: '后台预写未生效时，才打开模型菜单点一次；成功后把存储键记下来，以后回到静默模式', def: true },
         preferReasoning:   { group: '模型', type: 'bool', label: '优先深度思考',     tip: '在同类模型里优先选「深度思考 / Think deeper」档；关闭则优先「快速响应」', def: true },
         modelTarget:       { group: '模型', type: 'text', label: '固定模型（可选）', tip: '只在想锁定某个模型时填写，如 GPT-5.6 或 Claude；留空则自动选菜单里最新的可用模型', def: '' },
         // —— 网络 ——
@@ -166,7 +167,13 @@
     // ======================================================================
 
     var OPT = {};
-    var STATE = { patched: null, lastSwitch: '', switchRuns: 0, uploads: { retried: 0, failed: 0, healing: 0 } };
+    var STATE = {
+        patched: null, lastSwitch: '', switchRuns: 0,
+        uploads: { retried: 0, failed: 0, healing: 0 },
+        modelKeys: [],          // 已确认是模型偏好的存储键（自学习结果）
+        preseeded: 0,           // 本次加载预写成功的键数
+        learnedAt: 0
+    };
 
     // 单值归一（唯一合法判据）：布尔项非布尔回落默认值，文本项非字符串回落默认值。
     function readOpt(name, v) {
@@ -345,6 +352,78 @@
         if (want) return norm(t).indexOf(want) > -1;
         if (!t.trim()) return false;
         return modelIdOf(t) !== '';
+    }
+
+    // ---- 宿主存储键的识别与改写（后台静默设定模型的核心）----
+
+    // 只认「值看起来像模型标识」的键：这能挡住主题、语言、开关之类的无关项
+    function looksLikeModelValue(v) {
+        if (typeof v !== 'string') return false;
+        var s = v.trim();
+        if (!s || s.length > 120) return false;
+        if (MODEL_ID_RE.test(s)) return true;
+        // 值可能是 JSON：{"model":"gpt-5.6","mode":"deep"}
+        if (s.charAt(0) === '{' || s.charAt(0) === '[') {
+            return /"(?:model|modelId|deployment|gptId|variant)"\s*:\s*"[^"]+"/i.test(s);
+        }
+        return false;
+    }
+
+    // 从存储值里抽出「模型段」，生成替换后的值；抽不出返回 null
+    function rewriteModelValue(raw, opt) {
+        if (typeof raw !== 'string') return null;
+        var target = resolveTarget(opt);
+        var want = target || (opt && opt.preferReasoning ? 'deep' : 'quick');
+
+        // a) 纯字符串：gpt-5.6 / gpt-5.6-sol-deep
+        if (raw.trim() === raw && raw.charAt(0) !== '{' && raw.charAt(0) !== '[') {
+            if (!MODEL_ID_RE.test(raw)) return null;
+            if (target) {
+                // 指定了目标：已是目标就不动，避免每次刷新都重写同一个值
+                return norm(raw).indexOf(target) > -1 ? null : target;
+            }
+            // 留空＝沿用现有模型，只把模式词换成偏好档
+            var base = raw.replace(/[-_ ]?(deeper|deep|think|reasoning|quick|fast|instant)[-_ ]?$/i, '');
+            if (base === raw) return null;                     // 本来就没有模式段：不动
+            return base + (opt && opt.preferReasoning ? '_deep' : '_quick');
+        }
+
+        // b) JSON 字符串：只改模型/模式字段，其它字段原样保留
+        var data;
+        try { data = JSON.parse(raw); } catch (e) { return null; }
+        if (!data || typeof data !== 'object') return null;
+        var changed = false;
+        var MODEL_FIELDS = ['model', 'modelId', 'deployment', 'gptId', 'variant'];
+        var MODE_FIELDS = ['reasoning', 'mode', 'tone'];
+        var i;
+        for (i = 0; i < MODEL_FIELDS.length; i++) {
+            var mf = MODEL_FIELDS[i];
+            if (typeof data[mf] !== 'string') continue;
+            // 留空＝沿用原模型；指定了目标才覆盖
+            if (target && norm(data[mf]) !== target) { data[mf] = target; changed = true; }
+        }
+        for (i = 0; i < MODE_FIELDS.length; i++) {
+            var df = MODE_FIELDS[i];
+            if (typeof data[df] !== 'string') continue;
+            var cur = data[df];
+            var isDeep = /deep|think|reason/i.test(cur);
+            if (want === 'deep' && !isDeep) { data[df] = 'deep'; changed = true; }
+            else if (want === 'quick' && isDeep) { data[df] = 'quick'; changed = true; }
+        }
+        return changed ? JSON.stringify(data) : null;
+    }
+
+    // 考核一个已安装的存储键：只要「值看起来就是模型标识」即可认领。
+    // 注意：这里不能用「能否改写」当判据——留空自动模式下普通值本就无需改写，
+    // 那样会把所有合法的模型键都漏掉，预写永远不生效。
+    function isModelKey(storage, key, opt) {
+        var raw;
+        try { raw = storage.getItem(key); } catch (e) { return false; }
+        if (!looksLikeModelValue(raw)) return false;
+        // 键名带明显的非模型语义时排除（避免误改「模型列表」这类集合）
+        if (/list|options|available|catalog|history/i.test(key)) return false;
+        void opt;
+        return true;
     }
 
     // ======================================================================
@@ -688,8 +767,12 @@
             try { r = await navigate(opt); } catch (e) { r = 'retry'; }
             if (r !== 'retry') {
                 STATE.lastSwitch = r;
-                if (opt.toastOnSwitch && r !== 'already') {
-                    toast(r === 'done' ? '模型已切换' : '模型切换已提交，请确认切换器显示', r === 'done' ? 'ok' : 'warn');
+                // 点选成功后宿主已把偏好落盘，钩子会记录键；再立刻预写一次把模式对齐
+                if (r === 'done') {
+                    preseedModels(opt);
+                    if (opt.toastOnSwitch) toast('模型已切换，后续页面将静默生效', 'ok');
+                } else if (opt.toastOnSwitch) {
+                    toast('模型切换已提交，请确认切换器显示', 'warn');
                 }
                 return r;
             }
@@ -700,7 +783,118 @@
         return 'failed';
     }
 
-    // ---- 上传网络增强 ----
+    // 后台静默设定：先预写存储，没写成且允许点选时再退化为一次 UI 点击
+    async function applyModel(opt) {
+        opt = opt || OPT;
+        if (!shouldAutoSelect(location.href)) return 'skip';
+        if (opt.backgroundModel) {
+            var n = preseedModels(opt);
+            if (n > 0) {
+                // 预写成功但宿主可能已把旧值读进内存：切换器若仍不是目标，允许补一次点击
+                await sleep(600);
+                var sw = findSwitcher(document);
+                if (sw && switcherMatches(sw.textContent, opt)) {
+                    STATE.lastSwitch = 'preseed';
+                    return 'preseed';
+                }
+                if (!opt.autoSelectModel) return 'preseed';
+            }
+        }
+        if (!opt.autoSelectModel) return opt.backgroundModel ? 'preseed' : 'off';
+        return autoSelect(opt);
+    }
+
+    // ---- 宿主存储预写（后台静默设定模型）----
+
+    var KEY_CFG = PREFIX + '.modelKeys';     // 自学习到的存储键清单
+
+    function loadModelKeys() {
+        try {
+            var raw = GM_getValue(KEY_CFG);
+            if (typeof raw === 'string' && raw) {
+                var arr = JSON.parse(raw);
+                if (Array.isArray(arr)) STATE.modelKeys = arr.filter(function (k) { return typeof k === 'string'; });
+            }
+        } catch (e) { STATE.modelKeys = []; }
+        return STATE.modelKeys;
+    }
+
+    function saveModelKeys() {
+        try { GM_setValue(KEY_CFG, JSON.stringify(STATE.modelKeys)); } catch (e) { /* 存储不可写时忽略 */ }
+    }
+
+    function rememberKey(key) {
+        if (!key || STATE.modelKeys.indexOf(key) > -1) return false;
+        STATE.modelKeys.push(key);
+        saveModelKeys();
+        STATE.learnedAt = Date.now();
+        return true;
+    }
+
+    // 在存储里找模型键：先看自学习清单，再兜底全量扫一遍（键不合法就跳过）
+    function findModelKeys(storage, opt) {
+        var found = [];
+        var i;
+        for (i = 0; i < STATE.modelKeys.length; i++) {
+            if (isModelKey(storage, STATE.modelKeys[i], opt)) found.push(STATE.modelKeys[i]);
+        }
+        if (found.length) return found;
+
+        var n = 0;
+        try { n = storage.length; } catch (e) { return found; }
+        for (i = 0; i < n; i++) {
+            var k;
+            try { k = storage.key(i); } catch (e) { continue; }
+            if (!k || STATE.modelKeys.indexOf(k) > -1) continue;
+            if (isModelKey(storage, k, opt)) found.push(k);
+        }
+        return found;
+    }
+
+    // 预写：只改「值确实需要改」的键，改成功才写回；返回改动键数
+    function preseedModels(opt) {
+        opt = opt || OPT;
+        if (!opt.backgroundModel) return 0;
+        var n = 0;
+        var stores = [];
+        try { if (window.localStorage) stores.push(window.localStorage); } catch (e) { /* 存储被禁用 */ }
+        try { if (window.sessionStorage) stores.push(window.sessionStorage); } catch (e) { /* 存储被禁用 */ }
+
+        for (var s = 0; s < stores.length; s++) {
+            var st = stores[s];
+            var keys = findModelKeys(st, opt);
+            for (var i = 0; i < keys.length; i++) {
+                var key = keys[i];
+                var raw;
+                try { raw = st.getItem(key); } catch (e) { continue; }
+                var next = rewriteModelValue(raw, opt);
+                if (next === null || next === raw) continue;
+                try { st.setItem(key, next); n++; } catch (e) { /* 配额/隐私模式写入失败 */ }
+                rememberKey(key);
+            }
+        }
+        STATE.preseeded = n;
+        return n;
+    }
+
+    // ---- 学习：钩住 Storage.setItem，把「值像模型」的键记下来 ----
+    // 用户（或我们的点选）一旦改了模型，宿主必然要落盘；那一刻我们就知道是哪个键了。
+    function installModelLearn() {
+        var w = pageWin();
+        if (!w || !w.Storage || !w.Storage.prototype || w.Storage.prototype.__cpLearn) return false;
+        var proto = w.Storage.prototype;
+        var origSet = proto.setItem;
+        proto.__cpLearn = true;
+        proto.setItem = function (key, value) {
+            var r = origSet.apply(this, arguments);
+            try {
+                if (looksLikeModelValue(value)) rememberKey(String(key));
+            } catch (e) { /* 学习失败不影响原调用 */ }
+            return r;
+        };
+        return true;
+    }
+
 
     // 包一层 XHR.send：上传请求遇断连/超时/429/5xx 自动退避重试。
     // 关键：宿主自己的 load/error 监听器是先注册的，原生事件会先到它们手里——
@@ -987,7 +1181,7 @@
         : function (fn) { setTimeout(fn, 16); };
 
     function toast(msg, kind) {
-        if (!document.body) return;
+        if (!document || !document.body) return;
         var host = document.getElementById('cp-toasts');
         if (!host) {
             host = document.createElement('div');
@@ -1015,14 +1209,19 @@
         } else {
             t = '本页尚未执行补丁';
         }
-        if (!OPT.autoSelectModel) {
-            t += '；自动选模型已关闭';
+        if (!OPT.backgroundModel && !OPT.autoSelectModel) {
+            t += '；模型设定已关闭';
         } else if (!shouldAutoSelect(location.href)) {
-            t += '；本页不是对话页，不自动选模型';
+            t += '；本页不是对话页，不设模型';
         } else {
-            var last = STATE.lastSwitch;
-            var map = { done: '已切换', already: '本已是目标档位', clicked: '已提交切换', failed: '切换未成功', off: '已关闭', skip: '本页跳过' };
-            t += '；自动选模型：' + (map[last] || '尚未执行');
+            var map = {
+                preseed: '已静默写入', done: '已点选切换', already: '本已是目标档位',
+                clicked: '已提交切换', failed: '切换未成功', off: '已关闭', skip: '本页跳过'
+            };
+            var mode = OPT.backgroundModel ? (OPT.autoSelectModel ? '静默优先，必要时点选' : '仅静默写入') : '仅点选';
+            t += '；模型设定（' + mode + '）：' + (map[STATE.lastSwitch] || '尚未执行');
+            if (STATE.modelKeys.length) t += '；已识别模型键 ' + STATE.modelKeys.length + ' 个';
+            else t += '；尚未识别模型键（会退化为点选）';
         }
         if (OPT.uploadRetry || OPT.uploadFailureWatch) {
             t += '<br>上传增强：已重试 <b>' + STATE.uploads.retried + '</b> 次 / 自动再试 <b>' +
@@ -1158,7 +1357,7 @@
     }
 
     function refreshStatus() {
-        var el = document.getElementById('cp-status');
+        var el = document && document.getElementById('cp-status');
         if (el) el.innerHTML = statusText();
     }
 
@@ -1310,9 +1509,9 @@
     }
 
     function startModel() {
-        if (!OPT.autoSelectModel) return;
+        if (!OPT.backgroundModel && !OPT.autoSelectModel) return;
         if (!shouldAutoSelect(location.href)) return;
-        autoSelect(OPT);
+        applyModel(OPT);
     }
 
     function start() {
@@ -1322,11 +1521,15 @@
         watch();
         installUrlCapture();
         installUploadRetry();
+        installModelLearn();       // 先装钩子：任何一次模型落盘都能被记录
         startModel();
     }
 
     function boot() {
         loadOpts();
+        loadModelKeys();
+        // 存储预写必须尽早：DOMContentLoaded 之前宿主还没读到偏好
+        preseedModels(OPT);
         patchConfig(OPT);          // document-start：标签可能尚未解析，无元素即安静跳过
         registerMenu();
         if (document.readyState === 'loading') {
@@ -1355,6 +1558,10 @@
         pickRetryText: pickRetryText, installUploadRetry: installUploadRetry,
         healUploadFailure: healUploadFailure,
         visibleTexts: visibleTexts, findSwitcher: findSwitcher,
+        looksLikeModelValue: looksLikeModelValue, rewriteModelValue: rewriteModelValue,
+        isModelKey: isModelKey, findModelKeys: findModelKeys, loadModelKeys: loadModelKeys,
+        rememberKey: rememberKey, preseedModels: preseedModels, installModelLearn: installModelLearn,
+        applyModel: applyModel,
         navigate: navigate, autoSelect: autoSelect, toast: toast, statusText: statusText,
         openPanel: openPanel, closePanel: closePanel, buildUI: buildUI,
         __setOpt: function (name, value) { OPT[name] = value; },

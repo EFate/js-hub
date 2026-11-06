@@ -22,8 +22,8 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">copilot-enhance v1.1.0 · Copilot 增强助手 · 七层架构</text>
-  <text x="24" y="45" class="h2">解锁资格 + 界面文字驱动选模型 + 上传重试 · 零依赖 · 零注入 · 11 开关 / 4 组</text>
+  <text x="24" y="26" class="h1">copilot-enhance v1.2.0 · Copilot 增强助手 · 七层架构</text>
+  <text x="24" y="45" class="h2">解锁 + 后台静默设模型 + 上传重试 · 零依赖 · 零注入 · 12 开关 / 4 组</text>
 
   <!-- L1 -->
   <rect x="24" y="60" width="632" height="124" rx="12" class="layer"/>
@@ -37,7 +37,7 @@
 
   <rect x="238" y="94" width="186" height="74" rx="8" class="band"/>
   <text x="331" y="115" class="band-t" text-anchor="middle">OPT_DEFS 选项定义表</text>
-  <text x="331" y="133" class="band-d" text-anchor="middle">11 开关 · 4 组分类</text>
+  <text x="331" y="133" class="band-d" text-anchor="middle">12 开关 · 4 组分类</text>
   <text x="331" y="148" class="band-d" text-anchor="middle">解锁 模型 网络 通用</text>
   <text x="331" y="162" class="band-d" text-anchor="middle">bool / text 两种类型</text>
 
@@ -59,7 +59,7 @@
 
   <rect x="338" y="242" width="302" height="50" rx="8" class="node"/>
   <text x="489" y="262" class="nt" text-anchor="middle">STATE 运行状态</text>
-  <text x="489" y="280" class="nd" text-anchor="middle">patched / lastSwitch / switchRuns</text>
+  <text x="489" y="280" class="nd" text-anchor="middle">patched / modelKeys / preseeded</text>
 
   <line x1="340" y1="308" x2="340" y2="328" class="arrow" marker-end="url(#ar)"/>
 
@@ -120,7 +120,7 @@
 
   <!-- L5 -->
   <rect x="24" y="648" width="632" height="112" rx="12" class="layer"/>
-  <text x="40" y="670" class="layer-title">L5 执行层 · 就地改写宿主数据、驱动模型菜单</text>
+  <text x="40" y="670" class="layer-title">L5 执行层 · 就地改写宿主数据、预写模型偏好</text>
 
   <rect x="40" y="682" width="292" height="64" rx="8" class="band"/>
   <text x="186" y="703" class="band-t" text-anchor="middle">patchJsonTag 标签改写</text>
@@ -128,9 +128,9 @@
   <text x="186" y="736" class="band-d" text-anchor="middle">LAST_TEXT 短路防重解析</text>
 
   <rect x="344" y="682" width="296" height="64" rx="8" class="node"/>
-  <text x="492" y="703" class="nt" text-anchor="middle">patchConfig 一次完整补丁</text>
-  <text x="492" y="721" class="nd" text-anchor="middle">标签层 + 水合层，逐块 try/catch</text>
-  <text x="492" y="736" class="nd" text-anchor="middle">改动计数 → STATE.patched → 面板状态区</text>
+  <text x="492" y="703" class="nt" text-anchor="middle">preseedModels 存储预写</text>
+  <text x="492" y="721" class="nd" text-anchor="middle">DOMContentLoaded 前写 localStorage</text>
+  <text x="492" y="736" class="nd" text-anchor="middle">installModelLearn 钩 setItem 学键</text>
 
   <line x1="340" y1="760" x2="340" y2="780" class="arrow" marker-end="url(#ar)"/>
 
@@ -176,10 +176,11 @@
 
   <!-- 契约说明 -->
   <rect x="24" y="1050" width="632" height="150" rx="12" class="warn"/>
-  <text x="40" y="1072" class="warn-t">三条实现红线</text>
-  <text x="40" y="1094" class="warn-d">① 模型档位按界面文字现找，不写死语言：中文「深度思考」与英文 Think deeper 同等识别；</text>
-  <text x="40" y="1112" class="warn-d">② 重试必须重建连接——浏览器不允许对同一请求二次 send（InvalidStateError）；</text>
-  <text x="40" y="1130" class="warn-d">③ 重试期间拦下原生事件，只把最终结果交回页面，否则页面会把中途 503 当成真实失败。</text>
-  <text x="40" y="1154" class="note">改动计数只统计真实变化：宿主已是目标状态返回 0；失败路径一律先按 Esc 收尾，不留菜单挂在页面上。</text>
-  <text x="40" y="1174" class="note">合规要点：@author EFate / @license MIT / @updateURL + @downloadURL 指向本仓库 raw 地址。</text>
+  <text x="40" y="1072" class="warn-t">四条实现红线</text>
+  <text x="40" y="1094" class="warn-d">① 默认后台静默：预写页面存储，不打开菜单、不点击；点选只是预写失效时的兜底。</text>
+  <text x="40" y="1112" class="warn-d">② 档位按界面文字现找，不写死语言：中文「深度思考」与英文 Think deeper 同等识别。</text>
+  <text x="40" y="1130" class="warn-d">③ 预写只动模型段：集合键（options/list）排除，主题与语言原样，已是目标不重写。</text>
+  <text x="40" y="1148" class="warn-d">④ 重试必须重建连接并拦下原生事件，只把最终结果交回页面。</text>
+  <text x="40" y="1172" class="note">改动计数只统计真实变化；失败路径一律先按 Esc 收尾，不留菜单挂在页面上。</text>
+  <text x="40" y="1192" class="note">合规：@author EFate / @license MIT / @updateURL + @downloadURL 指向本仓库 raw 地址。</text>
 </svg>
