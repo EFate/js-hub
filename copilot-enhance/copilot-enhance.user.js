@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Copilot 增强助手
 // @namespace    js-hub/copilot-enhance
-// @version      1.0.0
-// @description  解除 Microsoft 365 Copilot 的地区与模型限制，并在页面加载后自动把模型切换到指定档位（默认 GPT Think deeper）——8 个开关、3 组分类，菜单打开设置面板，零依赖
+// @version      1.1.0
+// @description  解除 Microsoft 365 Copilot 的地区与模型限制、按界面语言自动选中目标模型档位（深度思考优先），并为附件上传增加网络抖动重试——11 个开关、4 组分类，菜单打开设置面板，零依赖
 // @author       EFate
 // @license      MIT
 // @match        https://m365.cloud.microsoft/*
@@ -30,9 +30,10 @@
     // L1 配置层 · 版本、存储前缀、功能开关目录、选项定义表（一切开关的唯一来源）
     // ======================================================================
 
-    var VERSION = '1.0.0';
+    var VERSION = '1.1.0';
     var PREFIX = 'cp';               // 存储键前缀：cp.<开关名>
-    var GROUPS = ['解锁', '模型', '通用'];
+    var MARK_ATTR = 'data-cp-retry';
+    var GROUPS = ['解锁', '模型', '网络', '通用'];
 
     // Copilot 的函数级功能开关目录（键名与宿主内部标志一一对应）。
     // 值即原厂默认值：少量 false 项意味着「关掉」正是我们想要的状态。
@@ -144,17 +145,20 @@
 
     var OPT_DEFS = {
         // —— 解锁 ——
-        unlockFeatures:   { group: '解锁', type: 'bool', label: '解锁功能与资格',   tip: '把功能开关表、Copilot 资格与许可全部置为已开通，并补齐内置应用入口', def: true },
+        unlockFeatures:    { group: '解锁', type: 'bool', label: '解锁功能与资格',   tip: '把功能开关表、Copilot 资格与许可全部置为已开通，并补齐内置应用入口', def: true },
         premiumModelTiers: { group: '解锁', type: 'bool', label: '开放 GPT 全档位', tip: '放开 GPT-5.2 / 5.3 / 5.4 在 Premium、Starter、Chat、Reasoning 等各入口的可见性', def: true },
         enableClaudeModels: { group: '解锁', type: 'bool', label: '开放 Claude 模型', tip: '放开 Claude 模型与 Claude 推理档位在网页版与企业版的可见性', def: true },
-        forceUSRegion:    { group: '解锁', type: 'bool', label: '地区识别为美国',   tip: '把身份地区改为 US 并声明位于可用区域，解除区域限制', def: true },
-        extraNavTabs:     { group: '解锁', type: 'bool', label: '补全导航入口',     tip: '导航栏缺失 Chat 与 Cowork 时自动补上（企业租户不改）', def: true },
+        forceUSRegion:     { group: '解锁', type: 'bool', label: '地区识别为美国',   tip: '把身份地区改为 US 并声明位于可用区域，解除区域限制', def: true },
+        extraNavTabs:      { group: '解锁', type: 'bool', label: '补全导航入口',     tip: '导航栏缺失 Chat 与 Cowork 时自动补上（企业租户不改）', def: true },
         // —— 模型 ——
-        autoSelectModel:  { group: '模型', type: 'bool', label: '自动选择模型',     tip: '页面载入后把模型切换器指向下方目标档位，已是目标档位则不动', def: true },
-        deeperThinking:   { group: '模型', type: 'bool', label: '优先 Think deeper', tip: '在目标族里优先选中带「Think deeper」的深层推理子项', def: true },
-        modelTarget:      { group: '模型', type: 'text', label: '目标档位关键字',   tip: '模型菜单里的完整子项文字；留空则使用默认值', def: 'gpt-5.6 sol think deeper' },
+        autoSelectModel:   { group: '模型', type: 'bool', label: '自动选择模型',     tip: '进入对话页后把模型切换器指向目标档位；已是目标档位则不做任何操作', def: true },
+        preferReasoning:   { group: '模型', type: 'bool', label: '优先深度思考',     tip: '在同类模型里优先选「深度思考 / Think deeper」档；关闭则优先「快速响应」', def: true },
+        modelTarget:       { group: '模型', type: 'text', label: '固定模型（可选）', tip: '只在想锁定某个模型时填写，如 GPT-5.6 或 Claude；留空则自动选菜单里最新的可用模型', def: '' },
+        // —— 网络 ——
+        uploadRetry:       { group: '网络', type: 'bool', label: '附件上传自动重试', tip: '上传接口因网络抖动失败（断连 / 429 / 5xx）时自动退避重试，最多 3 次', def: true },
+        uploadFailureWatch: { group: '网络', type: 'bool', label: '上传失败自动再试', tip: '页面出现「上传失败」类提示时自动点击其中的重试按钮，同一提示只点一次', def: true },
         // —— 通用 ——
-        toastOnSwitch:    { group: '通用', type: 'bool', label: '切换结果提示',     tip: '模型切换成功或失败时在页面底部提示一次', def: true }
+        toastOnSwitch:     { group: '通用', type: 'bool', label: '切换结果提示',     tip: '模型切换成功或失败时在页面底部提示一次', def: true }
     };
 
     // ======================================================================
@@ -162,7 +166,7 @@
     // ======================================================================
 
     var OPT = {};
-    var STATE = { patched: null, lastSwitch: '', switchRuns: 0 };
+    var STATE = { patched: null, lastSwitch: '', switchRuns: 0, uploads: { retried: 0, failed: 0, healing: 0 } };
 
     // 单值归一（唯一合法判据）：布尔项非布尔回落默认值，文本项非字符串回落默认值。
     function readOpt(name, v) {
@@ -170,8 +174,7 @@
         if (!d) return undefined;
         if (d.type === 'text') {
             if (typeof v !== 'string') return d.def;
-            var t = v.replace(/\s+/g, ' ').trim();
-            return t || d.def;
+            return v.replace(/\s+/g, ' ').trim();   // 文本项允许空串＝自动
         }
         return (typeof v === 'boolean') ? v : d.def;
     }
@@ -192,7 +195,7 @@
     }
 
     // ======================================================================
-    // L3 识别 / 解析层 · 文本归一、JSON 读取、宿主判定、模型档位推算
+    // L3 识别 / 解析层 · 文本归一、JSON 读取、宿主判定、模型档位识别
     // ======================================================================
 
     var norm = function (s) { return (s || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
@@ -232,29 +235,120 @@
         return false;
     }
 
-    // 目标档位 → 切换器上显示的确认文字：去掉尾部「 deeper」即为外层标签
-    function confirmLabelFor(target) {
-        var t = norm(target);
-        if (!t) return '';
-        return t.replace(/\s+deeper$/, '');
+    // ---- 模型档位识别（界面文字驱动，不依赖任何语言的写死标签）----
+
+    var MODEL_ID_RE = /\b(?:(?:gpt|o[1-9])[-\s]?[\d][\w.\-]*|claude[-\s]?\w+(?:[-\s]?[\d][\w.\-]*)?)\b/i;
+
+    // 模式关键字只认「档位标签」本身，不认说明句。
+    // 事故候选：菜单说明「决定要思考多长时间」含「思考」二字，宽松匹配会把它当档位行点掉。
+    var DEEP_LABEL_RE = /^(自动|auto|深度思考|深度推理|推理|思考|think\s*deeper|deeper|reasoning|think)$/i;
+    var QUICK_LABEL_RE = /^(快速响应|快速|即时|instant|quick|fast)$/i;
+
+    function isAlertText(s) { return /上传失败|失败|错误|重试|不足|额度|upload|failed|error|retry|too large|unsupported|[×✕✖]/.test(s); }
+
+    // 菜单里是否是「模型档位」行：带模型标识（GPT-5.6 / Claude），或整行就是一个模式标签
+    function isModelItem(text) {
+        var t = (text || '');
+        if (!t) return false;
+        if (MODEL_ID_RE.test(t)) return true;
+        var key = norm(t);
+        return DEEP_LABEL_RE.test(key) || QUICK_LABEL_RE.test(key);
     }
 
-    // 目标档位 → 外层标签（dashed 版与按空格切分的首段版各一份）
-    function targetLabels(target) {
-        var normed = norm(target);
-        var confirm = normed.replace(/\s+deeper$/, '');
-        var m = normed.match(/^[a-z0-9]+/);
-        return { normed: normed, confirm: confirm, parent: m ? m[0] : normed };
+    // 从菜单行里取模型标识并归一：GPT-5.6 Sol 深度思考 → gpt-5.6
+    function modelIdOf(text) {
+        var m = (text || '').match(MODEL_ID_RE);
+        if (!m) return '';
+        return norm(m[0]).replace(/\s+/g, '-').replace(/-+/g, '-');
     }
 
-    // 目标档位：开启深层推理取完整子项，否则只取外层标签
+    // 模式分：整行带模式词即算该模式（GPT-5.6 Sol 深度思考 → deep）
+    function modeOf(text) {
+        var t = (text || '');
+        if (/深度思考|深度推理|推理|think\s*deeper|deeper|reasoning/i.test(t)) return 'deep';
+        if (/快速响应|即时|instant|quick|fast/i.test(t)) return 'quick';
+        return 'none';
+    }
+
+    // 目标文字解析：空串 = 自动（取最新模型 + 优先模式）
     function resolveTarget(opt) {
-        var base = confirmLabelFor(opt.modelTarget);
-        return opt.deeperThinking ? norm(opt.modelTarget) : base;
+        return norm(opt && opt.modelTarget ? opt.modelTarget : '');
+    }
+
+    // 在可见菜单行里挑一个目标：
+    // ① 显式关键字命中 ② 最新模型（claude 优先，其次版本号降序）③ 首个模型行
+    function pickTargetItem(texts, opt) {
+        var want = resolveTarget(opt);
+        var preferDeep = !!(opt && opt.preferReasoning);
+        var rows = [];
+        for (var i = 0; i < (texts || []).length; i++) {
+            var t = texts[i];
+            if (typeof t !== 'string' || !t.trim()) continue;
+            if (isAlertText(t) && !isModelItem(t)) continue;
+            if (!isModelItem(t)) continue;
+            rows.push({ idx: i, text: t, key: norm(t), id: modelIdOf(t), mode: modeOf(t) });
+        }
+        if (!rows.length) return -1;
+
+        if (want) {
+            var hits = [];
+            var i2;
+            for (i2 = 0; i2 < rows.length; i2++) if (rows[i2].key === want) hits.push(rows[i2]);
+            if (!hits.length) {
+                for (i2 = 0; i2 < rows.length; i2++) if (rows[i2].key.indexOf(want) === 0) hits.push(rows[i2]);
+            }
+            if (!hits.length) {
+                for (i2 = 0; i2 < rows.length; i2++) if (rows[i2].key.indexOf(want) > -1) hits.push(rows[i2]);
+            }
+            if (!hits.length) return -1;   // 指定了关键字但菜单里没有：不猜
+            // 同一模型有多个档位时（深度思考/快速响应），仍按模式偏好挑
+            var wantMode = preferDeep ? 'deep' : 'quick';
+            for (i2 = 0; i2 < hits.length; i2++) if (hits[i2].mode === wantMode) return hits[i2].idx;
+            return hits[0].idx;
+        }
+
+        // 自动：先按模式过滤（只在与模型无关的行里筛），再按模型取最新
+        var pool = rows.slice();
+        var byMode = pool.filter(function (r) { return preferDeep ? r.mode === 'deep' : r.mode === 'quick'; });
+        if (byMode.length) pool = byMode;
+
+        var latest = null, latestRank = null;
+        for (var k = 0; k < pool.length; k++) {
+            var rank = modelRank(pool[k].id, pool[k].text);
+            if (!latest || compareRank(rank, latestRank) > 0) { latest = pool[k]; latestRank = rank; }
+        }
+        return latest ? latest.idx : rows[0].idx;
+    }
+
+    // 版本号比较用：GPT-5.6 → [5,6]；非法返回 []
+    function modelRank(id, text) {
+        var s = (id || '') + ' ' + (text || '');
+        return s.toLowerCase().split(/[^0-9]+/).filter(function (x) { return x !== ''; }).map(Number);
+    }
+
+    function compareRank(a, b) {
+        if (!b || !b.length) return a && a.length ? 1 : 0;
+        if (!a || !a.length) return -1;
+        var n = Math.max(a.length, b.length);
+        for (var i = 0; i < n; i++) {
+            var x = a[i] === undefined ? 0 : a[i];
+            var y = b[i] === undefined ? 0 : b[i];
+            if (x !== y) return x - y;
+        }
+        return 0;
+    }
+
+    // 切换器是否已显示目标：优先比对模型标识，其次比对完整目标文字
+    function switcherMatches(swText, opt) {
+        var t = swText || '';
+        var want = resolveTarget(opt);
+        if (want) return norm(t).indexOf(want) > -1;
+        if (!t.trim()) return false;
+        return modelIdOf(t) !== '';
     }
 
     // ======================================================================
-    // L4 核心逻辑层 · 纯函数（UMD 导出，测试直接 require 真实代码）
+    // L4 核心逻辑层 · 补丁与切换决策（纯函数，UMD 导出）
     // ======================================================================
 
     // 按选项挑出要写入宿主的功能开关。
@@ -400,12 +494,51 @@
         return 1;
     }
 
+    // 上传接口判定：只要「上传/附件」语义的端点，避免误包对话请求。
+    // 段名必须是独立的 upload/uploads，或 files|attachments + attach|upload 组合。
+    function isUploadUrl(url) {
+        var u = (url || '').toLowerCase();
+        if (!u || u.indexOf('http') !== 0) return false;
+        if (/(^|[\/\-_.])uploads?([\/\-_.?]|$)/.test(u)) return true;
+        if (/\/(attachments?|files?)[\/\-_]?(attach|upload)/.test(u)) return true;
+        if (/attachment/.test(u) && /file/.test(u)) return true;
+        return false;
+    }
+
+    // 该状态码是否值得重试：断连 / 超时 / 429 / 5xx 重试，4xx 业务错误不重试
+    function isTransientStatus(status) {
+        if (status === 0) return true;
+        if (!status) return false;
+        if (status === 408 || status === 429) return true;
+        return status >= 500;
+    }
+
+    function backoffDelay(attempt) {
+        var n = Math.max(1, attempt | 0);
+        return Math.min(4000, 300 * Math.pow(2, n - 1));
+    }
+
+    // 从提示文字里找重试按钮：文案命中 + 不是模型行
+    function pickRetryText(texts) {
+        for (var i = 0; i < (texts || []).length; i++) {
+            var t = texts[i];
+            if (typeof t !== 'string') continue;
+            var s = t.trim();
+            if (!s || s.length > 24) continue;
+            if (isModelItem(s)) continue;
+            if (/重试|再试|重新上传|重新尝试|retry|try again/i.test(s)) return s;
+        }
+        return '';
+    }
+
     // ======================================================================
-    // L5 执行层 · 就地改写宿主 JSON 标签与运行时数据、驱动模型切换
+    // L5 执行层 · 就地改写宿主数据、驱动模型菜单、上传重试
     // ======================================================================
 
     function pageWin() {
-        return (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window;
+        if (typeof unsafeWindow !== 'undefined' && unsafeWindow) return unsafeWindow;
+        if (typeof window !== 'undefined' && window) return window;
+        return typeof globalThis !== 'undefined' ? globalThis : null;
     }
 
     // 上次写回各标签的文本：宿主未重渲染时跳过解析，避免高频重扫反复 JSON.parse 大对象
@@ -464,13 +597,13 @@
 
     // ---- 模型切换 ----
 
-    var SEL_SWITCHER = '#gptModeSwitcher, button[aria-label="Model Selector"]';
-    var SEL_ITEMS = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], button';
+    var SEL_SWITCHER = '#gptModeSwitcher, button[aria-label="Model Selector"], [data-testid="model-selector"]';
+    var SEL_ITEMS = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="button"], button, [tabindex]:not([tabindex="-1"])';
 
     var SWITCHER_TIMEOUT_MS = 15000;
-    var ITEM_TIMEOUT_MS = 6000;
+    var ITEM_TIMEOUT_MS = 5000;
     var CONFIRM_TIMEOUT_MS = 4000;
-    var RUN_ATTEMPTS = 3;
+    var RUN_ATTEMPTS = 2;
 
     var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
 
@@ -482,80 +615,66 @@
         return (doc || document).querySelector(SEL_SWITCHER);
     }
 
-    // 精确匹配优先，避免 "gpt" 命中 "gpt-5.6 sol think deeper"
-    function findItem(label, doc) {
-        var items = [].slice.call((doc || document).querySelectorAll(SEL_ITEMS)).filter(isVisible);
-        var want = norm(label);
-        if (!want) return null;
-        var i;
-        for (i = 0; i < items.length; i++) {
-            if (norm(items[i].textContent) === want) return items[i];
-        }
-        for (i = 0; i < items.length; i++) {
-            if (norm(items[i].textContent).indexOf(want) === 0) return items[i];
-        }
-        return null;
+    // 收集可见菜单行的文字（与元素一一对应，顺序即文档序）
+    function visibleTexts(doc) {
+        var els = [].slice.call((doc || document).querySelectorAll(SEL_ITEMS)).filter(isVisible);
+        var out = [];
+        for (var i = 0; i < els.length; i++) out.push({ el: els[i], text: norm(els[i].textContent) });
+        return out;
     }
 
-    function switcherSays(sw, label) {
-        return !!sw && norm(sw.textContent).indexOf(norm(label)) > -1;
+    function textListOf(rows) {
+        var out = [];
+        for (var i = 0; i < rows.length; i++) out.push(rows[i].text);
+        return out;
     }
+
+    var menuOpen = false;
 
     function isOpen(sw) {
         return !!sw && sw.getAttribute('aria-expanded') === 'true';
     }
 
     function closeMenu(sw) {
-        if (!isOpen(sw)) return Promise.resolve();
+        if (!menuOpen && !isOpen(sw)) return Promise.resolve();
         document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        menuOpen = false;
         return sleep(150);
     }
 
     // 返回 done / already / retry（可安全重试）/ clicked（不要重试）
     async function navigate(opt) {
-        var t = targetLabels(resolveTarget(opt));
-        if (!t.normed || !t.confirm) return 'retry';
-
-        // 宿主菜单有的版本把「gpt-5.6 sol」写成「gpt 5.6 sol」，两种写法都试
-        var candidates = [t.normed];
-        var spaced = t.normed.replace(/-/g, ' ');
-        if (spaced !== t.normed) candidates.push(spaced);
-        var lookup = function () {
-            for (var i = 0; i < candidates.length; i++) {
-                var hit = findItem(candidates[i]);
-                if (hit) return hit;
-            }
-            return null;
-        };
-
         var sw = await waitFor(function () { return findSwitcher(document); }, SWITCHER_TIMEOUT_MS);
         if (!sw) return 'retry';
-        if (switcherSays(sw, t.confirm)) return 'already';
+        if (switcherMatches(sw.textContent, opt)) return 'already';
 
         await closeMenu(sw);
         sw.click();
 
-        // 目标已在顶层菜单里就不展开父项，少点一次少一次失败机会
-        if (!lookup()) {
-            var parent = await waitFor(function () { return findItem(t.parent); }, 2000);
-            if (!parent) {
-                await closeMenu(sw);
-                await sleep(300);
-                sw.click();
-                parent = await waitFor(function () { return findItem(t.parent); }, ITEM_TIMEOUT_MS);
-            }
-            if (!parent) return 'retry';
-            parent.click();
+        // 逐轮重新扫描菜单：SPA 渲染慢，等它把目标行渲染出来再点
+        var tried = {};
+        for (var round = 0; round < 2; round++) {
+            var rows = await waitFor(function () {
+                var r = visibleTexts(document);
+                return pickTargetItem(textListOf(r), opt) > -1 ? r : null;
+            }, ITEM_TIMEOUT_MS);
+            if (!rows) break;
+            var idx = pickTargetItem(textListOf(rows), opt);
+            if (idx < 0) break;
+            var key = rows[idx].text;
+            if (tried[key]) break;                 // 同一行点过没生效：不再重复点
+            tried[key] = 1;
+            menuOpen = true;
+            rows[idx].el.click();
+            var ok = await waitFor(function () {
+                return switcherMatches(findSwitcher(document) ? findSwitcher(document).textContent : '', opt) ? true : null;
+            }, CONFIRM_TIMEOUT_MS);
+            if (ok) { menuOpen = false; return 'done'; }
         }
 
-        var item = await waitFor(lookup, ITEM_TIMEOUT_MS);
-        if (!item) return 'retry';
-        item.click();
-
-        var ok = await waitFor(function () {
-            return switcherSays(findSwitcher(document), t.confirm) ? true : null;
-        }, CONFIRM_TIMEOUT_MS);
-        return ok ? 'done' : 'clicked';
+        // 没点中：按 Esc 收尾，绝不留菜单挂在页面上（旧版失败即放弃，菜单会一直浮着）
+        await closeMenu(sw);
+        return 'retry';
     }
 
     async function autoSelect(opt) {
@@ -570,15 +689,220 @@
             if (r !== 'retry') {
                 STATE.lastSwitch = r;
                 if (opt.toastOnSwitch && r !== 'already') {
-                    toast(r === 'done' ? '已切换到 ' + resolveTarget(opt) : '模型切换已提交，请确认切换器显示', r === 'done' ? 'ok' : 'warn');
+                    toast(r === 'done' ? '模型已切换' : '模型切换已提交，请确认切换器显示', r === 'done' ? 'ok' : 'warn');
                 }
                 return r;
             }
             if (attempt < RUN_ATTEMPTS) await sleep(500);
         }
         STATE.lastSwitch = 'failed';
-        if (opt.toastOnSwitch) toast('模型自动切换未成功，可稍后重试', 'err');
+        if (opt.toastOnSwitch) toast('模型自动切换未成功，可在面板点「重新选模型」', 'err');
         return 'failed';
+    }
+
+    // ---- 上传网络增强 ----
+
+    // 包一层 XHR.send：上传请求遇断连/超时/429/5xx 自动退避重试。
+    // 关键：宿主自己的 load/error 监听器是先注册的，原生事件会先到它们手里——
+    // 所以必须在 send 期间拦下原生事件，由我们决定何时把「最终结果」重放出去，
+    // 否则重试的中间响应会被应用当成一次真实上传结果（可能直接报失败）。
+    var MAX_RETRY = 3;
+
+    function installUploadRetry() {
+        var w = pageWin();
+        var X = w && w.XMLHttpRequest;
+        if (!X || !X.prototype || X.prototype.__cpWrapped) return false;
+
+        var origSend = X.prototype.send;
+        X.prototype.__cpWrapped = true;
+        X.prototype.send = function (body) {
+            var xhr = this;
+            // 未 boot 时（测试直调、或脚本被晚注入）OPT 还没装载：此时按默认值处理
+            if (OPT.uploadRetry === false || !isUploadUrl(xhr.__cpUrl)) {
+                return origSend.apply(xhr, arguments);
+            }
+
+            var args = arguments;
+            var attempt = 0;
+            var settled = false;      // 已对调用方交付最终结果
+            var delivered = false;    // 最终结果只重放一次
+            var gated = false;        // 正在拦截原生事件
+            var origMethod = xhr.__cpMethod || 'POST';
+            var origUrl = xhr.__cpUrl;
+            var origHeaders = (xhr.__cpHeaders || []).slice();
+            var origWithCreds = !!xhr.__cpWithCreds;
+            var gateTimer = null;
+
+            // 原生事件在捕获阶段被截停，不冒泡到应用自己的监听器
+            var blockers = {};
+            function gate(on) {
+                if (on === gated) return;
+                gated = on;
+                ['load', 'error', 'abort', 'timeout', 'progress', 'loadend', 'readystatechange'].forEach(function (t) {
+                    if (on) {
+                        if (!blockers[t]) {
+                            blockers[t] = function (ev) {
+                                if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+                            };
+                        }
+                        xhr.addEventListener(t, blockers[t], true);
+                    } else if (blockers[t]) {
+                        xhr.removeEventListener(t, blockers[t], true);
+                    }
+                });
+            }
+
+            // 重放只给一次：先解除闸门，再派发一次最终结果；
+            // 同时打上已重放的标记，避免后续任何路径重复通知调用方。
+            function deliver(type) {
+                if (delivered) return;
+                delivered = true;
+                gate(false);
+                try { xhr.dispatchEvent(new w.Event(type)); } catch (e) { /* 派发失败不影响上传本身 */ }
+            }
+
+            function onSettle(type) {
+                if (settled) return;
+                settled = true;
+                if (gateTimer) { clearTimeout(gateTimer); gateTimer = null; }
+                detachAll();
+                deliver(type);
+            }
+
+            // 自己的监听也在捕获阶段：必须早于闸门注册，才能在拦截之前拿到结果
+            function detachAll() {
+                xhr.removeEventListener('load', onLoad, true);
+                xhr.removeEventListener('error', onError, true);
+                xhr.removeEventListener('timeout', onTimeout, true);
+            }
+
+            function retryOr(type) {
+                if (settled) return;
+                if (attempt >= MAX_RETRY) {
+                    STATE.uploads.failed++;
+                    return onSettle(type);
+                }
+                attempt++;
+                STATE.uploads.retried++;
+                var wait = backoffDelay(attempt);
+                setTimeout(function () {
+                    if (settled) return;
+                    // 同一个 xhr 不能再 send 第二次（readyState 已非 OPENED，会抛 InvalidStateError），
+                    // 必须重建连接再发：按原方法/地址/头重新 open 一遍。
+                    try {
+                        xhr.open(origMethod, origUrl, true);
+                        applyHeaders(xhr, origHeaders);
+                        if (origWithCreds) xhr.withCredentials = true;
+                    } catch (e) {
+                        STATE.uploads.failed++;
+                        return onSettle('error');
+                    }
+                    arm();
+                }, wait);
+            }
+
+            function onLoad() {
+                if (settled) return;
+                if (isTransientStatus(xhr.status) && attempt < MAX_RETRY) return retryOr('load');
+                onSettle('load');
+            }
+            function onError() {
+                if (settled) return;
+                retryOr('error');
+            }
+            function onTimeout() {
+                if (settled) return;
+                retryOr('timeout');
+            }
+
+            function arm() {
+                // 顺序至关重要：捕获阶段按注册顺序触发，
+                // 必须先撤闸门 → 注册自己的监听 → 再上闸门，
+                // 否则重试时自己的监听会排在闸门之后，被自己拦掉。
+                gate(false);
+                detachAll();
+                xhr.addEventListener('load', onLoad, true);
+                xhr.addEventListener('error', onError, true);
+                xhr.addEventListener('timeout', onTimeout, true);
+                gate(true);
+                try {
+                    origSend.apply(xhr, args);
+                } catch (e) {
+                    retryOr('error');
+                }
+            }
+
+            arm();
+        };
+        return true;
+    }
+
+    // 记录请求 URL（open 是 send 之前唯一能看到地址的地方）
+    function installUrlCapture() {
+        var w = pageWin();
+        var X = w && w.XMLHttpRequest;
+        if (!X || !X.prototype || X.prototype.__cpUrlHooked) return false;
+        var origOpen = X.prototype.open;
+        var origSetHeader = X.prototype.setRequestHeader;
+        X.prototype.__cpUrlHooked = true;
+        X.prototype.open = function (method, url) {
+            try {
+                this.__cpMethod = String(method || 'POST');
+                this.__cpUrl = String(url || '');
+                this.__cpHeaders = [];
+                this.__cpWithCreds = false;
+            } catch (e) { /* 只读属性时跳过 */ }
+            return origOpen.apply(this, arguments);
+        };
+        // 头也记下来：重试要重建连接，缺了 Content-Type 服务端会拒收
+        if (typeof origSetHeader === 'function') {
+            X.prototype.setRequestHeader = function (k, v) {
+                try {
+                    if (this.__cpHeaders) this.__cpHeaders.push([String(k), String(v)]);
+                } catch (e) { /* 忽略 */ }
+                return origSetHeader.apply(this, arguments);
+            };
+        }
+        return true;
+    }
+
+    function applyHeaders(xhr, list) {
+        for (var i = 0; i < (list || []).length; i++) {
+            try { xhr.setRequestHeader(list[i][0], list[i][1]); } catch (e) { /* 头不可设置时跳过 */ }
+        }
+    }
+
+    // 上传失败提示里的重试按钮：页面自己给了出口就替用户点一下（同一提示只点一次）
+    var FAIL_RE = /上传失败|上传未完成|upload failed|failed to upload|couldn't upload|上传出错/;
+
+    function healUploadFailure() {
+        var hits = [];
+        var all = document.querySelectorAll('div,span,p,li,section,[role="alert"],[role="status"]');
+        for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (!isVisible(el)) continue;
+            var t = norm(el.textContent);
+            if (!t || t.length > 60) continue;          // 只看短提示块
+            if (!FAIL_RE.test(t)) continue;
+            if (el.querySelector('button,[role="button"]')) hits.push(el);
+        }
+        var n = 0;
+        for (var j = 0; j < hits.length && j < 3; j++) {
+            var box = hits[j];
+            if (box.getAttribute(MARK_ATTR) === '1') continue;   // 同一提示只处理一次
+            var btns = box.querySelectorAll('button,[role="button"]');
+            for (var k = 0; k < btns.length; k++) {
+                var bt = btns[k];
+                if (!isVisible(bt)) continue;
+                if (!/重试|再试|重新上传|retry|try again/i.test(norm(bt.textContent))) continue;
+                box.setAttribute(MARK_ATTR, '1');
+                bt.click();
+                n++;
+                break;
+            }
+        }
+        if (n) STATE.uploads.healing += n;
+        return n;
     }
 
     // ======================================================================
@@ -681,8 +1005,9 @@
         }, 3200);
     }
 
+    // 注入判定与自动选模型结论必须明示——用户不该对着一个没反应的按钮猜原因
     function statusText() {
-        var t = '';
+        var t;
         if (STATE.patched) {
             var d = STATE.patched.detail;
             t = '本页补丁累计改动 <b>' + STATE.patched.total + '</b> 处（开关表 ' + d.flags +
@@ -690,11 +1015,20 @@
         } else {
             t = '本页尚未执行补丁';
         }
-        if (!OPT.autoSelectModel) return t + '；自动选模型已关闭';
-        if (!shouldAutoSelect(location.href)) return t + '；本页不是对话页，不自动选模型';
-        var last = STATE.lastSwitch;
-        var map = { done: '已切换', already: '本已是目标档位', clicked: '已提交切换', failed: '切换未成功', off: '已关闭', skip: '本页跳过' };
-        return t + '；自动选模型：' + (map[last] || '尚未执行');
+        if (!OPT.autoSelectModel) {
+            t += '；自动选模型已关闭';
+        } else if (!shouldAutoSelect(location.href)) {
+            t += '；本页不是对话页，不自动选模型';
+        } else {
+            var last = STATE.lastSwitch;
+            var map = { done: '已切换', already: '本已是目标档位', clicked: '已提交切换', failed: '切换未成功', off: '已关闭', skip: '本页跳过' };
+            t += '；自动选模型：' + (map[last] || '尚未执行');
+        }
+        if (OPT.uploadRetry || OPT.uploadFailureWatch) {
+            t += '<br>上传增强：已重试 <b>' + STATE.uploads.retried + '</b> 次 / 自动再试 <b>' +
+                STATE.uploads.healing + '</b> 次 / 最终失败 <b>' + STATE.uploads.failed + '</b> 次';
+        }
+        return t;
     }
 
     function makeSettingRow(name) {
@@ -718,6 +1052,7 @@
             inp.className = 'cp-input';
             inp.type = 'text';
             inp.setAttribute('data-opt', name);
+            inp.setAttribute('placeholder', '自动（留空）');
             inp.value = OPT[name];
             inp.setAttribute('aria-label', d.label);
             row.appendChild(inp);
@@ -809,7 +1144,7 @@
         var retry = document.createElement('button');
         retry.className = 'cp-btn cp-primary';
         retry.id = 'cp-retry-model';
-        retry.textContent = '重新选择模型';
+        retry.textContent = '重新选模型';
         foot.appendChild(reapply);
         foot.appendChild(retry);
 
@@ -942,7 +1277,8 @@
                     _routeTimer = setTimeout(function () {
                         _routeTimer = null;
                         patchConfig(OPT);
-                    }, 120);
+                        startModel();      // 换路由后宿主会重建切换器：重新对齐一次
+                    }, 400);
                 }
             });
         } catch (e) { /* 宿主已定义不可配置属性时放弃钩子，靠 DOM 复检兜底 */ }
@@ -957,6 +1293,7 @@
             _debTimer = setTimeout(function () {
                 _debTimer = null;
                 patchConfig(OPT);   // 宿主按路由重挂标签时补上；文本未变则被 LAST_TEXT 短路
+                if (OPT.uploadFailureWatch) healUploadFailure();
                 if (uiBuilt) refreshStatus();
             }, 400);
         });
@@ -983,6 +1320,8 @@
         patchConfig(OPT);
         hookRoute();
         watch();
+        installUrlCapture();
+        installUploadRetry();
         startModel();
     }
 
@@ -1002,15 +1341,20 @@
     // ======================================================================
 
     var API = {
-        VERSION: VERSION, PREFIX: PREFIX, GROUPS: GROUPS, OPT_DEFS: OPT_DEFS,
-        FLAG_TABLE: FLAG_TABLE, UX_FEATURES: UX_FEATURES, NAV_TABS: NAV_TABS, STATE: STATE,
+        VERSION: VERSION, PREFIX: PREFIX, GROUPS: GROUPS, OPT_DEFS: OPT_DEFS, STATE: STATE,
+        FLAG_TABLE: FLAG_TABLE, UX_FEATURES: UX_FEATURES, NAV_TABS: NAV_TABS,
         readOpt: readOpt, saveOpt: saveOpt, loadOpts: loadOpts,
         norm: norm, readJson: readJson, hostKind: hostKind, shouldAutoSelect: shouldAutoSelect,
-        confirmLabelFor: confirmLabelFor, targetLabels: targetLabels, resolveTarget: resolveTarget,
+        MODEL_ID_RE: MODEL_ID_RE, isModelItem: isModelItem, modelIdOf: modelIdOf, modeOf: modeOf,
+        resolveTarget: resolveTarget, pickTargetItem: pickTargetItem, modelRank: modelRank,
+        compareRank: compareRank, switcherMatches: switcherMatches,
         buildFlags: buildFlags, mergeFlags: mergeFlags, patchEligibility: patchEligibility,
         patchEntitlements: patchEntitlements, patchStore: patchStore, patchIdentity: patchIdentity,
         ensureNavTabs: ensureNavTabs, patchJsonTag: patchJsonTag, patchConfig: patchConfig,
-        findSwitcher: findSwitcher, findItem: findItem, switcherSays: switcherSays,
+        isUploadUrl: isUploadUrl, isTransientStatus: isTransientStatus, backoffDelay: backoffDelay,
+        pickRetryText: pickRetryText, installUploadRetry: installUploadRetry,
+        healUploadFailure: healUploadFailure,
+        visibleTexts: visibleTexts, findSwitcher: findSwitcher,
         navigate: navigate, autoSelect: autoSelect, toast: toast, statusText: statusText,
         openPanel: openPanel, closePanel: closePanel, buildUI: buildUI,
         __setOpt: function (name, value) { OPT[name] = value; },
