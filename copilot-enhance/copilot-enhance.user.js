@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Copilot 增强助手
 // @namespace    js-hub/copilot-enhance
-// @version      1.2.2
+// @version      1.2.3
 // @description  按真实页面文字自动选择 Copilot 深度思考模型（后台预写优先），并为附件上传增加网络抖动重试与失败自愈——7 个开关、3 组分类，菜单打开设置面板，零依赖
 // @author       EFate
 // @license      MIT
@@ -30,7 +30,7 @@
     // L1 配置层 · 版本、存储前缀、功能开关目录、选项定义表（一切开关的唯一来源）
     // ======================================================================
 
-    var VERSION = '1.2.2';
+    var VERSION = '1.2.3';
     var PREFIX = 'cp';               // 存储键前缀：cp.<开关名>
     var MARK_ATTR = 'data-cp-retry';
     var GROUPS = ['模型', '网络', '通用'];
@@ -76,6 +76,14 @@
     function loadOpts() {
         for (var name in OPT_DEFS) {
             OPT[name] = readOpt(name, GM_getValue(PREFIX + '.' + name));
+        }
+        return OPT;
+    }
+
+    // 管理器存储异常时用默认值补齐，保证模型逻辑仍然能启动
+    function ensureOpts() {
+        for (var name in OPT_DEFS) {
+            if (!(name in OPT)) OPT[name] = readOpt(name, undefined);
         }
         return OPT;
     }
@@ -576,14 +584,16 @@
         if (!w || !w.Storage || !w.Storage.prototype || w.Storage.prototype.__cpLearn) return false;
         var proto = w.Storage.prototype;
         var origSet = proto.setItem;
-        proto.__cpLearn = true;
-        proto.setItem = function (key, value) {
-            var r = origSet.apply(this, arguments);
-            try {
-                if (looksLikeModelValue(value)) rememberKey(String(key));
-            } catch (e) { /* 学习失败不影响原调用 */ }
-            return r;
-        };
+        try {
+            proto.setItem = function (key, value) {
+                var r = origSet.apply(this, arguments);
+                try {
+                    if (looksLikeModelValue(value)) rememberKey(String(key));
+                } catch (e) { /* 学习失败不影响原调用 */ }
+                return r;
+            };
+            proto.__cpLearn = true;
+        } catch (e) { return false; }
         return true;
     }
 
@@ -1187,22 +1197,28 @@
         applyModel(OPT);
     }
 
+    // 安装类增强可能被脚本管理器或页面冻结原型；单项失败绝不能阻断模型切换。
+    function tryInstall(fn) {
+        try { return fn(); } catch (e) { return false; }
+    }
+
     function start() {
-        bindPanelEvents();
-        hookRoute();
-        watch();
-        installUrlCapture();
-        installUploadRetry();
-        installModelLearn();       // 先装钩子：任何一次模型落盘都能被记录
-        startModel();
+        tryInstall(bindPanelEvents);
+        tryInstall(hookRoute);
+        tryInstall(watch);
+        tryInstall(installUrlCapture);
+        tryInstall(installUploadRetry);
+        tryInstall(installModelLearn);   // 任何一次模型落盘都能被记录；失败不影响点选
+        startModel();                    // 必须最后无条件执行
     }
 
     function boot() {
-        loadOpts();
-        loadModelKeys();
+        try { loadOpts(); } catch (e) { /* 管理器读取异常时继续用默认值 */ }
+        ensureOpts();
+        try { loadModelKeys(); } catch (e) { /* 自学习清单读取失败不影响启动 */ }
         // 存储预写必须尽早：DOMContentLoaded 之前宿主还没读到偏好
-        preseedModels(OPT);
-        registerMenu();
+        try { preseedModels(OPT); } catch (e) { /* 预写失败仍可点选 */ }
+        try { registerMenu(); } catch (e) { /* 菜单注册失败不影响模型逻辑 */ }
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', start);
         } else {
@@ -1216,7 +1232,7 @@
 
     var API = {
         VERSION: VERSION, PREFIX: PREFIX, GROUPS: GROUPS, OPT_DEFS: OPT_DEFS, STATE: STATE,
-        readOpt: readOpt, saveOpt: saveOpt, loadOpts: loadOpts,
+        readOpt: readOpt, saveOpt: saveOpt, loadOpts: loadOpts, ensureOpts: ensureOpts,
         norm: norm, hostKind: hostKind, shouldAutoSelect: shouldAutoSelect,
         MODEL_ID_RE: MODEL_ID_RE, isModelItem: isModelItem, modelIdOf: modelIdOf, modeOf: modeOf,
         resolveTarget: resolveTarget, pickTargetItem: pickTargetItem, modelRank: modelRank,
