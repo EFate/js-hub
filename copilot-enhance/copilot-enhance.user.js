@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Copilot 增强助手
 // @namespace    js-hub/copilot-enhance
-// @version      1.2.0
+// @version      1.2.1
 // @description  解除 Microsoft 365 Copilot 的地区与模型限制、按界面语言自动选中目标模型档位（深度思考优先），并为附件上传增加网络抖动重试——11 个开关、4 组分类，菜单打开设置面板，零依赖
 // @author       EFate
 // @license      MIT
@@ -30,7 +30,7 @@
     // L1 配置层 · 版本、存储前缀、功能开关目录、选项定义表（一切开关的唯一来源）
     // ======================================================================
 
-    var VERSION = '1.2.0';
+    var VERSION = '1.2.1';
     var PREFIX = 'cp';               // 存储键前缀：cp.<开关名>
     var MARK_ATTR = 'data-cp-retry';
     var GROUPS = ['解锁', '模型', '网络', '通用'];

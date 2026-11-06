@@ -22,7 +22,7 @@
     </marker>
   </defs>
 
-  <text x="24" y="26" class="h1">copilot-enhance v1.2.0 · Copilot 增强助手 · 七层架构</text>
+  <text x="24" y="26" class="h1">copilot-enhance v1.2.1 · Copilot 增强助手 · 七层架构</text>
   <text x="24" y="45" class="h2">解锁 + 后台静默设模型 + 上传重试 · 零依赖 · 零注入 · 12 开关 / 4 组</text>
 
   <!-- L1 -->
