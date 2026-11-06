@@ -1,5 +1,21 @@
 # 更新日志
 
+## v1.2.4（2026-11-06）
+
+- **移除自动切换模型**：不再打开模型菜单、不写模型偏好、不尝试切换到「深度思考」，避免模型档位触发地区限制。
+- **恢复地区解锁**：重新加入地区改写，但改为多层实现：`JSON.parse` 前置钩子、`identity` / `userEntitlements` / `m365ChatFeatureSettings` 标签、`application/json` 脚本、localStorage / sessionStorage，以及可识别的运行时水合对象。
+- **地区字段白名单**：只改资格、地区、许可和国家字段；不碰账号、语言、主题等无关数据。
+- **上传增强保留**：上传接口重试、失败提示自愈、事件门控和 OneDrive / SharePoint / Graph 端点识别继续有效。
+- **服务端限制说明**：客户端改写不能改变真实网络出口；如果微软按 IP 直接拒绝，需配合可用地区网络线路。
+
+### 测试
+
+- `node --check` 语法零错误。
+- smoke + e2e（jsdom）：**74** 断言全绿。
+- 真实 copilot.com HTML 启动测试：**12** 断言全绿。
+- 变异反证：**7** 项全部被捕获。
+- 存储 API 阻断专项：地区解锁仍能工作。
+- 架构图：`architecture-diagram-svg/copilot-enhance-architecture.svg`（v1.2.4，check_svg 无文字溢出）。
 ## v1.2.3（2026-11-06）
 
 - **修复自动切换被增强安装拖死**：部分脚本管理器禁止改写 `Storage.prototype.setItem` 或 `XMLHttpRequest.prototype`。旧版在启动时直接安装这些钩子，一旦抛错，后续模型切换不会执行。现在每个安装项独立 `try/catch`，模型切换最后无条件启动。

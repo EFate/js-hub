@@ -1,136 +1,38 @@
-<svg viewBox="0 0 680 1060" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <style>
-      .layer { fill: none; stroke: #e2e8f0; stroke-width: 1.2; stroke-dasharray: 4 3; }
-      .layer-title { font-family: sans-serif; font-size: 13px; font-weight: 600; fill: #64748b; }
-      .node { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
-      .nt { font-family: sans-serif; font-size: 12.5px; font-weight: 600; fill: #1e293b; }
-      .nd { font-family: sans-serif; font-size: 10.5px; fill: #64748b; }
-      .arrow { stroke: #94a3b8; stroke-width: 1.3; fill: none; }
-      .band { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
-      .band-t { font-family: sans-serif; font-size: 12.5px; font-weight: 700; fill: #047857; }
-      .band-d { font-family: sans-serif; font-size: 10.5px; fill: #10b981; }
-      .warn { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
-      .warn-t { font-family: sans-serif; font-size: 12.5px; font-weight: 600; fill: #92400e; }
-      .warn-d { font-family: sans-serif; font-size: 10.5px; fill: #b45309; }
-      .h1 { font-family: sans-serif; font-size: 15px; font-weight: 700; fill: #0f172a; }
-      .h2 { font-family: sans-serif; font-size: 11.5px; fill: #64748b; }
-      .note { font-family: sans-serif; font-size: 11px; fill: #475569; }
-    </style>
-    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
-    </marker>
-  </defs>
-
-  <text x="24" y="26" class="h1">copilot-enhance v1.2.3 · Copilot 增强助手 · 七层架构</text>
-  <text x="24" y="45" class="h2">只保留 copilot.com 实测存在的模型切换与文件上传 · 零依赖 · 零注入 · 7 开关 / 3 组</text>
-
-  <!-- L1 -->
-  <rect x="24" y="60" width="632" height="104" rx="12" class="layer"/>
-  <text x="40" y="82" class="layer-title">L1 配置层 · Meta、站点范围与 7 个真实开关</text>
-  <rect x="40" y="94" width="186" height="54" rx="8" class="node"/>
-  <text x="133" y="115" class="nt" text-anchor="middle">UserScript Meta</text>
-  <text x="133" y="133" class="nd" text-anchor="middle">name/version/author/license</text>
-  <rect x="238" y="94" width="186" height="54" rx="8" class="band"/>
-  <text x="331" y="115" class="band-t" text-anchor="middle">OPT_DEFS 7 项</text>
-  <text x="331" y="133" class="band-d" text-anchor="middle">模型4 / 网络2 / 通用1</text>
-  <rect x="436" y="94" width="204" height="54" rx="8" class="node"/>
-  <text x="538" y="115" class="nt" text-anchor="middle">站点与入口</text>
-  <text x="538" y="133" class="nd" text-anchor="middle">copilot.com · 管理器菜单</text>
-  <line x1="340" y1="164" x2="340" y2="184" class="arrow" marker-end="url(#ar)"/>
-
-  <!-- L2 -->
-  <rect x="24" y="188" width="632" height="92" rx="12" class="layer"/>
-  <text x="40" y="210" class="layer-title">L2 数据结构层 · 单一数据源</text>
-  <rect x="40" y="220" width="196" height="44" rx="8" class="band"/>
-  <text x="138" y="239" class="band-t" text-anchor="middle">OPT 设置对象</text>
-  <text x="138" y="255" class="band-d" text-anchor="middle">loadOpts / saveOpt</text>
-  <rect x="248" y="220" width="196" height="44" rx="8" class="node"/>
-  <text x="346" y="239" class="nt" text-anchor="middle">STATE 运行状态</text>
-  <text x="346" y="255" class="nd" text-anchor="middle">lastSwitch · uploads · keys</text>
-  <rect x="456" y="220" width="184" height="44" rx="8" class="node"/>
-  <text x="548" y="239" class="nt" text-anchor="middle">本地键前缀</text>
-  <text x="548" y="255" class="nd" text-anchor="middle">cp.* / modelKeys</text>
-  <line x1="340" y1="280" x2="340" y2="300" class="arrow" marker-end="url(#ar)"/>
-
-  <!-- L3 -->
-  <rect x="24" y="304" width="632" height="112" rx="12" class="layer"/>
-  <text x="40" y="326" class="layer-title">L3 识别层 · 真实页面文字与存储值</text>
-  <rect x="40" y="336" width="196" height="62" rx="8" class="band"/>
-  <text x="138" y="356" class="band-t" text-anchor="middle">菜单行识别</text>
-  <text x="138" y="374" class="band-d" text-anchor="middle">标题前缀 + 说明拼接</text>
-  <text x="138" y="389" class="band-d" text-anchor="middle">排除「决定要思考」</text>
-  <rect x="248" y="336" width="196" height="62" rx="8" class="node"/>
-  <text x="346" y="356" class="nt" text-anchor="middle">模式与模型标识</text>
-  <text x="346" y="374" class="nd" text-anchor="middle">deep / quick / GPT-5.6</text>
-  <text x="346" y="389" class="nd" text-anchor="middle">中英文界面通用</text>
-  <rect x="456" y="336" width="184" height="62" rx="8" class="node"/>
-  <text x="548" y="356" class="nt" text-anchor="middle">存储值识别</text>
-  <text x="548" y="374" class="nd" text-anchor="middle">纯模型 / JSON / 枚举</text>
-  <text x="548" y="389" class="nd" text-anchor="middle">排除主题与语言键</text>
-  <line x1="340" y1="416" x2="340" y2="436" class="arrow" marker-end="url(#ar)"/>
-
-  <!-- L4 -->
-  <rect x="24" y="440" width="632" height="112" rx="12" class="layer"/>
-  <text x="40" y="462" class="layer-title">L4 核心决策层 · 纯函数，可被测试直接 require</text>
-  <rect x="40" y="472" width="196" height="62" rx="8" class="band"/>
-  <text x="138" y="492" class="band-t" text-anchor="middle">目标选择</text>
-  <text x="138" y="510" class="band-d" text-anchor="middle">pickTargetItem</text>
-  <text x="138" y="525" class="band-d" text-anchor="middle">模式偏好 + 版本排序</text>
-  <rect x="248" y="472" width="196" height="62" rx="8" class="node"/>
-  <text x="346" y="492" class="nt" text-anchor="middle">成功校验</text>
-  <text x="346" y="510" class="nd" text-anchor="middle">switcherMatches</text>
-  <text x="346" y="525" class="nd" text-anchor="middle">纯「深度思考」也算命中</text>
-  <rect x="456" y="472" width="184" height="62" rx="8" class="node"/>
-  <text x="548" y="492" class="nt" text-anchor="middle">上传判据</text>
-  <text x="548" y="510" class="nd" text-anchor="middle">isUploadUrl</text>
-  <text x="548" y="525" class="nd" text-anchor="middle">transient / backoff</text>
-  <line x1="340" y1="552" x2="340" y2="572" class="arrow" marker-end="url(#ar)"/>
-
-  <!-- L5 -->
-  <rect x="24" y="576" width="632" height="112" rx="12" class="layer"/>
-  <text x="40" y="598" class="layer-title">L5 执行层 · 后台预写优先，菜单点选仅兜底</text>
-  <rect x="40" y="608" width="196" height="62" rx="8" class="band"/>
-  <text x="138" y="628" class="band-t" text-anchor="middle">存储预写与自学习</text>
-  <text x="138" y="646" class="band-d" text-anchor="middle">Storage 写入钩子</text>
-  <text x="138" y="661" class="band-d" text-anchor="middle">新页面读取前先写入</text>
-  <rect x="248" y="608" width="196" height="62" rx="8" class="node"/>
-  <text x="346" y="628" class="nt" text-anchor="middle">菜单点选兜底</text>
-  <text x="346" y="646" class="nd" text-anchor="middle">定位 → 点击 → 校验</text>
-  <text x="346" y="661" class="nd" text-anchor="middle">失败必按 Esc 收尾</text>
-  <rect x="456" y="608" width="184" height="62" rx="8" class="node"/>
-  <text x="548" y="628" class="nt" text-anchor="middle">上传重试</text>
-  <text x="548" y="646" class="nd" text-anchor="middle">重建连接 + 事件门控</text>
-  <text x="548" y="661" class="nd" text-anchor="middle">失败提示自动再试</text>
-  <line x1="340" y1="688" x2="340" y2="708" class="arrow" marker-end="url(#ar)"/>
-
-  <!-- L6 -->
-  <rect x="24" y="712" width="632" height="92" rx="12" class="layer"/>
-  <text x="40" y="734" class="layer-title">L6 UI 层 · 懒挂载面板，不打扰页面</text>
-  <rect x="40" y="744" width="286" height="44" rx="8" class="node"/>
-  <text x="183" y="763" class="nt" text-anchor="middle">三组设置页</text>
-  <text x="183" y="779" class="nd" text-anchor="middle">模型 / 网络 / 通用</text>
-  <rect x="338" y="744" width="302" height="44" rx="8" class="band"/>
-  <text x="489" y="763" class="band-t" text-anchor="middle">状态与动作</text>
-  <text x="489" y="779" class="band-d" text-anchor="middle">静默状态 · 上传计数 · 重选模型</text>
-  <line x1="340" y1="804" x2="340" y2="824" class="arrow" marker-end="url(#ar)"/>
-
-  <!-- L7 -->
-  <rect x="24" y="828" width="632" height="92" rx="12" class="layer"/>
-  <text x="40" y="850" class="layer-title">L7 Watcher 层 · 唯一监听者</text>
-  <rect x="40" y="860" width="286" height="44" rx="8" class="node"/>
-  <text x="183" y="879" class="nt" text-anchor="middle">waitFor + MutationObserver</text>
-  <text x="183" y="895" class="nd" text-anchor="middle">等切换器与菜单就绪，不轮询</text>
-  <rect x="338" y="860" width="302" height="44" rx="8" class="node"/>
-  <text x="489" y="879" class="nt" text-anchor="middle">SPA 路由复检</text>
-  <text x="489" y="895" class="nd" text-anchor="middle">换路由后重新对齐模型</text>
-
-  <!-- Notes -->
-  <rect x="24" y="936" width="632" height="88" rx="12" class="warn"/>
-  <text x="40" y="958" class="warn-t">v1.2.3 实测与删除依据</text>
-  <text x="40" y="980" class="warn-d">① 真实菜单行是「深度思考 + 说明」拼接；切换器成功后只显示「深度思考」。</text>
-  <text x="40" y="998" class="warn-d">② 实测上传测试文本成功：从「即将完成上传」变为正式附件。</text>
-  <text x="40" y="1016" class="warn-d">③ 三个旧 JSON 标签与水合数据在 copilot.com 均不存在，相关解锁层已删除。</text>
-  <text x="40" y="1034" class="note">实现入口：preseedModels / installUploadRetry / hookRoute</text>
-  <text x="40" y="1048" class="note">启动隔离：任一增强安装失败，模型切换仍无条件执行</text>
+<svg viewBox="0 0 680 1000" xmlns="http://www.w3.org/2000/svg">
+<defs><style>.layer{fill:none;stroke:#e2e8f0;stroke-width:1.2;stroke-dasharray:4 3}.lt{font-family:sans-serif;font-size:13px;font-weight:600;fill:#64748b}.n{fill:#fff;stroke:#e2e8f0;stroke-width:1.5}.b{fill:#ecfdf5;stroke:#10b981;stroke-width:1.5}.t{font-family:sans-serif;font-size:12.5px;font-weight:600;fill:#1e293b}.d{font-family:sans-serif;font-size:10.5px;fill:#64748b}.bt{font-family:sans-serif;font-size:12.5px;font-weight:700;fill:#047857}.bd{font-family:sans-serif;font-size:10.5px;fill:#10b981}.h1{font-family:sans-serif;font-size:15px;font-weight:700;fill:#0f172a}.h2{font-family:sans-serif;font-size:11.5px;fill:#64748b}.w{fill:#fffbeb;stroke:#f59e0b;stroke-width:1.5}.wt{font-family:sans-serif;font-size:12.5px;font-weight:600;fill:#92400e}.wd{font-family:sans-serif;font-size:10.5px;fill:#b45309}.arrow{stroke:#94a3b8;stroke-width:1.3;fill:none}</style><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/></marker></defs>
+<text x="24" y="26" class="h1">copilot-enhance v1.2.4 · Copilot 增强助手 · 七层架构</text>
+<text x="24" y="45" class="h2">地区解锁 + 上传增强 · 零依赖 · 零注入 · 3 开关 / 2 组</text>
+<rect x="24" y="60" width="632" height="104" rx="12" class="layer"/><text x="40" y="82" class="lt">L1 配置层 · Meta / OPT_DEFS / 站点</text>
+<rect x="40" y="94" width="186" height="54" rx="8" class="n"/><text x="133" y="115" class="t" text-anchor="middle">UserScript Meta</text><text x="133" y="133" class="d" text-anchor="middle">version/author</text>
+<rect x="238" y="94" width="186" height="54" rx="8" class="b"/><text x="331" y="115" class="bt" text-anchor="middle">OPT_DEFS 3</text><text x="331" y="133" class="bd" text-anchor="middle">地区 1 · 上传 2</text>
+<rect x="436" y="94" width="204" height="54" rx="8" class="n"/><text x="538" y="115" class="t" text-anchor="middle">Match + Menu</text><text x="538" y="133" class="d" text-anchor="middle">copilot.com · GM menu</text>
+<line x1="340" y1="164" x2="340" y2="184" class="arrow" marker-end="url(#ar)"/>
+<rect x="24" y="188" width="632" height="92" rx="12" class="layer"/><text x="40" y="210" class="lt">L2 数据结构层 · 单一数据源</text>
+<rect x="40" y="220" width="196" height="44" rx="8" class="b"/><text x="138" y="239" class="bt" text-anchor="middle">OPT</text><text x="138" y="255" class="bd" text-anchor="middle">loadOpts / saveOpt</text>
+<rect x="248" y="220" width="196" height="44" rx="8" class="n"/><text x="346" y="239" class="t" text-anchor="middle">STATE</text><text x="346" y="255" class="d" text-anchor="middle">uploads/region</text>
+<rect x="456" y="220" width="184" height="44" rx="8" class="n"/><text x="548" y="239" class="t" text-anchor="middle">Local keys</text><text x="548" y="255" class="d" text-anchor="middle">cp.*</text>
+<line x1="340" y1="280" x2="340" y2="300" class="arrow" marker-end="url(#ar)"/>
+<rect x="24" y="304" width="632" height="112" rx="12" class="layer"/><text x="40" y="326" class="lt">L3 识别层 · 地区字段与上传端点</text>
+<rect x="40" y="336" width="196" height="62" rx="8" class="b"/><text x="138" y="356" class="bt" text-anchor="middle">patchRegionData</text><text x="138" y="374" class="bd" text-anchor="middle">region/eligibility</text><text x="138" y="389" class="bd" text-anchor="middle">country/idempotent</text>
+<rect x="248" y="336" width="196" height="62" rx="8" class="n"/><text x="346" y="356" class="t" text-anchor="middle">JSON hook</text><text x="346" y="374" class="d" text-anchor="middle">installRegion</text><text x="346" y="389" class="d" text-anchor="middle">hydration</text>
+<rect x="456" y="336" width="184" height="62" rx="8" class="n"/><text x="548" y="356" class="t" text-anchor="middle">Upload URL</text><text x="548" y="374" class="d" text-anchor="middle">isUploadUrl</text><text x="548" y="389" class="d" text-anchor="middle">Graph / SharePoint</text>
+<line x1="340" y1="416" x2="340" y2="436" class="arrow" marker-end="url(#ar)"/>
+<rect x="24" y="440" width="632" height="112" rx="12" class="layer"/><text x="40" y="462" class="lt">L4 核心逻辑层 · 纯函数</text>
+<rect x="40" y="472" width="196" height="62" rx="8" class="b"/><text x="138" y="492" class="bt" text-anchor="middle">Region rewrite</text><text x="138" y="510" class="bd" text-anchor="middle">region true / US</text><text x="138" y="525" class="bd" text-anchor="middle">EU false</text>
+<rect x="248" y="472" width="196" height="62" rx="8" class="n"/><text x="346" y="492" class="t" text-anchor="middle">Retry policy</text><text x="346" y="510" class="d" text-anchor="middle">transient / backoff</text><text x="346" y="525" class="d" text-anchor="middle">4xx no retry</text>
+<rect x="456" y="472" width="184" height="62" rx="8" class="n"/><text x="548" y="492" class="t" text-anchor="middle">Retry button</text><text x="548" y="510" class="d" text-anchor="middle">pickRetryText</text><text x="548" y="525" class="d" text-anchor="middle">same alert once</text>
+<line x1="340" y1="552" x2="340" y2="572" class="arrow" marker-end="url(#ar)"/>
+<rect x="24" y="576" width="632" height="112" rx="12" class="layer"/><text x="40" y="598" class="lt">L5 执行层 · 尽早介入，失败互相隔离</text>
+<rect x="40" y="608" width="196" height="62" rx="8" class="b"/><text x="138" y="628" class="bt" text-anchor="middle">Region apply</text><text x="138" y="646" class="bd" text-anchor="middle">JSON/storage</text><text x="138" y="661" class="bd" text-anchor="middle">runtime state</text>
+<rect x="248" y="608" width="196" height="62" rx="8" class="n"/><text x="346" y="628" class="t" text-anchor="middle">Upload retry</text><text x="346" y="646" class="d" text-anchor="middle">rebuild + event gate</text><text x="346" y="661" class="d" text-anchor="middle">failure heal</text>
+<rect x="456" y="608" width="184" height="62" rx="8" class="n"/><text x="548" y="628" class="t" text-anchor="middle">tryInstall</text><text x="548" y="646" class="d" text-anchor="middle">isolate failures</text><text x="548" y="661" class="d" text-anchor="middle">never stop page</text>
+<line x1="340" y1="688" x2="340" y2="708" class="arrow" marker-end="url(#ar)"/>
+<rect x="24" y="712" width="632" height="92" rx="12" class="layer"/><text x="40" y="734" class="lt">L6 UI 层 · 懒挂载面板</text>
+<rect x="40" y="744" width="286" height="44" rx="8" class="n"/><text x="183" y="763" class="t" text-anchor="middle">Region tab / Upload tab</text><text x="183" y="779" class="d" text-anchor="middle">3 switches</text>
+<rect x="338" y="744" width="302" height="44" rx="8" class="b"/><text x="489" y="763" class="bt" text-anchor="middle">Status</text><text x="489" y="779" class="bd" text-anchor="middle">region count · upload count</text>
+<line x1="340" y1="804" x2="340" y2="824" class="arrow" marker-end="url(#ar)"/>
+<rect x="24" y="828" width="632" height="92" rx="12" class="layer"/><text x="40" y="850" class="lt">L7 Watcher 层 · 唯一监听者</text>
+<rect x="40" y="860" width="286" height="44" rx="8" class="n"/><text x="183" y="879" class="t" text-anchor="middle">MutationObserver</text><text x="183" y="895" class="d" text-anchor="middle">DOM poll / retry heal</text>
+<rect x="338" y="860" width="302" height="44" rx="8" class="n"/><text x="489" y="879" class="t" text-anchor="middle">Document start</text><text x="489" y="895" class="d" text-anchor="middle">JSON.parse hook early</text>
+<rect x="24" y="936" width="632" height="52" rx="12" class="w"/><text x="40" y="956" class="wt">边界</text><text x="40" y="976" class="wd">Client-side config rewrite cannot change real IP; server-side geo rejection still needs a supported network route.</text>
 </svg>
