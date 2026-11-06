@@ -1,0 +1,184 @@
+<svg viewBox="0 0 680 1210" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .layer { fill: none; stroke: #e2e8f0; stroke-width: 1.2; stroke-dasharray: 4 3; }
+      .layer-title { font-family: sans-serif; font-size: 13px; font-weight: 600; fill: #64748b; }
+      .node { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1.5; }
+      .nt { font-family: sans-serif; font-size: 12.5px; font-weight: 600; fill: #1e293b; }
+      .nd { font-family: sans-serif; font-size: 10.5px; fill: #64748b; }
+      .arrow { stroke: #94a3b8; stroke-width: 1.3; fill: none; }
+      .band { fill: #ecfdf5; stroke: #10b981; stroke-width: 1.5; }
+      .band-t { font-family: sans-serif; font-size: 13px; font-weight: 700; fill: #047857; }
+      .band-d { font-family: sans-serif; font-size: 10.5px; fill: #10b981; }
+      .warn { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
+      .warn-t { font-family: sans-serif; font-size: 12.5px; font-weight: 600; fill: #92400e; }
+      .warn-d { font-family: sans-serif; font-size: 10.5px; fill: #b45309; }
+      .h1 { font-family: sans-serif; font-size: 15px; font-weight: 700; fill: #0f172a; }
+      .h2 { font-family: sans-serif; font-size: 11.5px; fill: #64748b; }
+      .note { font-family: sans-serif; font-size: 11px; fill: #475569; }
+    </style>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <text x="24" y="26" class="h1">copilot-enhance v1.0.0 · Copilot 增强助手 · 七层架构</text>
+  <text x="24" y="45" class="h2">解锁资格 + 自动选模型二合一 · 零依赖 · 零注入（管理器菜单是唯一入口）· 9 开关 / 3 组</text>
+
+  <!-- L1 -->
+  <rect x="24" y="60" width="632" height="124" rx="12" class="layer"/>
+  <text x="40" y="82" class="layer-title">L1 配置层 · 一切开关、键族与站点范围的唯一定义点</text>
+
+  <rect x="40" y="94" width="186" height="74" rx="8" class="node"/>
+  <text x="133" y="115" class="nt" text-anchor="middle">UserScript Meta 六件套</text>
+  <text x="133" y="133" class="nd" text-anchor="middle">name/namespace/version</text>
+  <text x="133" y="148" class="nd" text-anchor="middle">author/license/updateURL</text>
+  <text x="133" y="162" class="nd" text-anchor="middle">8 条 @match · unsafeWindow</text>
+
+  <rect x="238" y="94" width="186" height="74" rx="8" class="band"/>
+  <text x="331" y="115" class="band-t" text-anchor="middle">OPT_DEFS 选项定义表</text>
+  <text x="331" y="133" class="band-d" text-anchor="middle">9 开关 · 3 组分类</text>
+  <text x="331" y="148" class="band-d" text-anchor="middle">解锁 / 模型 / 通用</text>
+  <text x="331" y="162" class="band-d" text-anchor="middle">bool / text 两种类型</text>
+
+  <rect x="436" y="94" width="204" height="74" rx="8" class="node"/>
+  <text x="538" y="115" class="nt" text-anchor="middle">FLAG_TABLE 键族表</text>
+  <text x="538" y="133" class="nd" text-anchor="middle">宿主功能开关 86 项</text>
+  <text x="538" y="148" class="nd" text-anchor="middle">Claude / GPT5x 键族正则</text>
+  <text x="538" y="162" class="nd" text-anchor="middle">存储键 cp.&lt;开关名&gt;</text>
+
+  <line x1="340" y1="184" x2="340" y2="204" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L2 -->
+  <rect x="24" y="208" width="632" height="100" rx="12" class="layer"/>
+  <text x="40" y="230" class="layer-title">L2 数据结构层 · 单一数据源</text>
+
+  <rect x="40" y="242" width="286" height="50" rx="8" class="band"/>
+  <text x="183" y="262" class="band-t" text-anchor="middle">OPT 设置对象</text>
+  <text x="183" y="280" class="band-d" text-anchor="middle">loadOpts() → OPT → saveOpt()</text>
+
+  <rect x="338" y="242" width="302" height="50" rx="8" class="node"/>
+  <text x="489" y="262" class="nt" text-anchor="middle">STATE 运行状态</text>
+  <text x="489" y="280" class="nd" text-anchor="middle">patched / lastSwitch / switchRuns</text>
+
+  <line x1="340" y1="308" x2="340" y2="328" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L3 -->
+  <rect x="24" y="332" width="632" height="118" rx="12" class="layer"/>
+  <text x="40" y="354" class="layer-title">L3 识别 / 解析层 · 宿主结构判定与档位推算（纯函数）</text>
+
+  <rect x="40" y="366" width="150" height="70" rx="8" class="node"/>
+  <text x="115" y="387" class="nt" text-anchor="middle">文本与 JSON</text>
+  <text x="115" y="405" class="nd" text-anchor="middle">norm / readJson</text>
+  <text x="115" y="420" class="nd" text-anchor="middle">空白归一 · 坏 JSON 拒绝</text>
+
+  <rect x="200" y="366" width="160" height="70" rx="8" class="node"/>
+  <text x="280" y="387" class="nt" text-anchor="middle">宿主分型</text>
+  <text x="280" y="405" class="nd" text-anchor="middle">hostKind / shouldAutoSelect</text>
+  <text x="280" y="420" class="nd" text-anchor="middle">仅对话页才自动选模型</text>
+
+  <rect x="370" y="366" width="266" height="70" rx="8" class="band"/>
+  <text x="503" y="387" class="band-t" text-anchor="middle">档位推算 targetLabels</text>
+  <text x="503" y="405" class="band-d" text-anchor="middle">确认文字 = 去尾部 deeper</text>
+  <text x="503" y="420" class="band-d" text-anchor="middle">父项 = 首段（gpt）</text>
+
+  <line x1="340" y1="450" x2="340" y2="470" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L4 -->
+  <rect x="24" y="474" width="632" height="150" rx="12" class="layer"/>
+  <text x="40" y="496" class="layer-title">L4 核心逻辑层 · 补丁与切换决策（纯函数，UMD 导出）</text>
+
+  <rect x="40" y="508" width="150" height="102" rx="8" class="node"/>
+  <text x="115" y="529" class="nt" text-anchor="middle">buildFlags</text>
+  <text x="115" y="547" class="nd" text-anchor="middle">按子开关裁剪键族</text>
+  <text x="115" y="562" class="nd" text-anchor="middle">关闭 = 不写入</text>
+  <text x="115" y="577" class="nd" text-anchor="middle">（不收回既有能力）</text>
+  <text x="115" y="599" class="nd" text-anchor="middle">mergeFlags 计改动</text>
+
+  <rect x="200" y="508" width="150" height="102" rx="8" class="band"/>
+  <text x="275" y="529" class="band-t" text-anchor="middle">资格与许可</text>
+  <text x="275" y="547" class="band-d" text-anchor="middle">patchElig. 资格</text>
+  <text x="275" y="562" class="band-d" text-anchor="middle">patchEntitle.</text>
+  <text x="275" y="577" class="band-d" text-anchor="middle">patchIdentity</text>
+  <text x="275" y="599" class="band-d" text-anchor="middle">企业租户不改</text>
+
+  <rect x="360" y="508" width="136" height="102" rx="8" class="node"/>
+  <text x="428" y="529" class="nt" text-anchor="middle">patchStore</text>
+  <text x="428" y="547" class="nd" text-anchor="middle">资格 → 应用入口</text>
+  <text x="428" y="562" class="nd" text-anchor="middle">→ 功能开关 → 导航</text>
+  <text x="428" y="577" class="nd" text-anchor="middle">逐块容错</text>
+  <text x="428" y="599" class="nd" text-anchor="middle">ensureNavTabs</text>
+
+  <rect x="506" y="508" width="130" height="102" rx="8" class="node"/>
+  <text x="571" y="529" class="nt" text-anchor="middle">navigate</text>
+  <text x="571" y="547" class="nd" text-anchor="middle">done/already</text>
+  <text x="571" y="562" class="nd" text-anchor="middle">retry/clicked</text>
+  <text x="571" y="577" class="nd" text-anchor="middle">3 次重试上限</text>
+  <text x="571" y="599" class="nd" text-anchor="middle">返回码即契约</text>
+
+  <line x1="340" y1="624" x2="340" y2="644" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L5 -->
+  <rect x="24" y="648" width="632" height="112" rx="12" class="layer"/>
+  <text x="40" y="670" class="layer-title">L5 执行层 · 就地改写宿主数据、驱动模型菜单</text>
+
+  <rect x="40" y="682" width="292" height="64" rx="8" class="band"/>
+  <text x="186" y="703" class="band-t" text-anchor="middle">patchJsonTag 标签改写</text>
+  <text x="186" y="721" class="band-d" text-anchor="middle">三类 JSON 标签 + identity</text>
+  <text x="186" y="736" class="band-d" text-anchor="middle">LAST_TEXT 短路防重解析</text>
+
+  <rect x="344" y="682" width="296" height="64" rx="8" class="node"/>
+  <text x="492" y="703" class="nt" text-anchor="middle">patchConfig 一次完整补丁</text>
+  <text x="492" y="721" class="nd" text-anchor="middle">标签层 + 水合层，逐块 try/catch</text>
+  <text x="492" y="736" class="nd" text-anchor="middle">改动计数 → STATE.patched → 面板状态区</text>
+
+  <line x1="340" y1="760" x2="340" y2="780" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L6 -->
+  <rect x="24" y="784" width="632" height="112" rx="12" class="layer"/>
+  <text x="40" y="806" class="layer-title">L6 UI 层 · 设置面板（ghb 视觉规范，cp- 前缀，懒挂载）</text>
+
+  <rect x="40" y="818" width="200" height="64" rx="8" class="node"/>
+  <text x="140" y="839" class="nt" text-anchor="middle">3 Tab 分组面板</text>
+  <text x="140" y="857" class="nd" text-anchor="middle">开关即时生效</text>
+  <text x="140" y="872" class="nd" text-anchor="middle">文本框 change 落盘</text>
+
+  <rect x="252" y="818" width="200" height="64" rx="8" class="band"/>
+  <text x="352" y="839" class="band-t" text-anchor="middle">状态区 + 两个动作</text>
+  <text x="352" y="857" class="band-d" text-anchor="middle">注入判定 + 原因</text>
+  <text x="352" y="872" class="band-d" text-anchor="middle">重应用 / 重选模型</text>
+
+  <rect x="464" y="818" width="176" height="64" rx="8" class="node"/>
+  <text x="552" y="839" class="nt" text-anchor="middle">Toast 结果提示</text>
+  <text x="552" y="857" class="nd" text-anchor="middle">成功 / 待确认 / 失败</text>
+  <text x="552" y="872" class="nd" text-anchor="middle">可在设置中关闭</text>
+
+  <line x1="340" y1="896" x2="340" y2="916" class="arrow" marker-end="url(#ar)"/>
+
+  <!-- L7 -->
+  <rect x="24" y="920" width="632" height="112" rx="12" class="layer"/>
+  <text x="40" y="942" class="layer-title">L7 Watcher 层 · 唯一的监听者（路由钩子 / DOM 防抖 / 等待帮手）</text>
+
+  <rect x="40" y="954" width="196" height="64" rx="8" class="node"/>
+  <text x="138" y="975" class="nt" text-anchor="middle">hookRoute 路由钩子</text>
+  <text x="138" y="993" class="nd" text-anchor="middle">__routePath setter</text>
+  <text x="138" y="1008" class="nd" text-anchor="middle">120ms 防抖后复检补丁</text>
+
+  <rect x="248" y="954" width="196" height="64" rx="8" class="node"/>
+  <text x="346" y="975" class="nt" text-anchor="middle">watch DOM 复检</text>
+  <text x="346" y="993" class="nd" text-anchor="middle">MutationObserver 400ms</text>
+  <text x="346" y="1008" class="nd" text-anchor="middle">文本未变被短路</text>
+
+  <rect x="456" y="954" width="184" height="64" rx="8" class="band"/>
+  <text x="548" y="975" class="band-t" text-anchor="middle">waitFor 等待帮手</text>
+  <text x="548" y="993" class="band-d" text-anchor="middle">Observer + 超时</text>
+  <text x="548" y="1008" class="band-d" text-anchor="middle">无轮询 / 无定时器</text>
+
+  <!-- 契约说明 -->
+  <rect x="24" y="1050" width="632" height="132" rx="12" class="warn"/>
+  <text x="40" y="1072" class="warn-t">两条实现红线</text>
+  <text x="40" y="1094" class="warn-d">① 子开关关闭 = 该键族不写入，绝不写 false —— 不主动收回用户本就拥有的能力；</text>
+  <text x="40" y="1112" class="warn-d">② 自动选模型只在对话页执行：邮件 / 日历页没有模型切换器，硬跑只会空转重试。</text>
+  <text x="40" y="1136" class="note">改动计数只统计真实变化：宿主已是目标状态返回 0，面板据此显示「已是最新状态」。</text>
+  <text x="40" y="1156" class="note">合规要点：@author EFate / @license MIT / @updateURL + @downloadURL 指向本仓库 raw 地址。</text>
+</svg>
