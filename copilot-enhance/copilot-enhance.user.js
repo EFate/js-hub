@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Copilot 增强助手
 // @namespace    js-hub/copilot-enhance
-// @version      1.2.1
-// @description  解除 Microsoft 365 Copilot 的地区与模型限制、按界面语言自动选中目标模型档位（深度思考优先），并为附件上传增加网络抖动重试——11 个开关、4 组分类，菜单打开设置面板，零依赖
+// @version      1.2.2
+// @description  按真实页面文字自动选择 Copilot 深度思考模型（后台预写优先），并为附件上传增加网络抖动重试与失败自愈——7 个开关、3 组分类，菜单打开设置面板，零依赖
 // @author       EFate
 // @license      MIT
 // @match        https://m365.cloud.microsoft/*
@@ -30,134 +30,21 @@
     // L1 配置层 · 版本、存储前缀、功能开关目录、选项定义表（一切开关的唯一来源）
     // ======================================================================
 
-    var VERSION = '1.2.1';
+    var VERSION = '1.2.2';
     var PREFIX = 'cp';               // 存储键前缀：cp.<开关名>
     var MARK_ATTR = 'data-cp-retry';
-    var GROUPS = ['解锁', '模型', '网络', '通用'];
+    var GROUPS = ['模型', '网络', '通用'];
 
-    // Copilot 的函数级功能开关目录（键名与宿主内部标志一一对应）。
-    // 值即原厂默认值：少量 false 项意味着「关掉」正是我们想要的状态。
-    var FLAG_TABLE = {
-        isEURegion: false,
-        enablePrivateChat: true,
-        enablePrivateChatAdminCheck: true,
-        enablePrivateChatDisableButton: true,
-        enablePrivateChatInputTheme: true,
-        enablePrivateChatOnAgents: true,
-        enablePrivateChatTitleFix: true,
-        enablePrivateChatTitleFixSsr: true,
-        enablePrivateChatResetFix: true,
-        enableClaudeModelWeb: true,
-        enableClaudeModelWork: true,
-        enableClaudeReasoningWeb: true,
-        enableClaudeReasoningWork: true,
-        enableServiceDrivenGPTMenuWeb: true,
-        enableServiceDrivenGPTMenuWork: true,
-        disableServiceDrivenGPTMenuForEU: false,
-        enableServiceDrivenGPTMenuStarter: true,
-        enableServiceDrivenGPTMenuPremium: true,
-        enableGPT52Premium: true,
-        enableGPT53Premium: true,
-        enableGPT54Premium: true,
-        enableGPT52Starter: true,
-        enableGPT53Starter: true,
-        enableGPT54Starter: true,
-        enableGPT52ChatWork: true,
-        enableGPT53ChatWork: true,
-        enableGPT54ChatWork: true,
-        enableGPT52ReasoningWork: true,
-        enableGPT53ReasoningWork: true,
-        enableGPT54ReasoningWork: true,
-        enableGPT52QuickWork: true,
-        enableGPT53QuickWork: true,
-        enableGPT54QuickWork: true,
-        enableGPT52AutoWork: true,
-        enableGPT53AutoWork: true,
-        enableGPT54AutoWork: true,
-        enableGPT52InstantWork: true,
-        enableGPT52ThinkingWork: true,
-        enableGPT52ChatWeb: true,
-        enableGPT53ChatWeb: true,
-        enableGPT54ChatWeb: true,
-        enableGPT52ReasoningWeb: true,
-        enableGPT53ReasoningWeb: true,
-        enableGPT54ReasoningWeb: true,
-        enableGPT52QuickWeb: true,
-        enableGPT53QuickWeb: true,
-        enableGPT54QuickWeb: true,
-        enableGPT52AutoWeb: true,
-        enableGPT53AutoWeb: true,
-        enableGPT54AutoWeb: true,
-        enableGPT52InstantWeb: true,
-        enableGPT52ThinkingWeb: true,
-        enableGPT54ModelMenuDropdown: true,
-        enableGptJjModelPlanningMessage: true,
-        enableGPTInWebTabForFreeUsers: true,
-        enableGPTBuilderInWebTabForFreeUsers: true,
-        enableGPTInOWABasedonParam: true,
-        disableGPTModeMenuStickiness: false,
-        enableGptModelMenuTeachingMoment: true,
-        enableGPTModeAndModelMenuDropdown: true,
-        enableGPTModeAndModelMenu: false,
-        enableGPTModeMenu: true,
-        enableGPT: true,
-        enableStealthMagicTone: false,
-        enableGlobalChat: true,
-        enableChatMessageMotion: true,
-        enableSydneyReconnect: true,
-        enableMemoryV2PremiumROW: true,
-        enableMemoryV2PremiumEU: true,
-        enableMemoryV2StarterROW: true,
-        enableMemoryV2StarterEU: true,
-        enableBizChatHomeRefresh: true,
-        enableHideCoworkAgentsFromNav: false,
-        enableCoworkPremiumCheck: false,
-        enableCoworkGovCheck: false,
-        enableCoworkEduCheck: false,
-        enableCoworkFrontierTenantBypass: false,
-        enableCoworkConsumptiveServicesDiscoverableCheck: false,
-        enableCopilotAgentCenterRemoveCoworkAgents: false,
-        enableResetModelSelectorOnNewChat: false,
-        enableRefactoredNewChatButton: true,
-        enabledSharedAnchorNewChatButton: true,
-        enableNewChatButtonLogging: true,
-        enableUpdateConvIdForNewChat: true,
-        enableUpdateCorrelationIdForCreateNewChat: true,
-        enableSydneyResetConversationOnNewChat: true
-    };
-
-    // 子开关管辖的键族：Claude 模型族 / GPT-5.2-5.4 档位族
-    var CLAUDE_KEY_RE = /Claude/;
-    var TIER_KEY_RE = /GPT5[234]/;
-
-    var UX_FEATURES = ['CodeInterpreter', 'Designer', 'GPTV', 'Threads', 'WebGroundingControls', 'Pages', 'FileUpload'];
-
-    var APPS_TARGETS = [
-        'isAgentsEnabled', 'isConversationsEnabled', 'isFrontierEnabled', 'isOpalEnabled',
-        'isNotebooksEnabled', 'isAppsInlineFlyoutEnabled', 'isAppsFooterFlyoutEnabled',
-        'isCoworkEligible', 'isChatEligible', 'isLibraryEligible', 'isProjectsEligible', 'isLearnEligible'
-    ];
-
-    var NAV_TABS = [
-        { id: 'chat', label: 'Chat', path: '/chat', icon: 'ChatsDarkIcon', isDefault: true, shouldBeLocalized: true },
-        { id: 'cowork', label: 'Cowork', path: '/cowork', icon: 'CoworkFilled', isDefault: true, shouldBeLocalized: true }
-    ];
-
+    // 设置面板的唯一数据源：只保留 2026-11-06 在 copilot.com 实测可用的能力。
     var OPT_DEFS = {
-        // —— 解锁 ——
-        unlockFeatures:    { group: '解锁', type: 'bool', label: '解锁功能与资格',   tip: '把功能开关表、Copilot 资格与许可全部置为已开通，并补齐内置应用入口', def: true },
-        premiumModelTiers: { group: '解锁', type: 'bool', label: '开放 GPT 全档位', tip: '放开 GPT-5.2 / 5.3 / 5.4 在 Premium、Starter、Chat、Reasoning 等各入口的可见性', def: true },
-        enableClaudeModels: { group: '解锁', type: 'bool', label: '开放 Claude 模型', tip: '放开 Claude 模型与 Claude 推理档位在网页版与企业版的可见性', def: true },
-        forceUSRegion:     { group: '解锁', type: 'bool', label: '地区识别为美国',   tip: '把身份地区改为 US 并声明位于可用区域，解除区域限制', def: true },
-        extraNavTabs:      { group: '解锁', type: 'bool', label: '补全导航入口',     tip: '导航栏缺失 Chat 与 Cowork 时自动补上（企业租户不改）', def: true },
         // —— 模型 ——
-        backgroundModel:   { group: '模型', type: 'bool', label: '后台静默设定模型', tip: '新页面在应用读取前先把模型偏好写进宿主存储，不打开菜单、不点击', def: true },
-        autoSelectModel:   { group: '模型', type: 'bool', label: '必要时自动点选',     tip: '后台预写未生效时，才打开模型菜单点一次；成功后把存储键记下来，以后回到静默模式', def: true },
-        preferReasoning:   { group: '模型', type: 'bool', label: '优先深度思考',     tip: '在同类模型里优先选「深度思考 / Think deeper」档；关闭则优先「快速响应」', def: true },
-        modelTarget:       { group: '模型', type: 'text', label: '固定模型（可选）', tip: '只在想锁定某个模型时填写，如 GPT-5.6 或 Claude；留空则自动选菜单里最新的可用模型', def: '' },
+        backgroundModel:   { group: '模型', type: 'bool', label: '后台静默设定模型', tip: '学到宿主存储键后，在新页面读取前先写入深度思考偏好，不打开菜单、不点击', def: true },
+        autoSelectModel:   { group: '模型', type: 'bool', label: '必要时自动点选',     tip: '后台预写尚未学到存储键时，打开模型菜单点一次；成功后记住宿主存储键', def: true },
+        preferReasoning:   { group: '模型', type: 'bool', label: '优先深度思考',     tip: '优先选「深度思考 / Think deeper」，关闭则优先「快速响应」', def: true },
+        modelTarget:       { group: '模型', type: 'text', label: '固定模型（可选）', tip: '只在想锁定某个模型时填写，如 GPT-5.6；留空则自动选最新可用模型', def: '' },
         // —— 网络 ——
-        uploadRetry:       { group: '网络', type: 'bool', label: '附件上传自动重试', tip: '上传接口因网络抖动失败（断连 / 429 / 5xx）时自动退避重试，最多 3 次', def: true },
-        uploadFailureWatch: { group: '网络', type: 'bool', label: '上传失败自动再试', tip: '页面出现「上传失败」类提示时自动点击其中的重试按钮，同一提示只点一次', def: true },
+        uploadRetry:       { group: '网络', type: 'bool', label: '附件上传自动重试', tip: '上传接口断连 / 429 / 5xx 时自动退避重试，最多 3 次', def: true },
+        uploadFailureWatch: { group: '网络', type: 'bool', label: '上传失败自动再试', tip: '页面出现「上传失败」提示时自动点其中的重试按钮，同一提示只点一次', def: true },
         // —— 通用 ——
         toastOnSwitch:     { group: '通用', type: 'bool', label: '切换结果提示',     tip: '模型切换成功或失败时在页面底部提示一次', def: true }
     };
@@ -168,7 +55,7 @@
 
     var OPT = {};
     var STATE = {
-        patched: null, lastSwitch: '', switchRuns: 0,
+        lastSwitch: '', switchRuns: 0,
         uploads: { retried: 0, failed: 0, healing: 0 },
         modelKeys: [],          // 已确认是模型偏好的存储键（自学习结果）
         preseeded: 0,           // 本次加载预写成功的键数
@@ -202,22 +89,10 @@
     }
 
     // ======================================================================
-    // L3 识别 / 解析层 · 文本归一、JSON 读取、宿主判定、模型档位识别
+    // L3 识别 / 解析层 · 文本归一、宿主判定、模型档位与存储值识别
     // ======================================================================
 
     var norm = function (s) { return (s || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
-
-    function readJson(text) {
-        if (typeof text !== 'string') return null;
-        var t = text.trim();
-        if (!t) return null;
-        try {
-            var d = JSON.parse(t);
-            return (d && typeof d === 'object' && !Array.isArray(d)) ? d : null;
-        } catch (e) {
-            return null;
-        }
-    }
 
     // 宿主分型：决定「本页是否是 Copilot 对话页面」
     function hostKind(host) {
@@ -246,10 +121,12 @@
 
     var MODEL_ID_RE = /\b(?:(?:gpt|o[1-9])[-\s]?[\d][\w.\-]*|claude[-\s]?\w+(?:[-\s]?[\d][\w.\-]*)?)\b/i;
 
-    // 模式关键字只认「档位标签」本身，不认说明句。
-    // 事故候选：菜单说明「决定要思考多长时间」含「思考」二字，宽松匹配会把它当档位行点掉。
-    var DEEP_LABEL_RE = /^(自动|auto|深度思考|深度推理|推理|思考|think\s*deeper|deeper|reasoning|think)$/i;
-    var QUICK_LABEL_RE = /^(快速响应|快速|即时|instant|quick|fast)$/i;
+    // 真实 DOM 会把标题和说明拼成一个字符串：
+    // 「深度思考思考更长的时间以获得更好的回答」。因此按前缀识别标题，
+    // 但「决定要思考多长时间」不以「思考」开头，不会被误判。
+    var AUTO_PREFIX_RE = /^(自动|auto)/i;
+    var DEEP_PREFIX_RE = /^(深度思考|深度推理|推理|思考|think\s*deeper|deeper|reasoning)/i;
+    var QUICK_PREFIX_RE = /^(快速响应|快速|即时|instant|quick|fast)/i;
 
     function isAlertText(s) { return /上传失败|失败|错误|重试|不足|额度|upload|failed|error|retry|too large|unsupported|[×✕✖]/.test(s); }
 
@@ -259,7 +136,7 @@
         if (!t) return false;
         if (MODEL_ID_RE.test(t)) return true;
         var key = norm(t);
-        return DEEP_LABEL_RE.test(key) || QUICK_LABEL_RE.test(key);
+        return AUTO_PREFIX_RE.test(key) || DEEP_PREFIX_RE.test(key) || QUICK_PREFIX_RE.test(key);
     }
 
     // 从菜单行里取模型标识并归一：GPT-5.6 Sol 深度思考 → gpt-5.6
@@ -271,9 +148,10 @@
 
     // 模式分：整行带模式词即算该模式（GPT-5.6 Sol 深度思考 → deep）
     function modeOf(text) {
-        var t = (text || '');
-        if (/深度思考|深度推理|推理|think\s*deeper|deeper|reasoning/i.test(t)) return 'deep';
+        var t = norm(text);
+        if (/深度思考|深度推理|think\s*deeper|deeper|reasoning/i.test(t)) return 'deep';
         if (/快速响应|即时|instant|quick|fast/i.test(t)) return 'quick';
+        if (AUTO_PREFIX_RE.test(t)) return 'auto';
         return 'none';
     }
 
@@ -283,7 +161,7 @@
     }
 
     // 在可见菜单行里挑一个目标：
-    // ① 显式关键字命中 ② 最新模型（claude 优先，其次版本号降序）③ 首个模型行
+    // ① 显式关键字命中 ② 模式偏好 ③ 版本号最高的模型行
     function pickTargetItem(texts, opt) {
         var want = resolveTarget(opt);
         var preferDeep = !!(opt && opt.preferReasoning);
@@ -345,12 +223,14 @@
         return 0;
     }
 
-    // 切换器是否已显示目标：优先比对模型标识，其次比对完整目标文字
+    // 切换器是否已显示目标：固定目标按文字比对；自动模式按模式偏好比对。
     function switcherMatches(swText, opt) {
-        var t = swText || '';
+        var t = norm(swText);
         var want = resolveTarget(opt);
-        if (want) return norm(t).indexOf(want) > -1;
-        if (!t.trim()) return false;
+        if (want) return t.indexOf(want) > -1;
+        if (!t) return false;
+        var expected = (opt && opt.preferReasoning) ? 'deep' : 'quick';
+        if (modeOf(t) === expected) return true;
         return modelIdOf(t) !== '';
     }
 
@@ -366,7 +246,8 @@
         if (s.charAt(0) === '{' || s.charAt(0) === '[') {
             return /"(?:model|modelId|deployment|gptId|variant)"\s*:\s*"[^"]+"/i.test(s);
         }
-        return false;
+        // 有些宿主只存档位枚举，不含模型名
+        return /^(auto|deep|quick|reasoning|fast|instant|think|think_deeper)$/i.test(s);
     }
 
     // 从存储值里抽出「模型段」，生成替换后的值；抽不出返回 null
@@ -377,6 +258,11 @@
 
         // a) 纯字符串：gpt-5.6 / gpt-5.6-sol-deep
         if (raw.trim() === raw && raw.charAt(0) !== '{' && raw.charAt(0) !== '[') {
+            // 纯档位枚举：quick / deep / auto
+            if (/^(auto|deep|quick|reasoning|fast|instant|think|think_deeper)$/i.test(raw)) {
+                var mode = (opt && opt.preferReasoning) ? 'deep' : 'quick';
+                return raw === mode ? null : mode;
+            }
             if (!MODEL_ID_RE.test(raw)) return null;
             if (target) {
                 // 指定了目标：已是目标就不动，避免每次刷新都重写同一个值
@@ -427,151 +313,8 @@
     }
 
     // ======================================================================
-    // L4 核心逻辑层 · 补丁与切换决策（纯函数，UMD 导出）
+    // L4 核心逻辑层 · 模型选择与上传决策（纯函数，UMD 导出）
     // ======================================================================
-
-    // 按选项挑出要写入宿主的功能开关。
-    // 子开关关闭时「不写入」而非「写 false」——不主动收回用户本就拥有的能力。
-    function buildFlags(opt) {
-        var out = {};
-        if (opt.unlockFeatures) {
-            for (var k in FLAG_TABLE) {
-                if (CLAUDE_KEY_RE.test(k) && !opt.enableClaudeModels) continue;
-                if (TIER_KEY_RE.test(k) && !opt.premiumModelTiers) continue;
-                out[k] = FLAG_TABLE[k];
-            }
-        }
-        if (opt.forceUSRegion) out.isEURegion = false;
-        return out;
-    }
-
-    // 就地合并功能开关，返回实际改动数（相同值不计）
-    function mergeFlags(target, flags) {
-        if (!target || typeof target !== 'object' || !flags) return 0;
-        var n = 0;
-        for (var k in flags) {
-            if (target[k] !== flags[k]) { target[k] = flags[k]; n++; }
-        }
-        return n;
-    }
-
-    // 资格对象：解锁项与地区项分开管，互不牵连
-    function patchEligibility(e, opt, isMsa) {
-        if (!e || typeof e !== 'object') return 0;
-        var n = 0;
-        function set(k, v) { if (e[k] !== v) { e[k] = v; n++; } }
-
-        if (opt.unlockFeatures) {
-            set('isCopilotEligible', true);
-            set('m365CopilotAcquisitionState', 'acquired');
-            set('acquisitionState', 'acquired');
-            set('isOptedOutByAdmin', false);
-            // 消费级账号缺省 cohort 会导致部分入口按企业租户分支走，仅在缺失时补默认值
-            if (!isMsa && (!e.cohort || e.cohort === 'None')) set('cohort', 'bcais');
-            if (!e.featureSet || typeof e.featureSet !== 'object') { e.featureSet = {}; n++; }
-            var ux = e.featureSet.uxFeatures;
-            if (!Array.isArray(ux)) { e.featureSet.uxFeatures = ux = []; n++; }
-            for (var i = 0; i < UX_FEATURES.length; i++) {
-                if (ux.indexOf(UX_FEATURES[i]) < 0) { ux.push(UX_FEATURES[i]); n++; }
-            }
-        }
-        if (opt.forceUSRegion) {
-            set('isEURegion', false);
-            set('isCopilotEnabledRegion', true);
-            set('isCodexEnabledRegion', true);
-        }
-        return n;
-    }
-
-    // 许可对象：消费级资格、业务对话与授权状态一并置为已开通
-    function patchEntitlements(data, opt, isMsa) {
-        if (!data || typeof data !== 'object') return 0;
-        var n = 0;
-        function set(k, v) { if (data[k] !== v) { data[k] = v; n++; } }
-
-        if (opt.unlockFeatures) {
-            set('isUserConsumerCopilotEligible', true);
-            set('isOpalEligible', true);
-            set('HasCopilotAI', true);
-            set('HasCopilotBusinessChat', true);
-            set('userCopilotUserSetting', true);
-            set('IsLicensed', true);
-            if (!data.userCopilotEligibilityV3 || typeof data.userCopilotEligibilityV3 !== 'object') {
-                data.userCopilotEligibilityV3 = {};
-                n++;
-            }
-            n += patchEligibility(data.userCopilotEligibilityV3, opt, isMsa);
-
-            var app = data.copilotAppDefinition;
-            if (!app || typeof app !== 'object') { app = data.copilotAppDefinition = {}; n++; }
-            if (!app.titleDefinition || typeof app.titleDefinition !== 'object') { app.titleDefinition = {}; n++; }
-            if (!app.titleDefinition.eligibility || typeof app.titleDefinition.eligibility !== 'object') {
-                app.titleDefinition.eligibility = {};
-                n++;
-            }
-            n += patchEligibility(app.titleDefinition.eligibility, opt, isMsa);
-        } else if (opt.forceUSRegion) {
-            // 即便不解锁功能，地区标记也要落到已存在的资格对象里
-            if (data.userCopilotEligibilityV3 && typeof data.userCopilotEligibilityV3 === 'object') {
-                n += patchEligibility(data.userCopilotEligibilityV3, opt, isMsa);
-            }
-            var a2 = data.copilotAppDefinition;
-            if (a2 && a2.titleDefinition && a2.titleDefinition.eligibility) {
-                n += patchEligibility(a2.titleDefinition.eligibility, opt, isMsa);
-            }
-        }
-        return n;
-    }
-
-    // 导航补全：缺 Chat / Cowork 时补上（企业租户不改导航）
-    function ensureNavTabs(navTabs, isMsa) {
-        if (!Array.isArray(navTabs) || isMsa) return 0;
-        var n = 0;
-        for (var i = 0; i < NAV_TABS.length; i++) {
-            var want = NAV_TABS[i];
-            var has = false;
-            for (var j = 0; j < navTabs.length; j++) {
-                if (navTabs[j] && navTabs[j].id === want.id) { has = true; break; }
-            }
-            if (!has) { navTabs.push(cloneTab(want)); n++; }
-        }
-        return n;
-    }
-
-    function cloneTab(t) {
-        var o = {};
-        for (var k in t) o[k] = t[k];
-        return o;
-    }
-
-    // 路由水合数据：资格 → 应用入口 → 功能开关 → 导航，逐块容错
-    function patchStore(store, opt) {
-        if (!store || typeof store !== 'object') return 0;
-        var isMsa = !!(store.appsConfig && store.appsConfig.isMsaUser);
-        var n = 0;
-        n += patchEligibility(store.eligibility, opt, isMsa);
-        if (store.eligibility && opt.unlockFeatures && store.eligibility.isOpalEligible !== true) {
-            store.eligibility.isOpalEligible = true;
-            n++;
-        }
-        if (store.appsConfig && opt.unlockFeatures) {
-            for (var i = 0; i < APPS_TARGETS.length; i++) {
-                var k = APPS_TARGETS[i];
-                if (store.appsConfig[k] !== true) { store.appsConfig[k] = true; n++; }
-            }
-        }
-        if (store.featureFlags) n += mergeFlags(store.featureFlags, buildFlags(opt));
-        if (opt.extraNavTabs) n += ensureNavTabs(store.navTabs, isMsa);
-        return n;
-    }
-
-    // 身份对象：地区改写（仅当开启地区解锁）
-    function patchIdentity(data, opt) {
-        if (!data || typeof data !== 'object' || !opt.forceUSRegion) return 0;
-        if (data.userCountryCode === 'US') return 0;
-        data.userCountryCode = 'US';
-        return 1;
-    }
 
     // 上传接口判定：只要「上传/附件」语义的端点，避免误包对话请求。
     // 段名必须是独立的 upload/uploads，或 files|attachments + attach|upload 组合。
@@ -581,6 +324,9 @@
         if (/(^|[\/\-_.])uploads?([\/\-_.?]|$)/.test(u)) return true;
         if (/\/(attachments?|files?)[\/\-_]?(attach|upload)/.test(u)) return true;
         if (/attachment/.test(u) && /file/.test(u)) return true;
+        // OneDrive / SharePoint / Graph 常见上传会话
+        if (/createuploadsession|uploadsession|uploadfile|fileupload/i.test(u)) return true;
+        if (/(sharepoint|onedrive|graph\.microsoft\.com)/.test(u) && /\/content(?:[\/?]|$)/.test(u)) return true;
         return false;
     }
 
@@ -611,67 +357,13 @@
     }
 
     // ======================================================================
-    // L5 执行层 · 就地改写宿主数据、驱动模型菜单、上传重试
+    // L5 执行层 · 存储预写、驱动模型菜单、上传重试
     // ======================================================================
 
     function pageWin() {
         if (typeof unsafeWindow !== 'undefined' && unsafeWindow) return unsafeWindow;
         if (typeof window !== 'undefined' && window) return window;
         return typeof globalThis !== 'undefined' ? globalThis : null;
-    }
-
-    // 上次写回各标签的文本：宿主未重渲染时跳过解析，避免高频重扫反复 JSON.parse 大对象
-    var LAST_TEXT = {};
-
-    // 读 → 改 → 写回；无元素 / 非法 JSON / 无改动 一律不动
-    function patchJsonTag(doc, id, mutate) {
-        var el = doc.getElementById(id);
-        if (!el) { delete LAST_TEXT[id]; return 0; }
-        var text = el.textContent;
-        if (LAST_TEXT[id] === text) return 0;
-        var data = readJson(text);
-        if (!data) { LAST_TEXT[id] = text; return 0; }
-        var n = 0;
-        try { n = mutate(data) | 0; } catch (e) { return 0; }
-        if (n > 0) {
-            LAST_TEXT[id] = JSON.stringify(data);
-            el.textContent = LAST_TEXT[id];
-        } else {
-            LAST_TEXT[id] = text;
-        }
-        return n;
-    }
-
-    function hydrationStore() {
-        var w = pageWin();
-        var d = w.__staticRouterHydrationData;
-        return (d && d.loaderData && d.loaderData.root && d.loaderData.root.store) || null;
-    }
-
-    // 一次完整补丁：标签层 + 水合层，逐块容错，返回改动计数
-    function patchConfig(opt) {
-        opt = opt || OPT;
-        var doc = document;
-        var rep = { flags: 0, ent: 0, id: 0, store: 0 };
-
-        rep.flags += patchJsonTag(doc, 'm365ChatFeatureSettings', function (d) {
-            return mergeFlags(d, buildFlags(opt));
-        });
-        rep.ent += patchJsonTag(doc, 'userEntitlements', function (d) {
-            return patchEntitlements(d, opt, false);
-        });
-        rep.id += patchJsonTag(doc, 'identity', function (d) {
-            return patchIdentity(d, opt);
-        });
-
-        var store = hydrationStore();
-        if (store) {
-            try { rep.store += patchStore(store, opt); } catch (e) { /* 水合结构随版本变化，失败不影响标签层 */ }
-        }
-
-        var total = rep.flags + rep.ent + rep.id + rep.store;
-        STATE.patched = { total: total, detail: rep, at: Date.now() };
-        return total;
     }
 
     // ---- 模型切换 ----
@@ -912,7 +604,9 @@
         X.prototype.send = function (body) {
             var xhr = this;
             // 未 boot 时（测试直调、或脚本被晚注入）OPT 还没装载：此时按默认值处理
-            if (OPT.uploadRetry === false || !isUploadUrl(xhr.__cpUrl)) {
+            var method = String(xhr.__cpMethod || 'POST').toUpperCase();
+            var uploadMethod = method === 'POST' || method === 'PUT' || method === 'PATCH';
+            if (OPT.uploadRetry === false || !uploadMethod || !isUploadUrl(xhr.__cpUrl)) {
                 return origSend.apply(xhr, arguments);
             }
 
@@ -1201,14 +895,7 @@
 
     // 注入判定与自动选模型结论必须明示——用户不该对着一个没反应的按钮猜原因
     function statusText() {
-        var t;
-        if (STATE.patched) {
-            var d = STATE.patched.detail;
-            t = '本页补丁累计改动 <b>' + STATE.patched.total + '</b> 处（开关表 ' + d.flags +
-                ' / 许可 ' + d.ent + ' / 地区 ' + d.id + ' / 水合 ' + d.store + '）';
-        } else {
-            t = '本页尚未执行补丁';
-        }
+        var t = '页面：copilot.com 对话页';
         if (!OPT.backgroundModel && !OPT.autoSelectModel) {
             t += '；模型设定已关闭';
         } else if (!shouldAutoSelect(location.href)) {
@@ -1336,15 +1023,10 @@
 
         var foot = document.createElement('div');
         foot.className = 'cp-foot';
-        var reapply = document.createElement('button');
-        reapply.className = 'cp-btn';
-        reapply.id = 'cp-reapply';
-        reapply.textContent = '重新应用';
         var retry = document.createElement('button');
         retry.className = 'cp-btn cp-primary';
         retry.id = 'cp-retry-model';
         retry.textContent = '重新选模型';
-        foot.appendChild(reapply);
         foot.appendChild(retry);
 
         panel.appendChild(head);
@@ -1384,12 +1066,6 @@
             if (!t || typeof t.closest !== 'function') return;
             if (t.id === 'cp-overlay') { closePanel(); return; }
             if (t.closest('#cp-close')) { closePanel(); return; }
-            if (t.closest('#cp-reapply')) {
-                var n = patchConfig(OPT);
-                refreshStatus();
-                toast(n > 0 ? '已重新应用补丁（' + n + ' 处改动）' : '补丁已是最新状态', n > 0 ? 'ok' : 'info');
-                return;
-            }
             if (t.closest('#cp-retry-model')) {
                 closePanel();
                 autoSelect(OPT);
@@ -1416,8 +1092,7 @@
             var d = OPT_DEFS[name];
             var v = d.type === 'text' ? saveOpt(name, t.value) : saveOpt(name, t.checked);
             if (d.type === 'text') t.value = v;
-            patchConfig(OPT);
-            if (name === 'autoSelectModel' && v === true) autoSelect(OPT);
+            if ((name === 'backgroundModel' || name === 'autoSelectModel') && v === true) applyModel(OPT);
             refreshStatus();
         }, false);
 
@@ -1461,7 +1136,7 @@
     var _routeTimer = null;
     var _routePath = null;
 
-    // 路由钩子：SPA 每次改 __routePath 都复检补丁（宿主按路由重读水合数据）
+    // 路由钩子：SPA 每次改 __routePath 后重新对齐模型（宿主会重建切换器）
     function hookRoute() {
         var w = pageWin();
         try {
@@ -1475,7 +1150,6 @@
                     if (_routeTimer) clearTimeout(_routeTimer);
                     _routeTimer = setTimeout(function () {
                         _routeTimer = null;
-                        patchConfig(OPT);
                         startModel();      // 换路由后宿主会重建切换器：重新对齐一次
                     }, 400);
                 }
@@ -1491,7 +1165,6 @@
             if (_debTimer) clearTimeout(_debTimer);
             _debTimer = setTimeout(function () {
                 _debTimer = null;
-                patchConfig(OPT);   // 宿主按路由重挂标签时补上；文本未变则被 LAST_TEXT 短路
                 if (OPT.uploadFailureWatch) healUploadFailure();
                 if (uiBuilt) refreshStatus();
             }, 400);
@@ -1500,7 +1173,7 @@
     }
 
     // ======================================================================
-    // 启动序列 · loadOpts → 早期补丁 → (DOMContentLoaded) 面板事件/监听 → 自动选模型
+    // 启动序列 · loadOpts → 预写模型偏好 → (DOMContentLoaded) 面板事件/监听 → 自动选模型
     // ======================================================================
 
     function registerMenu() {
@@ -1516,7 +1189,6 @@
 
     function start() {
         bindPanelEvents();
-        patchConfig(OPT);
         hookRoute();
         watch();
         installUrlCapture();
@@ -1530,7 +1202,6 @@
         loadModelKeys();
         // 存储预写必须尽早：DOMContentLoaded 之前宿主还没读到偏好
         preseedModels(OPT);
-        patchConfig(OPT);          // document-start：标签可能尚未解析，无元素即安静跳过
         registerMenu();
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', start);
@@ -1545,15 +1216,11 @@
 
     var API = {
         VERSION: VERSION, PREFIX: PREFIX, GROUPS: GROUPS, OPT_DEFS: OPT_DEFS, STATE: STATE,
-        FLAG_TABLE: FLAG_TABLE, UX_FEATURES: UX_FEATURES, NAV_TABS: NAV_TABS,
         readOpt: readOpt, saveOpt: saveOpt, loadOpts: loadOpts,
-        norm: norm, readJson: readJson, hostKind: hostKind, shouldAutoSelect: shouldAutoSelect,
+        norm: norm, hostKind: hostKind, shouldAutoSelect: shouldAutoSelect,
         MODEL_ID_RE: MODEL_ID_RE, isModelItem: isModelItem, modelIdOf: modelIdOf, modeOf: modeOf,
         resolveTarget: resolveTarget, pickTargetItem: pickTargetItem, modelRank: modelRank,
         compareRank: compareRank, switcherMatches: switcherMatches,
-        buildFlags: buildFlags, mergeFlags: mergeFlags, patchEligibility: patchEligibility,
-        patchEntitlements: patchEntitlements, patchStore: patchStore, patchIdentity: patchIdentity,
-        ensureNavTabs: ensureNavTabs, patchJsonTag: patchJsonTag, patchConfig: patchConfig,
         isUploadUrl: isUploadUrl, isTransientStatus: isTransientStatus, backoffDelay: backoffDelay,
         pickRetryText: pickRetryText, installUploadRetry: installUploadRetry,
         healUploadFailure: healUploadFailure,
